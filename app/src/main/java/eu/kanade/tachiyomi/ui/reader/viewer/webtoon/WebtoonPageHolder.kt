@@ -89,8 +89,8 @@ class WebtoonPageHolder(
             // view still measures its height at fit-width ratio (imageWidth * screenWidth),
             // which is taller than the 1:1 image and leaves a large black gap below each
             // strip. Match the item height to the image's real 1:1 height instead.
-            if (viewer.config.originalSize && frame.sHeight > 0) {
-                frame.layoutParams?.height = frame.sHeight
+            if (viewer.config.originalSize && frame.imageSHeight > 0) {
+                frame.layoutParams?.height = frame.imageSHeight
                 frame.requestLayout()
             }
         }

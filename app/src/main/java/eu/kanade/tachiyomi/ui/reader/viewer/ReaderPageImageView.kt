@@ -77,6 +77,14 @@ open class ReaderPageImageView @JvmOverloads constructor(
     var onViewClicked: (() -> Unit)? = null
 
     /**
+     * MihonSY: the pixel height of the loaded image, or 0 if unknown. Exposed so the
+     * webtoon holder can match the item height to the real 1:1 image height when
+     * "original resolution" is enabled (avoids the black gap below each strip).
+     */
+    val imageSHeight: Int
+        get() = (pageView as? SubsamplingScaleImageView)?.sHeight ?: 0
+
+    /**
      * For automatic background. Will be set as background color when [onImageLoaded] is called.
      */
     var pageBackground: Drawable? = null
