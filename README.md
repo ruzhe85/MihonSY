@@ -4,7 +4,7 @@
 
 ![MihonSY](.github/readme-images/app-icon.png)
 
-**基于 [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY) 的个人定制版漫画阅读器**
+**基于 [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY) 的漫画阅读器**
 
 包名 `eu.kanade.mihonsy` ｜ 版本 1.13.2 (81) ｜ Android 8.0+
 
@@ -14,7 +14,7 @@
 
 ## 简介
 
-MihonSY 是 TachiyomiSY（SY）的个人定制 fork，在保留 SY 全部特性的基础上，针对**条漫阅读体验**做了深度定制：
+MihonSY 是 TachiyomiSY（SY）的分支，在保留 SY 全部特性的基础上，针对**条漫阅读体验**做了增强：
 
 - 点击滚动距离与匀速动画可调
 - 更聪明的自动条漫判定
@@ -26,7 +26,7 @@ MihonSY 是 TachiyomiSY（SY）的个人定制 fork，在保留 SY 全部特性�
 
 ---
 
-## ✨ MihonSY 定制功能
+## ✨ 新增功能
 
 ### 1. 条漫点击滚动设置
 
@@ -59,10 +59,6 @@ MihonSY 是 TachiyomiSY（SY）的个人定制 fork，在保留 SY 全部特性�
 
 - 条漫模式新增「原始分辨率」开关：图片按原始像素 **1:1** 显示，不缩放。
 - 普通翻页模式可在缩放类型中选择「原始大小」。
-
-### 6. 图标
-
-- 全新应用图标：DeepSeek 拟人化大肥鱼女仆形象 + SY 字母（自适应图标，各分辨率已适配）。
 
 ---
 
@@ -109,14 +105,14 @@ gh run download <run-id> --repo ruzhe85/MihonSY
 
 ---
 
-## 🗂️ 项目结构（定制相关）
+## 🗂️ 项目结构
 
 | 路径 | 说明 |
 |------|------|
 | `app/src/main/cpp/` | Anime4K / Lanczos3 原生实现（JNI + GLES） |
 | `app/src/main/assets/anime4k/` | Anime4K GLSL shader 资源 |
 | `.../reader/viewer/webtoon/` | 条漫点击滚动、匀速动画、原始分辨率 |
-| `.../reader/setting/ReaderPreferences.kt` | 定制项偏好定义 |
+| `.../reader/setting/ReaderPreferences.kt` | 偏好项定义 |
 | `.../util/MihonSyEnhancer.kt` | 图像增强调度 |
 | `.../data/track/komga/` | Komga 逐本进度同步 |
 | `.github/workflows/build.yml` | GitHub Actions 构建配置 |
