@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 
 import android.graphics.PointF
+import android.animation.ValueAnimator
 import android.os.Build
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -8,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.animation.LinearInterpolator
+import androidx.core.animation.doOnEnd
 import androidx.core.app.ActivityCompat
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
@@ -63,6 +65,14 @@ class WebtoonViewer(
      * Distance to scroll when the user taps on one side of the recycler view.
      */
     private var scrollDistance = (activity.resources.displayMetrics.heightPixels * config.tapScrollDistanceFraction).toInt()
+
+    /**
+     * MihonSY: animator driving the tap-scroll. A ValueAnimator that steps the
+     * recycler by a fixed per-frame delta gives a perfectly constant-speed scroll
+     * (like ComicScreen) and avoids the janky ViewFlinger/OverScroller path of
+     * RecyclerView.smoothScrollBy. A new tap cancels the previous animation.
+     */
+    private var scrollAnimator: ValueAnimator? = null
 
     /**
      * Layout manager of the recycler view.
@@ -211,6 +221,7 @@ class WebtoonViewer(
      * Destroys this viewer. Called when leaving the reader or swapping viewers.
      */
     override fun destroy() {
+        scrollAnimator?.cancel()
         super.destroy()
         scope.cancel()
     }
@@ -293,12 +304,61 @@ class WebtoonViewer(
         }
     }
 
+    private var lastAnimatedValue: Int = 0
+
+    /**
+     * MihonSY: performs a tap-scroll of [totalDistance] pixels with a constant
+     * (linear) speed over [durationMillis]. Each animation frame scrolls the
+     * recycler by an equal delta, which is what makes the motion feel smooth
+     * and uniform instead of chunky. A previously running animation is
+     * cancelled first so rapid taps never fight each other.
+     *
+     * @param totalDistance signed scroll distance in pixels (negative = scroll up)
+     * @param durationMillis animation duration; <= 0 means jump instantly
+     */
+    private fun animateScrollBy(totalDistance: Int, durationMillis: Int) {
+        // Cancel any running animation first so rapid taps never overlap.
+        scrollAnimator?.cancel()
+        if (durationMillis <= 0 || totalDistance == 0) {
+            recycler.scrollBy(0, totalDistance)
+            return
+        }
+
+        val animator = ValueAnimator.ofInt(0, totalDistance).apply {
+            this.duration = durationMillis.toLong()
+            interpolator = LinearInterpolator()
+
+            addUpdateListener {
+                val animated = it.animatedValue as Int
+                // Scroll by the difference since the last frame: this yields a
+                // constant per-frame delta thanks to the linear interpolator.
+                val delta = animated - lastAnimatedValue
+                lastAnimatedValue = animated
+                if (delta != 0) {
+                    recycler.scrollBy(0, delta)
+                }
+            }
+
+            doOnEnd {
+                lastAnimatedValue = 0
+                // Only clear the field if we're still the active animator; a
+                // newer animation may have replaced us after cancel().
+                if (scrollAnimator === this) {
+                    scrollAnimator = null
+                }
+            }
+        }
+        lastAnimatedValue = 0
+        scrollAnimator = animator
+        animator.start()
+    }
+
     /**
      * Scrolls up by [scrollDistance].
      */
     private fun scrollUp() {
         if (config.usePageTransitions && config.tapScrollDurationMillis > 0) {
-            recycler.smoothScrollBy(0, -scrollDistance, LinearInterpolator(), config.tapScrollDurationMillis)
+            animateScrollBy(-scrollDistance, config.tapScrollDurationMillis)
         } else {
             recycler.scrollBy(0, -scrollDistance)
         }
@@ -308,10 +368,8 @@ class WebtoonViewer(
      * Scrolls one screen over a period of time
      */
     fun linearScroll(duration: Duration) {
-        recycler.smoothScrollBy(
-            0,
+        animateScrollBy(
             activity.resources.displayMetrics.heightPixels,
-            LinearInterpolator(),
             duration.inWholeMilliseconds.toInt(),
         )
     }
@@ -343,7 +401,7 @@ class WebtoonViewer(
     private fun scrollDownBy() {
         // SY <--
         if (config.usePageTransitions && config.tapScrollDurationMillis > 0) {
-            recycler.smoothScrollBy(0, scrollDistance, LinearInterpolator(), config.tapScrollDurationMillis)
+            animateScrollBy(scrollDistance, config.tapScrollDurationMillis)
         } else {
             recycler.scrollBy(0, scrollDistance)
         }
