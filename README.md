@@ -1,125 +1,144 @@
-| Preview Builds | Release Builds | Mihon Support Server |
-|-------|----------|----------|
-| [![Preview](https://github.com/jobobby04/TachiyomiSYPreview/workflows/Remote%20Dispatch%20Build%20App/badge.svg)](https://github.com/jobobby04/TachiyomiSYPreview/releases) | [![stable release](https://img.shields.io/github/release/jobobby04/tachiyomisy.svg?maxAge=3600&label=download)](https://github.com/jobobby04/tachiyomisy/releases/latest) | [![Discord](https://img.shields.io/discord/1195734228319617024.svg?label=discord&labelColor=7289da&color=2c2f33&style=flat)](https://discord.gg/mihon) |
+# MihonSY
 
+<div align="center">
 
-# ![app icon](./.github/readme-images/app-icon.png)TachiyomiSY
-Mihon is a free and open source manga reader for Android 8.0 and above. This version of Mihon, TachiyomiSY was based off TachiyomiAZ. This version is meant to push forward in the ways of usability and features. TachiyomiSY tries to push forward where it can, but staying in a place where it can easily grab updates and features from the main app, it tries to make new features, or take features from other forks like J2K and Neko.
+![MihonSY](.github/readme-images/app-icon.png)
 
-![screenshots of app](./.github/readme-images/screens.png)
+**基于 [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY) 的个人定制版漫画阅读器**
 
-## Features
+包名 `eu.kanade.mihonsy` ｜ 版本 1.13.2 (81) ｜ Android 8.0+
 
-Features of Mihon(original) include:
-* Online reading from a variety of sources
-* Local reading of downloaded content
-* A configurable reader with multiple viewers, reading directions and other settings.
-* Tracker support: [MyAnimeList](https://myanimelist.net/), [AniList](https://anilist.co/), [Kitsu](https://kitsu.app/), [MangaUpdates](https://mangaupdates.com), [Shikimori](https://shikimori.one), [Bangumi](https://bgm.tv/) and [Hikka](https://hikka.io/) support.
-* Categories to organize your library
-* Light and dark themes
-* Schedule updating your library for new chapters
-* Create backups locally to read offline or to your desired cloud service
+</div>
 
-Features of TachiyomiSY include:
-* Latest tab, store up to 5 sources where you can easily view the latest manga by viewing the tab
-* Automatic webtoon detection, allowing the reader to switch to webtoon mode automatically when viewing one
-* Manga recommendations, uses MAL and Anilist, as well as Neko Similar Manga for Mangadex manga(Thanks to Az, She11Shocked, Carlos, and Goldbattle)
-* Lewd filter, hide the lewd manga in your library when you want to
-* Tracking filter, filter your tracked manga so you can see them or see non-tracked manga, made by She11Shocked
-* Search tracking status in library, made by She11Shocked
-* Custom categories for sources, liked the pinned sources, but you can make your own versions and put any sources in them
-* Manga info edit
-* Manga Cover view + share and save
-* Dynamic Categories, view the library in multiple ways
-* Smart background for reading modes like LTR or Vertical, changes the background based on the page color
-* Force disable webtoon zoom
-* Continue reading button in library
-* Hentai features enable/disable, in advanced settings
-* Quick clean titles
-* Source migration, migrate all your manga from one source to another
-* Saving searches
-* Autoscroll
-* Page preload customization
-* Customize image cache size
-* Batch import of custom sources and featured extensions
-* Advanced source settings page, searching, enable/disable all
-* Click tag for local search, long click tag for global search
-* Merge multiple of the same manga from different sources
-* Drag and drop library sorting
-* Library search engine, includes exclude, quotes as absolute, and a bunch of other ways to search
-* New E-Hentai/ExHentai features, such as language settings and watched list settings
-* Enhanced views for internal and integrated sources
-* Enhanced usability for internal and delegated sources
+---
 
-Custom sources:
-* E-Hentai/ExHentai
+## 简介
 
-Additional features for some extensions, features include custom description, opening in app, batch add to library, and a bunch of other things based on the source:
-* 8Muses (EroMuse)
-* HBrowse
-* Mangadex
-* NHentai
-* Puruin
-* LANraragi
+MihonSY 是 TachiyomiSY（SY）的个人定制 fork，在保留 SY 全部特性的基础上，针对**条漫阅读体验**做了深度定制：
 
-## Download
-Get the app from our [releases page](https://github.com/jobobby04/tachiyomisy/releases/latest).
+- 点击滚动距离与匀速动画可调
+- 更聪明的自动条漫判定
+- Komga 追番进度**逐本精确**同步
+- 轻量图像增强（Anime4K / Lanczos3，无大模型）
+- 原始分辨率 1:1 显示
 
-If you want to try new features before they get to the stable release, you can download the preview version [here](https://github.com/jobobby04/tachiyomisypreview/releases).
+> ⚠️ 本应用**移除了原版更新检查**，不会联网检查更新；与官方 TachiyomiSY 包名不同，可共存安装，但**请勿混淆两个版本的数据**（备份/恢复时注意区分）。
 
-## Translation
-Feel free to translate the project on [Weblate](https://hosted.weblate.org/projects/mihon/tachiyomisy/)
+---
 
-<details><summary>Translation Progress</summary>
-<a href="https://hosted.weblate.org/engage/mihon/">
-<img src="https://hosted.weblate.org/widgets/mihon/-/tachiyomisy/multi-auto.svg" alt="Translation status" />
-</a>
-</details>
+## ✨ MihonSY 定制功能
 
-## Issues, Feature Requests and Contributing
+### 1. 条漫点击滚动设置
 
-Please make sure to read the full guidelines. Your issue may be closed without warning if you do not.
+- **点击滚动距离**：半个屏幕 / 3/4 屏幕 / 一个屏幕，三档可选。
+- **滚动动画**：点击滚动采用**匀速线性动画**，动画时长可调（0–1000ms，默认 250ms）；设为 0 即瞬时跳页。
+- **入口**：阅读器内设置（条漫分组）或 全局设置 → 阅读器 → 条漫。
 
-<details><summary>Issues</summary>
+### 2. 自动条漫判定增强
 
-1. **Before reporting a new issue, take a look at the [FAQ](https://mihon.app/docs/faq/general), the [changelog](https://github.com/jobobby04/tachiyomisy/releases) and the already opened [issues](https://github.com/jobobby04/tachiyomisy/issues).**
-2. If you are unsure, ask here: [![Discord](https://img.shields.io/discord/1195734228319617024.svg)](https://discord.gg/mihon)
+- 保留原版标签判定（标签含 webtoon / long strip 等）。
+- 新增**按图片分辨率判定**：打开阅读器后若首页为长条图（高/宽 > 2.5），自动切换条漫模式。
 
-</details>
+### 3. Komga 进度逐本同步
 
-<details><summary>Bugs</summary>
+- 阅读进度不再使用"把第 1~N 话全部标记已读"的累积接口，改为对**实际读到的单话**逐本 PATCH
+  （`PATCH /api/v1/books/{id}/read-progress`），**其他章节不受影响**，进度精确到话。
 
-* Include version (More → About → Version)
-* If not latest, try updating, it may have already been solved
-* Preview version is equal to the number of commits as seen on the main page
-* Include steps to reproduce (if not obvious from description)
-* Include screenshot (if needed)
-* If it could be device-dependent, try reproducing on another device (if possible)
-* Don't group unrelated requests into one issue
+### 4. 图像增强（轻量方案）
 
-Use the [issue forms](https://github.com/jobobby04/TachiyomiSY/issues/new/choose) to submit a bug.
+| 算法 | 类型 | 档位 |
+|------|------|------|
+| **Anime4K** | GPU Shader（硬件加速） | Fast / High / Ultra |
+| **Lanczos3** | CPU 经典插值 | 1.5x / 2x / 3x |
 
-</details>
+- 针对漫画/条漫线条优化，加载快、内存占用低。
+- **不含** waifu2x / Real-CUGAN / Real-ESRGAN 等重型模型（避免卡顿）。
+- 入口：全局设置 → 阅读器 → 图像增强。
 
-<details><summary>Feature Requests</summary>
+### 5. 原始分辨率显示
 
-* Write a detailed issue, explaining what it should do or how. Avoid writing just "like X app does"
-* Include screenshot (if needed)
+- 条漫模式新增「原始分辨率」开关：图片按原始像素 **1:1** 显示，不缩放。
+- 普通翻页模式可在缩放类型中选择「原始大小」。
 
-Source requests are not accepted.
-</details>
+### 6. 图标
 
-<details><summary>Contributing</summary>
+- 全新应用图标：DeepSeek 拟人化大肥鱼女仆形象 + SY 字母（自适应图标，各分辨率已适配）。
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md).
-</details>
+---
 
-<details><summary>Code of Conduct</summary>
+## 🧩 原版 TachiyomiSY 特性（全部保留）
 
-See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
-</details>
+- 多源在线阅读、本地阅读
+- 可配置阅读器（多视图、多阅读方向、其他设置）
+- 追踪支持：MyAnimeList、AniList、Kitsu、MangaUpdates、Shikimori、Bangumi、Hikka
+- 分类管理书架
+- 明/暗主题
+- 定时更新书架新章节
+- 本地/云备份
+- Latest 标签（最多 5 个源）
+- 自动 webtoon 检测（原版）
+- 漫画推荐（MAL / Anilist / Neko Similar Manga）
+- Lewd 过滤、追踪过滤、自定义源分类等
 
-## FAQ
+---
 
-[See our website.](https://mihon.app/)
-You can also reach out to us on [Discord](https://discord.gg/mihon).
+## 📦 构建
+
+### GitHub Actions（推荐，本仓库已配置）
+
+推送到 `master` 分支自动触发构建，或手动触发 `Build MihonSY APK` workflow：
+
+```bash
+git push origin master
+# 或手动触发
+gh workflow run 332560481 --repo ruzhe85/MihonSY
+# 下载产物
+gh run download <run-id> --repo ruzhe85/MihonSY
+```
+
+- 产物：5 个 ABI 的 release APK（arm64-v8a / armeabi-v7a / x86_64 / x86 / universal）
+- 签名：`keystore/mihonmod.jks`（经 GitHub Secrets 注入，不落入代码库）
+- 依赖：JDK 17 + Android SDK 36 + NDK 28.2 + CMake
+
+### 本地构建（不推荐）
+
+```bash
+# 需要 JDK 17、Android SDK 36、NDK 28.2.13676358、Gradle 9.6.1
+./gradlew assembleRelease -Pdisable-code-shrink
+```
+
+---
+
+## 🗂️ 项目结构（定制相关）
+
+| 路径 | 说明 |
+|------|------|
+| `app/src/main/cpp/` | Anime4K / Lanczos3 原生实现（JNI + GLES） |
+| `app/src/main/assets/anime4k/` | Anime4K GLSL shader 资源 |
+| `.../reader/viewer/webtoon/` | 条漫点击滚动、匀速动画、原始分辨率 |
+| `.../reader/setting/ReaderPreferences.kt` | 定制项偏好定义 |
+| `.../util/MihonSyEnhancer.kt` | 图像增强调度 |
+| `.../data/track/komga/` | Komga 逐本进度同步 |
+| `.github/workflows/build.yml` | GitHub Actions 构建配置 |
+
+---
+
+## 📝 更新记录
+
+详见 [CHANGELOG.md](./CHANGELOG.md)。
+
+---
+
+## ⚠️ 注意事项
+
+- 仅用于个人学习与使用，请勿用于商业用途。
+- 请遵守所阅读漫画的版权规定。
+- 本 fork 与上游无关联，问题请自行排查或在本仓库 Issue 讨论。
+
+---
+
+## 致谢
+
+- [TachiyomiSY (jobobby04)](https://github.com/jobobby04/TachiyomiSY) — 上游项目
+- [Mihon](https://github.com/mihonapp/mihon) — 主项目
+- [Anime4K](https://github.com/bloc97/Anime4K) — 图像增强算法
