@@ -122,23 +122,25 @@ object MihonSyEnhancer {
 
         // Single selector: 0 = Off, 1 = Anime4K, 2 = Lanczos3. Only one algorithm runs,
         // so there is never a question of which one takes priority.
-        when (preferences.enhancementMode.get()) {
+        return when (preferences.enhancementMode.get()) {
             1 -> {
                 val mode = preferences.anime4kMode.get()
                 val argb = ensureArgb(input) ?: return null
                 if (initAnime4K(Injekt.get<Application>(), mode) && anime4kSupportsSize(argb.width, argb.height)) {
-                    return nativeProcessAnime4K(argb).takeUnless { it === argb }
+                    nativeProcessAnime4K(argb).takeUnless { it === argb }
+                } else {
+                    null
                 }
-                null
             }
 
             2 -> {
                 val scale = preferences.lanczosScale.get() / 100f
                 val argb = ensureArgb(input) ?: return null
                 if (scale > 1f) {
-                    return nativeLanczosProcess(argb, scale).takeUnless { it === argb }
+                    nativeLanczosProcess(argb, scale).takeUnless { it === argb }
+                } else {
+                    null
                 }
-                null
             }
 
             else -> null
