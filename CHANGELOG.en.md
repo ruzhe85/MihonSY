@@ -1,6 +1,6 @@
 # MihonSY Changelog
 
-> MihonSY is a personal fork of [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY).
+> MihonSY is a fork of [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY).
 > Versioning is managed independently (restarted from 1.0.0). The update checker is
 > removed — do not confuse it with the official TachiyomiSY.
 
@@ -21,8 +21,10 @@
 
 2. **Enhanced auto-webtoon detection**
    - Keeps the original tag-based detection (tags containing webtoon / long strip, etc.).
-   - New **aspect-ratio detection**: if the first page of a chapter is a long strip
-     (height/width > 2.5), the reader automatically switches to webtoon mode.
+   - New **aspect-ratio detection**: the first 5 pages of a chapter are inspected; if any
+     is a long strip (height/width > 2.5) the reader automatically switches to webtoon
+     mode — chapters opening with a horizontal cover followed by tall strips are detected
+     automatically as well.
 
 3. **Komga progress sync changed to per-book marking**
    - Progress no longer uses the cumulative endpoint (which marked chapters 1–N as read);
@@ -37,6 +39,19 @@
 5. **Original-resolution display**
    - Webtoon mode gains an "Original resolution" toggle: images render at 1:1 original
      pixels without scaling; in paging mode you can pick "Original size" in zoom type.
+
+### Improvements & Fixes
+
+- **Tap-scroll animation optimization**: replaced the previous `smoothScrollBy` path with
+  a constant-speed linear animation — scrolling is smoother with no jank; a new tap cancels
+  the running animation, so rapid taps never fight.
+- **Auto-webtoon detection fix**: fixed chapters that open with a horizontal cover only
+  switching to webtoon mode after scrolling to the second page. The reader now pre-inspects
+  the first pages' aspect ratios when a chapter opens and switches immediately when a tall
+  strip is found, without requiring manual scrolling.
+- **Download fix (卓易通 / HarmonyOS)**: for file systems that do not support SAF
+  `renameDocument` (e.g. the HarmonyOS 卓易通 compatibility layer), downloads now fall
+  back to "copy to target + delete temp file", so they no longer stick at `.tmp` and fail.
 
 ### Changes
 
