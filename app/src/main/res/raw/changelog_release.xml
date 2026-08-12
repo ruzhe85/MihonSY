@@ -2,6 +2,7 @@
 <changelog bulletedList="true">
     <changelogversion versionName="1.0.0" changeDate="August 13,2026">
         <changelogtext>[b]MihonSY 1.0.0 (1)[/b]</changelogtext>
+        <changelogtext>[b]Based on TachiyomiSY 1.13.2[/b]</changelogtext>
         <changelogtext>[b]New[/b] Webtoon tap scroll distance: half / 3/4 / full screen</changelogtext>
         <changelogtext>[b]New[/b] Webtoon tap scroll uses constant-speed animation, duration adjustable (0-1000ms, default 250ms)</changelogtext>
         <changelogtext>[b]New[/b] Auto webtoon detection also checks image aspect ratio (height/width > 2.5)</changelogtext>
