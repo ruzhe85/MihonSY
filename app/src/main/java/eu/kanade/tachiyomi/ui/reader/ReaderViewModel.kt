@@ -62,6 +62,7 @@ import exh.util.mangaType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -633,6 +634,13 @@ class ReaderViewModel @JvmOverloads constructor(
     private val autoWebtoonCheckedIndices: MutableSet<Int> = Collections.synchronizedSet(HashSet())
 
     /**
+     * How many delayed re-checks remain for the current chapter. Each re-check
+     * gives still-downloading early pages a chance to be measured so the switch
+     * happens without requiring the user to scroll first.
+     */
+    private var autoWebtoonRetriesLeft = 0
+
+    /**
      * Heuristic auto-webtoon by image aspect ratio.
      *
      * Webtoon chapters are (almost) always long strips, but a chapter may open with a cover
@@ -653,48 +661,80 @@ class ReaderViewModel @JvmOverloads constructor(
         // Skip if tag/source based detection already resolved to webtoon
         if (getMangaReadingMode() == ReadingMode.WEBTOON.flagValue) return
 
-        val chapterPages = page.chapter.pages
-        val checkCount = minOf(AUTO_WEBTOON_PAGES_TO_CHECK, chapterPages?.size ?: AUTO_WEBTOON_PAGES_TO_CHECK)
-        // Only inspect the early pages; ignore the rest of the chapter.
-        if (page.index >= checkCount) return
-        if (page.status != Page.State.Ready || page.stream == null) return
+        val chapterPages = page.chapter.pages ?: return
+        val checkCount = minOf(AUTO_WEBTOON_PAGES_TO_CHECK, chapterPages.size)
 
         // A new chapter starts a fresh check window.
         val chapterUrl = page.chapter.chapter.url
         if (autoWebtoonCheckChapter != chapterUrl) {
             synchronized(autoWebtoonCheckedIndices) { autoWebtoonCheckedIndices.clear() }
             autoWebtoonCheckChapter = chapterUrl
+            // Fresh window: allow a few delayed re-checks for still-loading pages.
+            autoWebtoonRetriesLeft = AUTO_WEBTOON_RETRIES
         }
 
-        viewModelScope.launchIO {
-            val ratio = try {
-                val inputStream = page.stream?.invoke() ?: return@launchIO
-                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                inputStream.use { BitmapFactory.decodeStream(it, null, options) }
-                val width = options.outWidth
-                val height = options.outHeight
-                if (width <= 0 || height <= 0) return@launchIO
-                height.toFloat() / width
-            } catch (e: Exception) {
-                logcat(LogPriority.ERROR, e) { "MihonSY auto-webtoon aspect check failed" }
-                return@launchIO
-            }
+        // Check EVERY early page that is already ready, not just the current one.
+        // A webtoon may open with a horizontal cover before the tall strips start;
+        // measuring only the cover would defer the switch until the user scrolls.
+        // Pages still queued/downloading are skipped here - they will be picked up
+        // when they become ready and onPageSelected fires again.
+        val readyPages = chapterPages
+            .take(checkCount)
+            .filter { it.status == Page.State.Ready && it.stream != null }
+        if (readyPages.isEmpty()) return
 
-            logcat { "MihonSY auto-webtoon aspect check page ${page.number}: ratio=$ratio" }
-            if (ratio > AUTO_WEBTOON_MIN_ASPECT_RATIO) {
-                autoWebtoonAspectDone = true
-                logcat { "MihonSY auto-webtoon: page ${page.number} is a tall strip, switching to webtoon mode" }
-                setMangaReadingMode(ReadingMode.WEBTOON)
-            } else {
-                synchronized(autoWebtoonCheckedIndices) { autoWebtoonCheckedIndices.add(page.index) }
-                val allEarlyChecked = synchronized(autoWebtoonCheckedIndices) {
-                    (0 until checkCount).all { autoWebtoonCheckedIndices.contains(it) }
+        viewModelScope.launchIO {
+            for (candidate in readyPages) {
+                if (synchronized(autoWebtoonCheckedIndices) { autoWebtoonCheckedIndices.contains(candidate.index) }) {
+                    continue
                 }
-                if (allEarlyChecked) {
+                val ratio = measurePageAspectRatio(candidate) ?: continue
+                logcat { "MihonSY auto-webtoon aspect check page ${candidate.number}: ratio=$ratio" }
+                if (ratio > AUTO_WEBTOON_MIN_ASPECT_RATIO) {
                     autoWebtoonAspectDone = true
-                    logcat { "MihonSY auto-webtoon: none of the first $checkCount pages is tall, giving up" }
+                    logcat { "MihonSY auto-webtoon: page ${candidate.number} is a tall strip, switching to webtoon mode" }
+                    setMangaReadingMode(ReadingMode.WEBTOON)
+                    return@launchIO
+                }
+                synchronized(autoWebtoonCheckedIndices) { autoWebtoonCheckedIndices.add(candidate.index) }
+            }
+            val allEarlyChecked = synchronized(autoWebtoonCheckedIndices) {
+                (0 until checkCount).all { autoWebtoonCheckedIndices.contains(it) }
+            }
+            if (allEarlyChecked) {
+                autoWebtoonAspectDone = true
+                logcat { "MihonSY auto-webtoon: none of the first $checkCount pages is tall, giving up" }
+            } else if (autoWebtoonRetriesLeft > 0) {
+                // Some early pages are still downloading. Retry shortly so a strip that
+                // becomes ready after the cover (without the user scrolling) is still
+                // detected and the reader switches to webtoon mode immediately.
+                autoWebtoonRetriesLeft--
+                viewModelScope.launchIO {
+                    delay(700)
+                    if (!autoWebtoonAspectDone) {
+                        val firstPage = page.chapter.pages?.firstOrNull() ?: return@launchIO
+                        maybeAutoWebtoonByAspectRatio(firstPage)
+                    }
                 }
             }
+        }
+    }
+
+    /**
+     * Reads the intrinsic width/height of [page]'s image (without decoding pixels)
+     * and returns height/width, or null when the image cannot be read.
+     */
+    private fun measurePageAspectRatio(page: ReaderPage): Float? {
+        return try {
+            val inputStream = page.stream?.invoke() ?: return null
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            inputStream.use { BitmapFactory.decodeStream(it, null, options) }
+            val width = options.outWidth
+            val height = options.outHeight
+            if (width <= 0 || height <= 0) null else height.toFloat() / width
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e) { "MihonSY auto-webtoon aspect check failed" }
+            null
         }
     }
 
@@ -708,6 +748,9 @@ class ReaderViewModel @JvmOverloads constructor(
          * detected as long as any of the first few pages is a tall strip.
          */
         const val AUTO_WEBTOON_PAGES_TO_CHECK = 5
+
+        /** Max delayed re-checks while waiting for early pages to finish downloading. */
+        const val AUTO_WEBTOON_RETRIES = 4
 
         /** Minimum interval between Komga page-progress syncs while reading (ms). */
         const val KOMGA_PAGE_SYNC_INTERVAL_MS = 5_000L
