@@ -8,6 +8,8 @@
 
 包名 `eu.kanade.mihonsy` ｜ 版本 1.0.0 (1) ｜ Android 8.0+
 
+[中文](./README.md) | [English](./README.en.md)
+
 </div>
 
 ---
@@ -121,7 +123,7 @@ gh run download <run-id> --repo ruzhe85/MihonSY
 
 ## 📝 更新记录
 
-详见 [CHANGELOG.md](./CHANGELOG.md)。
+详见 [CHANGELOG.md](./CHANGELOG.md)（[English](./CHANGELOG.en.md)）。
 
 ---
 

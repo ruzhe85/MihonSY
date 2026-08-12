@@ -3,6 +3,8 @@
 > MihonSY 是基于 [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY) 的个人定制 fork，
 > 版本号独立管理（1.0.0 起全新开始），已移除原版更新检查，请勿与官方 TachiyomiSY 混用。
 
+[中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
+
 ## v1.0.0 (MihonSY)
 
 > 基于 TachiyomiSY 1.13.2 主线源码。
