@@ -5,7 +5,7 @@
 
 [中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
 
-## v1.0.0 (MihonSY)
+## v1.0.1 (MihonSY)
 
 > 基于 TachiyomiSY 1.13.2 主线源码。
 

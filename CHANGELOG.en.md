@@ -6,7 +6,7 @@
 
 [中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
 
-## v1.0.0 (MihonSY)
+## v1.0.1 (MihonSY)
 
 > Based on TachiyomiSY 1.13.2 upstream source.
 

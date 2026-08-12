@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <changelog bulletedList="true">
-    <changelogversion versionName="1.0.0" changeDate="August 13,2026">
-        <changelogtext>[b]MihonSY 1.0.0 (1)[/b]</changelogtext>
+    <changelogversion versionName="1.0.1" changeDate="August 13,2026">
+        <changelogtext>[b]MihonSY 1.0.1 (2)[/b]</changelogtext>
         <changelogtext>[b]Based on TachiyomiSY 1.13.2[/b]</changelogtext>
         <changelogtext>[b]New[/b] Webtoon tap scroll distance: half / 3/4 / full screen</changelogtext>
         <changelogtext>[b]New[/b] Webtoon tap scroll uses constant-speed animation, duration adjustable (0-1000ms, default 250ms)</changelogtext>
-        <changelogtext>[b]New[/b] Auto webtoon detection also checks image aspect ratio (height/width > 2.5)</changelogtext>
+        <changelogtext>[b]New[/b] Auto webtoon detection also checks image aspect ratio (height/width > 2.5) on the first pages</changelogtext>
         <changelogtext>[b]New[/b] Komga tracker sync now marks only the actually read chapter (per-book PATCH), other chapters unaffected</changelogtext>
         <changelogtext>[b]New[/b] Image enhancement: Anime4K (GPU shader, Fast/High/Ultra) and Lanczos3 (CPU, 1.5x/2x/3x), lightweight without heavy models</changelogtext>
         <changelogtext>[b]New[/b] Original resolution option for webtoon mode (1:1 pixel display, no scaling)</changelogtext>
-        <changelogtext>[b]Changed[/b] App renamed to MihonSY, package eu.kanade.mihonsy</changelogtext>
-        <changelogtext>[b]Changed[/b] Removed update checker, no longer checks for updates online</changelogtext>
-        <changelogtext>[b]Changed[/b] Removed Firebase / Crashlytics telemetry</changelogtext>
+        <changelogtext>[b]New[/b] Download compatibility: fall back to copy+delete when SAF rename is unsupported (卓易通/HarmonyOS, ported from zsyou/mihon-harmony)</changelogtext>
+        <changelogtext>[b]Fix[/b] Smoother tap-scroll: constant-speed linear animation, no jank</changelogtext>
+        <changelogtext>[b]Fix[/b] Auto webtoon now switches immediately even when the chapter opens with a horizontal cover</changelogtext>
     </changelogversion>
 </changelog>
