@@ -12,52 +12,37 @@
 
 ### New Features
 
-1. **Webtoon tap-to-scroll settings**
-   - Tap scroll distance: half screen / 3/4 screen / full screen (3 options).
-   - Scroll animation: tap scrolling now uses a **constant-speed animation** (linear
-     interpolation), with adjustable duration (0–1000ms, default 250ms); set to 0ms for
-     an instant jump.
-   - Where: reader settings (webtoon group) and Global settings → Reader → Webtoon.
+1. **Webtoon feature pack**
+   - **Tap-to-scroll settings**: tap scroll distance — half screen / 3/4 screen / full
+     screen (3 options); scroll animation — constant-speed animation (linear
+     interpolation), adjustable duration (0–1000ms, default 250ms), 0ms = instant jump.
+   - **Auto-webtoon detection**: keeps the original tag-based detection (tags containing
+     webtoon / long strip, etc.); new aspect-ratio detection inspects the first 5 pages —
+     if any is a long strip (height/width > 2.5) the reader switches to webtoon mode
+     automatically, including chapters that open with a horizontal cover followed by
+     tall strips.
+   - **Original-resolution display**: webtoon mode gains an "Original resolution" toggle
+     that renders images at 1:1 original pixels without scaling; in paging mode you can
+     pick "Original size" in the zoom type.
 
-2. **Enhanced auto-webtoon detection**
-   - Keeps the original tag-based detection (tags containing webtoon / long strip, etc.).
-   - New **aspect-ratio detection**: the first 5 pages of a chapter are inspected; if any
-     is a long strip (height/width > 2.5) the reader automatically switches to webtoon
-     mode — chapters opening with a horizontal cover followed by tall strips are detected
-     automatically as well.
-
-3. **Komga progress sync changed to per-book marking**
+2. **Komga progress sync changed to per-book marking**
    - Progress no longer uses the cumulative endpoint (which marked chapters 1–N as read);
      it now PATCHes the **actually read chapter** per book
      (`PATCH /api/v1/books/{id}/read-progress`), so other chapters are unaffected.
 
-4. **Image enhancement (lightweight, no heavy models)**
+3. **Image enhancement (lightweight, no heavy models)**
    - Built-in **Anime4K** (GPU shader, Fast / High / Ultra) and **Lanczos3** (classic
      resampling) algorithms, tuned for webtoon/manga line art; does not include heavy
      models such as waifu2x / Real-CUGAN / Real-ESRGAN — fast to load, low memory usage.
 
-5. **Original-resolution display**
-   - Webtoon mode gains an "Original resolution" toggle: images render at 1:1 original
-     pixels without scaling; in paging mode you can pick "Original size" in zoom type.
+4. **Download compatibility (卓易通 / HarmonyOS)**
+   - For file systems that do not support SAF `renameDocument` (e.g. the HarmonyOS 卓易通
+     compatibility layer), downloads now fall back to "copy to target + delete temp file",
+     so they no longer stick at `.tmp` and fail.
+   - Code ported from [zsyou/mihon-harmony](https://github.com/zsyou/mihon-harmony).
 
 ### Improvements & Fixes
 
 - **Tap-scroll animation optimization**: replaced the previous `smoothScrollBy` path with
   a constant-speed linear animation — scrolling is smoother with no jank; a new tap cancels
   the running animation, so rapid taps never fight.
-- **Auto-webtoon detection fix**: fixed chapters that open with a horizontal cover only
-  switching to webtoon mode after scrolling to the second page. The reader now pre-inspects
-  the first pages' aspect ratios when a chapter opens and switches immediately when a tall
-  strip is found, without requiring manual scrolling.
-- **Download fix (卓易通 / HarmonyOS)**: for file systems that do not support SAF
-  `renameDocument` (e.g. the HarmonyOS 卓易通 compatibility layer), downloads now fall
-  back to "copy to target + delete temp file", so they no longer stick at `.tmp` and fail.
-
-### Changes
-
-- App renamed to **MihonSY**, package `eu.kanade.mihonsy` (no conflict with official
-  TachiyomiSY; both can be installed side by side).
-- Removed the upstream update checker (no longer checks for updates online).
-- Removed Firebase / Crashlytics telemetry (no google-services configuration).
-- Built with an independent signing keystore (`keystore/mihonmod.jks`), consistent with
-  the mihon_img_upscale series.
