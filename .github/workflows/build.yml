@@ -1,0 +1,60 @@
+name: Build MihonSY APK
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK components (platform 36 + build-tools + NDK + CMake)
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"
+
+      - name: Write local.properties
+        run: |
+          echo "sdk.dir=/usr/local/lib/android/sdk" > local.properties
+          cat local.properties
+
+      - name: Decode signing keystore from secrets
+        run: |
+          mkdir -p keystore
+          echo "${{ secrets.MIHONSY_KEYSTORE_BASE64 }}" | base64 -d > keystore/mihonmod.jks
+          ls -la keystore/
+
+      - name: Grant gradlew execute permission
+        run: chmod +x gradlew
+
+      - name: Build release APK
+        env:
+          MIHONSY_STORE_PASSWORD: ${{ secrets.MIHONSY_KEYSTORE_PASSWORD }}
+          MIHONSY_KEY_PASSWORD: ${{ secrets.MIHONSY_KEYSTORE_PASSWORD }}
+        run: ./gradlew assembleRelease -Pdisable-code-shrink --no-daemon --stacktrace
+
+      - name: Verify APK signature
+        run: |
+          ls -la app/build/outputs/apk/release/
+          $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs app/build/outputs/apk/release/app-arm64-v8a-release.apk | head -5
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: mihonsy-apk
+          path: |
+            app/build/outputs/apk/release/*.apk
+          retention-days: 30

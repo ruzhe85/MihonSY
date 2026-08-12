@@ -78,6 +78,23 @@ class Komga(id: Long) : BaseTracker(id, "Komga"), EnhancedTracker {
         return track
     }
 
+    /**
+     * MihonSY: syncs partial page progress for a chapter to its Komga book, so Komga
+     * records "read to page N" even before the chapter is finished.
+     */
+    suspend fun updatePageProgress(track: Track, chapterNumber: Double, page: Int) {
+        api.updateBookPageProgress(track.tracking_url, chapterNumber, page)
+    }
+
+    /** MihonSY: marks a single book (chapter) as completed in Komga. */
+    suspend fun markBookCompleted(track: Track, chapterNumber: Double) {
+        api.markBookCompleted(track.tracking_url, chapterNumber)
+    }
+
+    /** MihonSY: fetches all books of the series with their per-book read progress. */
+    suspend fun getSeriesBooks(track: Track): List<BookPageDto> =
+        api.getSeriesBooks(track.tracking_url)
+
     override suspend fun login(username: String, password: String) {
         saveCredentials("user", "pass")
     }

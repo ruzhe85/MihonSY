@@ -42,6 +42,24 @@ class WebtoonConfig(
 
     var doubleTapZoomChangedListener: ((Boolean) -> Unit)? = null
 
+    // MihonSY -->
+    var tapScrollDistanceFraction: Float = ReaderPreferences.WebtoonTapScrollFractions
+        .getOrElse(readerPreferences.webtoonTapScrollDistance.get()) { 0.75f }
+        private set
+
+    var tapScrollDurationMillis: Int = readerPreferences.webtoonTapScrollDuration.get()
+        .coerceIn(
+            ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MIN,
+            ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MAX,
+        )
+        private set
+
+    var tapScrollChangedListener: (() -> Unit)? = null
+
+    var originalSize = false
+        private set
+    // MihonSY <--
+
     val theme = readerPreferences.readerTheme.get()
 
     // SY -->
@@ -111,6 +129,26 @@ class WebtoonConfig(
         readerPreferences.pageTransitionsWebtoon
             .register({ usePageTransitions = it }, { imagePropertyChangedListener?.invoke() })
         // SY <--
+
+        // MihonSY -->
+        readerPreferences.webtoonTapScrollDistance
+            .register(
+                { tapScrollDistanceFraction = ReaderPreferences.WebtoonTapScrollFractions.getOrElse(it) { 0.75f } },
+                { tapScrollChangedListener?.invoke() },
+            )
+        readerPreferences.webtoonTapScrollDuration
+            .register(
+                {
+                    tapScrollDurationMillis = it.coerceIn(
+                        ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MIN,
+                        ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MAX,
+                    )
+                },
+                { tapScrollChangedListener?.invoke() },
+            )
+        readerPreferences.webtoonOriginalSize
+            .register({ originalSize = it }, { imagePropertyChangedListener?.invoke() })
+        // MihonSY <--
     }
 
     override var navigator: ViewerNavigation = defaultNavigation()

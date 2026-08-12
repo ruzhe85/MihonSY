@@ -1,6 +1,7 @@
 package eu.kanade.presentation.reader.settings
 
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -8,6 +9,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import eu.kanade.domain.manga.model.readerOrientation
 import eu.kanade.domain.manga.model.readingMode
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
@@ -52,6 +55,10 @@ internal fun ColumnScope.ReadingModePage(screenModel: ReaderSettingsScreenModel)
         }
     }
 
+    // MihonSY: image enhancement applies to EVERY reading mode, so it sits at the top level
+    // of the in-reader settings (not inside the webtoon/pager sections).
+    ImageEnhancementSettings(screenModel)
+
     val viewer by screenModel.viewerFlow.collectAsState()
     if (viewer is WebtoonViewer) {
         WebtoonViewerSettings(screenModel)
@@ -62,6 +69,60 @@ internal fun ColumnScope.ReadingModePage(screenModel: ReaderSettingsScreenModel)
         PagerViewerSettings(screenModel)
     }
 }
+
+// MihonSY -->
+/**
+ * In-reader image enhancement settings. Placed at the top level of the reading-mode page
+ * (outside the webtoon/pager sections) on purpose: enhancement is global and applies to
+ * every reading mode. A single selector (Off / Anime4K / Lanczos3) avoids the ambiguity of
+ * two toggles where one silently overrides the other.
+ */
+@Composable
+private fun ColumnScope.ImageEnhancementSettings(screenModel: ReaderSettingsScreenModel) {
+    HeadingItem(MR.strings.pref_image_enhancement_group)
+    Text(
+        text = stringResource(MR.strings.pref_enhancement_mode_summary),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
+
+    val enhancementMode by screenModel.preferences.enhancementMode.collectAsState()
+    SettingsChipRow(MR.strings.pref_enhancement_mode) {
+        ReaderPreferences.EnhancementModes.forEachIndexed { index, label ->
+            FilterChip(
+                selected = enhancementMode == index,
+                onClick = { screenModel.preferences.enhancementMode.set(index) },
+                label = { Text(stringResource(label)) },
+            )
+        }
+    }
+
+    if (enhancementMode == 1) {
+        val anime4kMode by screenModel.preferences.anime4kMode.collectAsState()
+        SettingsChipRow(MR.strings.pref_anime4k_mode) {
+            ReaderPreferences.Anime4kModes.forEachIndexed { index, label ->
+                FilterChip(
+                    selected = anime4kMode == index,
+                    onClick = { screenModel.preferences.anime4kMode.set(index) },
+                    label = { Text(stringResource(label)) },
+                )
+            }
+        }
+    } else if (enhancementMode == 2) {
+        val lanczosScale by screenModel.preferences.lanczosScale.collectAsState()
+        SettingsChipRow(MR.strings.pref_lanczos_scale) {
+            ReaderPreferences.LanczosScaleOptions.forEach { (value, label) ->
+                FilterChip(
+                    selected = lanczosScale == value,
+                    onClick = { screenModel.preferences.lanczosScale.set(value) },
+                    label = { Text(stringResource(label)) },
+                )
+            }
+        }
+    }
+}
+// MihonSY <--
 
 @Composable
 private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenModel) {
@@ -190,6 +251,34 @@ private fun ColumnScope.WebtoonViewerSettings(screenModel: ReaderSettingsScreenM
         invertMode = webtoonNavInverted,
         onSelectInvertMode = screenModel.preferences.webtoonNavInverted::set,
     )
+
+    // MihonSY -->
+    val webtoonTapScrollDistance by screenModel.preferences.webtoonTapScrollDistance.collectAsState()
+    SettingsChipRow(MR.strings.pref_webtoon_tap_scroll_distance) {
+        ReaderPreferences.WebtoonTapScrollDistance.mapIndexed { index, it ->
+            FilterChip(
+                selected = webtoonTapScrollDistance == index,
+                onClick = { screenModel.preferences.webtoonTapScrollDistance.set(index) },
+                label = { Text(stringResource(it)) },
+            )
+        }
+    }
+
+    val webtoonTapScrollDuration by screenModel.preferences.webtoonTapScrollDuration.collectAsState()
+    SliderItem(
+        value = webtoonTapScrollDuration,
+        valueRange = ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MIN..ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MAX,
+        label = stringResource(MR.strings.pref_webtoon_tap_scroll_duration),
+        valueString = "${webtoonTapScrollDuration}ms",
+        onChange = { screenModel.preferences.webtoonTapScrollDuration.set(it) },
+        pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+    )
+
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_webtoon_original_resolution),
+        pref = screenModel.preferences.webtoonOriginalSize,
+    )
+    // MihonSY <--
 
     val webtoonSidePadding by screenModel.preferences.webtoonSidePadding.collectAsState()
     SliderItem(

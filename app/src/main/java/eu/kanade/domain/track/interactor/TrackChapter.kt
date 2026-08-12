@@ -6,6 +6,7 @@ import eu.kanade.domain.track.model.toDomainTrack
 import eu.kanade.domain.track.service.DelayedTrackingUpdateJob
 import eu.kanade.domain.track.store.DelayedTrackingStore
 import eu.kanade.tachiyomi.data.track.TrackerManager
+import eu.kanade.tachiyomi.data.track.komga.Komga
 import eu.kanade.tachiyomi.data.track.mdlist.MdList
 import exh.md.utils.FollowStatus
 import kotlinx.coroutines.async
@@ -61,6 +62,27 @@ class TrackChapter(
                 .awaitAll()
                 .mapNotNull { it.exceptionOrNull() }
                 .forEach { logcat(LogPriority.WARN, it) }
+        }
+    }
+
+    /**
+     * MihonSY: syncs partial page progress to Komga while reading, so Komga records
+     * "read to page N" even before the chapter is completed. Only Komga supports
+     * page-level granularity; other trackers are updated on chapter completion via [await].
+     */
+    suspend fun updateKomgaPageProgress(mangaId: Long, chapterNumber: Double, page: Int) {
+        withNonCancellableContext {
+            val tracks = getTracks.await(mangaId)
+            if (tracks.isEmpty()) return@withNonCancellableContext
+
+            tracks.forEach { track ->
+                val service = trackerManager.get(track.trackerId)
+                if (service is Komga && service.isLoggedIn) {
+                    runCatching {
+                        service.updatePageProgress(track.toDbTrack(), chapterNumber, page)
+                    }.onFailure { logcat(LogPriority.WARN, it) { "Failed to sync Komga page progress" } }
+                }
+            }
         }
     }
 }

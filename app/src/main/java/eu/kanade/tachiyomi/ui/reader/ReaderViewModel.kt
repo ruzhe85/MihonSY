@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader
 
 import android.app.Application
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.annotation.ColorInt
 import androidx.annotation.IntRange
@@ -105,7 +106,9 @@ import tachiyomi.source.local.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.time.Instant
+import java.util.Collections
 import java.util.Date
+import java.util.HashSet
 
 /**
  * Presenter used by the activity to perform background operations.
@@ -597,6 +600,9 @@ class ReaderViewModel @JvmOverloads constructor(
         val selectedChapter = page.chapter
         val pages = selectedChapter.pages ?: return
 
+        // MihonSY: auto-detect webtoons by image aspect ratio (webtoons are tall strips)
+        maybeAutoWebtoonByAspectRatio(page)
+
         // Save last page read and mark as read if needed
         viewModelScope.launchNonCancellable {
             updateChapterProgress(selectedChapter, page/* SY --> */, hasExtraPage/* SY <-- */)
@@ -614,6 +620,99 @@ class ReaderViewModel @JvmOverloads constructor(
 
         eventChannel.trySend(Event.PageChanged)
     }
+
+    // MihonSY -->
+    /** Set once the aspect-ratio check has finished (either switched or gave up). */
+    @Volatile
+    private var autoWebtoonAspectDone = false
+
+    /** Chapter URL the current check session belongs to; reset on chapter change. */
+    private var autoWebtoonCheckChapter: String? = null
+
+    /** Indices (0-based) of early pages in the current chapter already measured as non-tall. */
+    private val autoWebtoonCheckedIndices: MutableSet<Int> = Collections.synchronizedSet(HashSet())
+
+    /**
+     * Heuristic auto-webtoon by image aspect ratio.
+     *
+     * Webtoon chapters are (almost) always long strips, but a chapter may open with a cover
+     * page (normal manga ratio ~1.5) before the long strips start. Instead of inspecting only
+     * the first page, we inspect the first [AUTO_WEBTOON_PAGES_TO_CHECK] pages as the reader
+     * passes through them: if ANY of them is a tall strip (ratio above
+     * [AUTO_WEBTOON_MIN_ASPECT_RATIO]) the manga is a webtoon and its reading mode is set
+     * permanently. Only when all of them turn out normal-sized does the check give up.
+     *
+     * Complements the tag/source based detection in [getMangaReadingMode].
+     */
+    private fun maybeAutoWebtoonByAspectRatio(page: ReaderPage) {
+        if (autoWebtoonAspectDone) return
+        if (!readerPreferences.useAutoWebtoon.get()) return
+        val manga = manga ?: return
+        // Only when the manga has no explicit reading mode (still DEFAULT)
+        if (ReadingMode.fromPreference(manga.readingMode.toInt()) != ReadingMode.DEFAULT) return
+        // Skip if tag/source based detection already resolved to webtoon
+        if (getMangaReadingMode() == ReadingMode.WEBTOON.flagValue) return
+
+        val chapterPages = page.chapter.pages
+        val checkCount = minOf(AUTO_WEBTOON_PAGES_TO_CHECK, chapterPages?.size ?: AUTO_WEBTOON_PAGES_TO_CHECK)
+        // Only inspect the early pages; ignore the rest of the chapter.
+        if (page.index >= checkCount) return
+        if (page.status != Page.State.Ready || page.stream == null) return
+
+        // A new chapter starts a fresh check window.
+        val chapterUrl = page.chapter.chapter.url
+        if (autoWebtoonCheckChapter != chapterUrl) {
+            synchronized(autoWebtoonCheckedIndices) { autoWebtoonCheckedIndices.clear() }
+            autoWebtoonCheckChapter = chapterUrl
+        }
+
+        viewModelScope.launchIO {
+            val ratio = try {
+                val inputStream = page.stream?.invoke() ?: return@launchIO
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                inputStream.use { BitmapFactory.decodeStream(it, null, options) }
+                val width = options.outWidth
+                val height = options.outHeight
+                if (width <= 0 || height <= 0) return@launchIO
+                height.toFloat() / width
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR, e) { "MihonSY auto-webtoon aspect check failed" }
+                return@launchIO
+            }
+
+            logcat { "MihonSY auto-webtoon aspect check page ${page.number}: ratio=$ratio" }
+            if (ratio > AUTO_WEBTOON_MIN_ASPECT_RATIO) {
+                autoWebtoonAspectDone = true
+                logcat { "MihonSY auto-webtoon: page ${page.number} is a tall strip, switching to webtoon mode" }
+                setMangaReadingMode(ReadingMode.WEBTOON)
+            } else {
+                synchronized(autoWebtoonCheckedIndices) { autoWebtoonCheckedIndices.add(page.index) }
+                val allEarlyChecked = synchronized(autoWebtoonCheckedIndices) {
+                    (0 until checkCount).all { autoWebtoonCheckedIndices.contains(it) }
+                }
+                if (allEarlyChecked) {
+                    autoWebtoonAspectDone = true
+                    logcat { "MihonSY auto-webtoon: none of the first $checkCount pages is tall, giving up" }
+                }
+            }
+        }
+    }
+
+    private companion object {
+        /** Height/width ratio above which a page is considered a webtoon strip. */
+        const val AUTO_WEBTOON_MIN_ASPECT_RATIO = 2.5f
+
+        /**
+         * Number of leading pages inspected before giving up. Cover pages (normal ratio)
+         * are skipped implicitly: a webtoon whose strips start after the cover is still
+         * detected as long as any of the first few pages is a tall strip.
+         */
+        const val AUTO_WEBTOON_PAGES_TO_CHECK = 5
+
+        /** Minimum interval between Komga page-progress syncs while reading (ms). */
+        const val KOMGA_PAGE_SYNC_INTERVAL_MS = 5_000L
+    }
+    // MihonSY <--
 
     private fun downloadNextChapters() {
         if (downloadAheadAmount == 0) return
@@ -702,6 +801,11 @@ class ReaderViewModel @JvmOverloads constructor(
 
         if (!incognitoMode && page.status !is Page.State.Error) {
             readerChapter.chapter.last_page_read = pageIndex
+
+            // MihonSY: while reading, sync partial page progress to Komga (throttled).
+            // Komga records "read to page N" per book, so mid-chapter progress is kept in
+            // sync even before the chapter is completed.
+            syncKomgaPageProgress(readerChapter, pageIndex)
 
             // SY -->
             if (
@@ -1293,12 +1397,38 @@ class ReaderViewModel @JvmOverloads constructor(
         class Error(val error: Throwable) : SaveImageResult
     }
 
+    /** Timestamp of the last throttled Komga page-progress sync (ms since epoch). */
+    @Volatile
+    private var lastKomgaPageSyncTimestamp = 0L
+
+    /**
+     * MihonSY: syncs the current page position of an unfinished chapter to Komga, so Komga
+     * records "read to page N" even before the chapter is completed. Throttled to avoid
+     * spamming the server on every page turn; the completion path handles the final update.
+     */
+    private fun syncKomgaPageProgress(readerChapter: ReaderChapter, pageIndex: Int) {
+        if (!trackPreferences.autoUpdateTrack.get()) return
+        val manga = manga ?: return
+        val pages = readerChapter.pages ?: return
+        if (pageIndex >= pages.lastIndex) return // completion path (updateTrackChapterRead) handles it
+        val now = System.currentTimeMillis()
+        if (now - lastKomgaPageSyncTimestamp < KOMGA_PAGE_SYNC_INTERVAL_MS) return
+        lastKomgaPageSyncTimestamp = now
+
+        viewModelScope.launchNonCancellable {
+            trackChapter.updateKomgaPageProgress(
+                manga.id,
+                readerChapter.chapter.chapter_number.toDouble(),
+                pageIndex + 1,
+            )
+        }
+    }
+
     /**
      * Starts the service that updates the last chapter read in sync services. This operation
      * will run in a background thread and errors are ignored.
      */
-    private fun updateTrackChapterRead(readerChapter: ReaderChapter) {
-        if (incognitoMode) return
+    private fun updateTrackChapterRead(readerChapter: ReaderChapter) {        if (incognitoMode) return
         if (!trackPreferences.autoUpdateTrack.get()) return
 
         val manga = manga ?: return

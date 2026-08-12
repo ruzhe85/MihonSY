@@ -78,6 +78,45 @@ data class ReadListDto(
     val filtered: Boolean,
 )
 
+// MihonSY -->
+/** Payload for Komga's per-book read-progress endpoint: PATCH /api/v1/books/{id}/read-progress */
+@Serializable
+data class BookReadProgressUpdateDto(
+    val completed: Boolean? = null,
+)
+
+/** Payload for updating a single book's page progress (partial read): {"page": N} */
+@Serializable
+data class BookReadProgressPageUpdateDto(
+    val page: Int,
+)
+
+@Serializable
+data class BookPageDto(
+    val id: String,
+    val metadata: BookPageMetadataDto,
+    val readProgress: BookReadProgressDto? = null,
+)
+
+@Serializable
+data class BookPageMetadataDto(
+    val numberSort: Float,
+)
+
+/** Book-level read progress from Komga's books endpoint (per-book granularity). */
+@Serializable
+data class BookReadProgressDto(
+    val page: Int = 0,
+    val completed: Boolean = false,
+    val lastModified: String? = null,
+)
+
+@Serializable
+data class BookPageWrapperDto(
+    val content: List<BookPageDto>,
+)
+// MihonSY <--
+
 @Serializable
 data class ReadProgressDto(
     val booksCount: Int,

@@ -68,6 +68,9 @@ object SettingsReaderScreen : SearchableSettings {
             getReadingGroup(readerPreferences = readerPref),
             getPagedGroup(readerPreferences = readerPref),
             getWebtoonGroup(readerPreferences = readerPref),
+            // MihonSY -->
+            getEnhancementGroup(readerPreferences = readerPref),
+            // MihonSY <--
             // SY -->
             getContinuousVerticalGroup(readerPreferences = readerPref),
             // SY <--
@@ -298,6 +301,42 @@ object SettingsReaderScreen : SearchableSettings {
         )
     }
 
+    // MihonSY -->
+    @Composable
+    private fun getEnhancementGroup(readerPreferences: ReaderPreferences): Preference.PreferenceGroup {
+        val enhancementMode by readerPreferences.enhancementMode.collectAsState()
+
+        return Preference.PreferenceGroup(
+            title = stringResource(MR.strings.pref_image_enhancement_group),
+            preferenceItems = listOf(
+                Preference.PreferenceItem.ListPreference(
+                    preference = readerPreferences.enhancementMode,
+                    entries = ReaderPreferences.EnhancementModes
+                        .mapIndexed { index, it -> index to stringResource(it) }
+                        .toMap(),
+                    title = stringResource(MR.strings.pref_enhancement_mode),
+                    subtitle = stringResource(MR.strings.pref_enhancement_mode_summary),
+                ),
+                Preference.PreferenceItem.ListPreference(
+                    preference = readerPreferences.anime4kMode,
+                    entries = ReaderPreferences.Anime4kModes
+                        .mapIndexed { index, it -> index to stringResource(it) }
+                        .toMap(),
+                    title = stringResource(MR.strings.pref_anime4k_mode),
+                    enabled = enhancementMode == 1,
+                ),
+                Preference.PreferenceItem.ListPreference(
+                    preference = readerPreferences.lanczosScale,
+                    entries = ReaderPreferences.LanczosScaleOptions
+                        .associate { it.first to stringResource(it.second) },
+                    title = stringResource(MR.strings.pref_lanczos_scale),
+                    enabled = enhancementMode == 2,
+                ),
+            ),
+        )
+    }
+    // MihonSY <--
+
     @Composable
     private fun getWebtoonGroup(readerPreferences: ReaderPreferences): Preference.PreferenceGroup {
         val numberFormat = remember { NumberFormat.getPercentInstance() }
@@ -311,6 +350,7 @@ object SettingsReaderScreen : SearchableSettings {
         val dualPageSplit by dualPageSplitPref.collectAsState()
         val rotateToFit by rotateToFitPref.collectAsState()
         val webtoonSidePadding by webtoonSidePaddingPref.collectAsState()
+        val webtoonTapScrollDuration by readerPreferences.webtoonTapScrollDuration.collectAsState()
 
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.webtoon_viewer),
@@ -322,6 +362,26 @@ object SettingsReaderScreen : SearchableSettings {
                         .toMap(),
                     title = stringResource(MR.strings.pref_viewer_nav),
                 ),
+                // MihonSY -->
+                Preference.PreferenceItem.ListPreference(
+                    preference = readerPreferences.webtoonTapScrollDistance,
+                    entries = ReaderPreferences.WebtoonTapScrollDistance
+                        .mapIndexed { index, it -> index to stringResource(it) }
+                        .toMap(),
+                    title = stringResource(MR.strings.pref_webtoon_tap_scroll_distance),
+                ),
+                Preference.PreferenceItem.SliderPreference(
+                    value = webtoonTapScrollDuration,
+                    valueRange = ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MIN..ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MAX,
+                    title = stringResource(MR.strings.pref_webtoon_tap_scroll_duration),
+                    valueString = "${webtoonTapScrollDuration}ms",
+                    onValueChanged = { readerPreferences.webtoonTapScrollDuration.set(it) },
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = readerPreferences.webtoonOriginalSize,
+                    title = stringResource(MR.strings.pref_webtoon_original_resolution),
+                ),
+                // MihonSY <--
                 Preference.PreferenceItem.ListPreference(
                     preference = readerPreferences.webtoonNavInverted,
                     entries = listOf(

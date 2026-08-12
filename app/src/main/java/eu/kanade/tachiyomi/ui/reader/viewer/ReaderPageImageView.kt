@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.viewer
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.drawable.Animatable
@@ -37,6 +38,8 @@ import eu.kanade.domain.base.BasePreferences
 import eu.kanade.tachiyomi.data.coil.cropBorders
 import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonSubsamplingImageView
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.util.MihonSyEnhancer
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.view.isVisibleOnScreen
 import okio.BufferedSource
@@ -149,6 +152,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     fun setImage(drawable: Drawable, config: Config) {
         this.config = config
+        enhanceGeneration++
         if (drawable is Animatable) {
             prepareAnimatedImageView()
             setAnimatedImage(drawable, config)
@@ -160,6 +164,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     fun setImage(source: BufferedSource, isAnimated: Boolean, config: Config) {
         this.config = config
+        enhanceGeneration++
         if (isAnimated) {
             prepareAnimatedImageView()
             setAnimatedImage(source, config)
@@ -176,6 +181,37 @@ open class ReaderPageImageView @JvmOverloads constructor(
         }
         it.isVisible = false
     }
+
+    // MihonSY -->
+    /** Monotonic counter used to discard enhancement results that belong to an older image. */
+    private var enhanceGeneration = 0L
+
+    /**
+     * Runs MihonSY image enhancement (Anime4K GPU shaders or Lanczos3) on the decoded bitmap
+     * in the background, then swaps the enhanced bitmap into the view if the image is still
+     * current. The original is shown immediately, enhancement upgrades it in place.
+     */
+    private fun maybeEnhance(original: Bitmap) {
+        val preferences = Injekt.get<ReaderPreferences>()
+        if (preferences.enhancementMode.get() == 0) return
+        if (original.isRecycled || original.config != Bitmap.Config.ARGB_8888) return
+
+        val generation = ++enhanceGeneration
+        MihonSyEnhancer.submit(
+            block = { MihonSyEnhancer.enhance(original) },
+            onResult = { enhanced ->
+                if (generation != enhanceGeneration || !isVisible || enhanced.isRecycled) {
+                    enhanced.recycle()
+                    return@submit
+                }
+                (pageView as? SubsamplingScaleImageView)?.let { view ->
+                    view.recycle()
+                    view.setImage(ImageSource.bitmap(enhanced))
+                }
+            },
+        )
+    }
+    // MihonSY <--
 
     /**
      * Check if the image can be panned to the left
@@ -299,6 +335,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
             is BitmapDrawable -> {
                 setImage(ImageSource.bitmap(data.bitmap))
                 isVisible = true
+                maybeEnhance(data.bitmap)
             }
             is BufferedSource -> {
                 if (!isWebtoon || alwaysDecodeLongStripWithSSIV) {
@@ -317,6 +354,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
                             val image = result as BitmapImage
                             setImage(ImageSource.bitmap(image.bitmap))
                             isVisible = true
+                            maybeEnhance(image.bitmap)
                         },
                     )
                     .listener(

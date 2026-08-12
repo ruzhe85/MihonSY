@@ -18,18 +18,15 @@ plugins {
     id("com.github.ben-manes.versions")
 }
 
-if (gradle.startParameter.taskRequests.toString().contains("Release")) {
-    pluginManager.apply {
-        apply(libs.plugins.google.services.get().pluginId)
-        apply(libs.plugins.firebase.crashlytics.get().pluginId)
-    }
-}
+// MihonSY: this fork does not ship Firebase telemetry (no google-services.json), so the
+// Google services / Crashlytics plugins are intentionally not applied, even for Release builds.
+// MihonSY <--
 
 android {
     namespace = "eu.kanade.tachiyomi"
 
     defaultConfig {
-        applicationId = "eu.kanade.tachiyomi.sy"
+        applicationId = "eu.kanade.mihonsy"
 
         versionCode = 81
         versionName = "1.13.2"
@@ -44,6 +41,27 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("mihonsy") {
+            storeFile = file("../keystore/mihonmod.jks")
+            storePassword = System.getenv("MIHONSY_STORE_PASSWORD") ?: "mihonmod123"
+            keyAlias = "mihonmod"
+            keyPassword = System.getenv("MIHONSY_KEY_PASSWORD") ?: "mihonmod123"
+        }
+    }
+
+    // MihonSY: lightweight native enhancement (Anime4K GPU shaders + Lanczos3 CPU resampler)
+    // Uses the locally installed NDK instead of the global one to avoid an extra SDK download.
+    ndkVersion = "28.2.13676358"
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            // ANDROID_STL defaults to c++_static in the NDK; passing it via `arguments`
+            // is unnecessary on AGP 9 (DSL changed), so it is intentionally omitted.
+        }
+    }
+
     buildTypes {
         named("debug") {
             versionNameSuffix = "-${getLatestCommitCount()}"
@@ -51,13 +69,15 @@ android {
             isPseudoLocalesEnabled = true
         }
         named("release") {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            val shrink = !project.hasProperty("disable-code-shrink")
+            isMinifyEnabled = shrink
+            isShrinkResources = shrink
             isProfileable = true
+            signingConfig = signingConfigs.getByName("mihonsy")
             setProguardFiles(listOf(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"))
 
             buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLatestCommitTime = true)}\"")
-            buildConfigField("boolean", "INCLUDE_UPDATER", "true")
+            buildConfigField("boolean", "INCLUDE_UPDATER", "false")
         }
         create("foss") {
             initWith(getByName("release"))

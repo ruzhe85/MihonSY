@@ -83,7 +83,17 @@ class WebtoonPageHolder(
     init {
         refreshLayoutParams()
 
-        frame.onImageLoaded = { onImageDecoded() }
+        frame.onImageLoaded = {
+            onImageDecoded()
+            // MihonSY: with "original resolution" the image is drawn at 1:1 pixels, but the
+            // view still measures its height at fit-width ratio (imageWidth * screenWidth),
+            // which is taller than the 1:1 image and leaves a large black gap below each
+            // strip. Match the item height to the image's real 1:1 height instead.
+            if (viewer.config.originalSize && frame.SHeight > 0) {
+                frame.layoutParams?.height = frame.SHeight
+                frame.requestLayout()
+            }
+        }
         frame.onImageLoadError = { error -> setError(error) }
         frame.onScaleChanged = { viewer.activity.hideMenu() }
     }
@@ -201,7 +211,11 @@ class WebtoonPageHolder(
                     isAnimated,
                     ReaderPageImageView.Config(
                         zoomDuration = viewer.config.doubleTapAnimDuration,
-                        minimumScaleType = SubsamplingScaleImageView.SCALE_TYPE_FIT_WIDTH,
+                        minimumScaleType = if (viewer.config.originalSize) {
+                            SubsamplingScaleImageView.SCALE_TYPE_ORIGINAL_SIZE
+                        } else {
+                            SubsamplingScaleImageView.SCALE_TYPE_FIT_WIDTH
+                        },
                         cropBorders =
                         (viewer.config.imageCropBorders && viewer.isContinuous) ||
                             (viewer.config.continuousCropBorders && !viewer.isContinuous),

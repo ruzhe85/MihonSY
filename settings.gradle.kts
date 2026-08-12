@@ -31,7 +31,7 @@ dependencyResolutionManagement {
 
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
-rootProject.name = "TachiyomiSY"
+rootProject.name = "MihonSY"
 include(":app")
 include(":baseline-profile")
 include(":core-metadata")

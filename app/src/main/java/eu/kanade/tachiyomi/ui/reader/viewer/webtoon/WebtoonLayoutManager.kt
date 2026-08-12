@@ -13,7 +13,10 @@ import androidx.recyclerview.widget.RecyclerView.NO_POSITION
  * This layout manager uses the same package name as the support library in order to use a package
  * protected method.
  */
-class WebtoonLayoutManager(context: Context, private val extraLayoutSpace: Int) : LinearLayoutManager(context) {
+class WebtoonLayoutManager(context: Context, extraLayoutSpace: Int) : LinearLayoutManager(context) {
+
+    // MihonSY: made mutable so the tap-scroll distance can be changed at runtime from settings
+    var extraLayoutSpace: Int = extraLayoutSpace
 
     init {
         isItemPrefetchEnabled = false

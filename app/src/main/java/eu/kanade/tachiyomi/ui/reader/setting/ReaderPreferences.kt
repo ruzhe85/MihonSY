@@ -183,6 +183,32 @@ class ReaderPreferences(
         TappingInvertMode.NONE,
     )
 
+    // MihonSY -->
+    val webtoonTapScrollDistance: Preference<Int> = preferenceStore.getInt(
+        "webtoon_tap_scroll_distance",
+        WEBTOON_TAP_SCROLL_DISTANCE_DEFAULT,
+    )
+
+    val webtoonTapScrollDuration: Preference<Int> = preferenceStore.getInt(
+        "webtoon_tap_scroll_duration",
+        WEBTOON_TAP_SCROLL_DURATION_DEFAULT,
+    )
+
+    val webtoonOriginalSize: Preference<Boolean> = preferenceStore.getBoolean(
+        "webtoon_original_size",
+        false,
+    )
+
+    // MihonSY image enhancement -->
+    /** 0 = Off, 1 = Anime4K, 2 = Lanczos3. Single selector so the two algorithms never conflict. */
+    val enhancementMode: Preference<Int> = preferenceStore.getInt("pref_enhancement_mode", 0)
+
+    val anime4kMode: Preference<Int> = preferenceStore.getInt("pref_anime4k_mode", 0) // 0 Fast, 1 High, 2 Ultra
+
+    val lanczosScale: Preference<Int> = preferenceStore.getInt("pref_lanczos_scale", 200) // 150/200/300 = 1.5x/2x/3x
+    // MihonSY image enhancement <--
+    // MihonSY <--
+
     val showNavigationOverlayNewUser: Preference<Boolean> = preferenceStore.getBoolean(
         "reader_navigation_overlay_new_user",
         true,
@@ -265,6 +291,41 @@ class ReaderPreferences(
         const val WEBTOON_PADDING_MAX = 25
 
         const val MILLI_CONVERSION = 100
+
+        // MihonSY -->
+        const val WEBTOON_TAP_SCROLL_DISTANCE_DEFAULT = 1 // 0 = half, 1 = 3/4, 2 = full
+        const val WEBTOON_TAP_SCROLL_DURATION_DEFAULT = 250
+        const val WEBTOON_TAP_SCROLL_DURATION_MIN = 0
+        const val WEBTOON_TAP_SCROLL_DURATION_MAX = 1000
+
+        val WebtoonTapScrollDistance = listOf(
+            MR.strings.webtoon_tap_scroll_half,
+            MR.strings.webtoon_tap_scroll_three_quarter,
+            MR.strings.webtoon_tap_scroll_full,
+        )
+
+        val WebtoonTapScrollFractions = floatArrayOf(0.5f, 0.75f, 1.0f)
+
+        // MihonSY image enhancement -->
+        val EnhancementModes = listOf(
+            MR.strings.enhancement_off,
+            MR.strings.enhancement_anime4k,
+            MR.strings.enhancement_lanczos3,
+        )
+
+        val Anime4kModes = listOf(
+            MR.strings.anime4k_mode_fast,
+            MR.strings.anime4k_mode_high,
+            MR.strings.anime4k_mode_ultra,
+        )
+
+        val LanczosScaleOptions = listOf(
+            150 to MR.strings.lanczos_scale_1_5x,
+            200 to MR.strings.lanczos_scale_2x,
+            300 to MR.strings.lanczos_scale_3x,
+        )
+        // MihonSY image enhancement <--
+        // MihonSY <--
 
         val TapZones = listOf(
             MR.strings.label_default,

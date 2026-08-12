@@ -55,19 +55,19 @@ class WebtoonViewer(
     private val frame = WebtoonFrame(activity)
 
     /**
+     * Configuration used by this viewer, like allow taps, or crop image borders.
+     */
+    val config = WebtoonConfig(scope)
+
+    /**
      * Distance to scroll when the user taps on one side of the recycler view.
      */
-    private val scrollDistance = activity.resources.displayMetrics.heightPixels * 3 / 4
+    private var scrollDistance = (activity.resources.displayMetrics.heightPixels * config.tapScrollDistanceFraction).toInt()
 
     /**
      * Layout manager of the recycler view.
      */
     private val layoutManager = WebtoonLayoutManager(activity, scrollDistance)
-
-    /**
-     * Configuration used by this viewer, like allow taps, or crop image borders.
-     */
-    val config = WebtoonConfig(scope)
 
     /**
      * Adapter of the recycler view.
@@ -168,6 +168,12 @@ class WebtoonViewer(
         config.navigationModeChangedListener = {
             val showOnStart = config.navigationOverlayOnStart || config.forceNavigationOverlay
             activity.binding.navigationOverlay.setNavigation(config.navigator, showOnStart)
+        }
+
+        // MihonSY: keep tap-scroll distance and animation speed in sync with settings
+        config.tapScrollChangedListener = {
+            scrollDistance = (activity.resources.displayMetrics.heightPixels * config.tapScrollDistanceFraction).toInt()
+            layoutManager.extraLayoutSpace = scrollDistance
         }
 
         frame.layoutParams = ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT)
@@ -291,8 +297,8 @@ class WebtoonViewer(
      * Scrolls up by [scrollDistance].
      */
     private fun scrollUp() {
-        if (config.usePageTransitions) {
-            recycler.smoothScrollBy(0, -scrollDistance)
+        if (config.usePageTransitions && config.tapScrollDurationMillis > 0) {
+            recycler.smoothScrollBy(0, -scrollDistance, LinearInterpolator(), config.tapScrollDurationMillis)
         } else {
             recycler.scrollBy(0, -scrollDistance)
         }
@@ -336,8 +342,8 @@ class WebtoonViewer(
 
     private fun scrollDownBy() {
         // SY <--
-        if (config.usePageTransitions) {
-            recycler.smoothScrollBy(0, scrollDistance)
+        if (config.usePageTransitions && config.tapScrollDurationMillis > 0) {
+            recycler.smoothScrollBy(0, scrollDistance, LinearInterpolator(), config.tapScrollDurationMillis)
         } else {
             recycler.scrollBy(0, scrollDistance)
         }

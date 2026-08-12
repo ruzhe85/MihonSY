@@ -1,7 +1,9 @@
 [versions]
 # Used in [/gradle/build-config/src/main/kotlin/PluginKotlinMultiplatform.kt]
 android-sdk-min = "26"
-android-sdk-compile = "37"
+# MihonSY: upstream declares compile 37, but no android-37 platform exists in the public SDK
+# repository yet (newest is 36.x), so we compile against 36 (targetSdk is already 36).
+android-sdk-compile = "36"
 android-sdk-target = "36"
 android-ndk = "29.0.14206865"
 java = "17"
