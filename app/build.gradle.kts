@@ -28,8 +28,8 @@ android {
     defaultConfig {
         applicationId = "eu.kanade.mihonsy"
 
-        versionCode = 81
-        versionName = "1.13.2"
+        versionCode = 1
+        versionName = "1.0.0"
 
         buildConfigField("String", "UPSTREAM_VERSION", """"0.20.1"""")
 

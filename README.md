@@ -6,7 +6,7 @@
 
 **基于 [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY) 的漫画阅读器**
 
-包名 `eu.kanade.mihonsy` ｜ 版本 1.13.2 (81) ｜ Android 8.0+
+包名 `eu.kanade.mihonsy` ｜ 版本 1.0.0 (1) ｜ Android 8.0+
 
 </div>
 
