@@ -120,9 +120,14 @@ data class ChangelogText(
 
 private const val bullet = "\u2022"
 
+// MihonSY: how many recent versions to show in the "what's new" dialog.
+private const val MAX_CHANGELOG_VERSIONS = 4
+
 fun Changelog.toDisplayChangelog(): List<DisplayChangelog> {
     val prefix = if (bulletedList) bullet + "\t\t" else ""
-    return changelogs.map { version ->
+    // MihonSY: only show the most recent 4 versions in the "what's new" dialog.
+    // changelogs are ordered newest-first in the XML, so take() keeps the latest ones.
+    return changelogs.take(MAX_CHANGELOG_VERSIONS).map { version ->
         DisplayChangelog(
             version = version.versionName,
             changelog = version.text.mapIndexed { index, changelogText ->
