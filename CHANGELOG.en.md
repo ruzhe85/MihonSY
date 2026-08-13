@@ -6,6 +6,25 @@
 
 [中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
 
+## v1.0.2 (MihonSY)
+
+> Based on TachiyomiSY 1.13.2 upstream source (self-developed update, not an upstream sync).
+
+### Improvements & Fixes
+
+- **Webtoon tap-scroll snaps to page boundary**: after the tap-scroll animation ends
+  (or an instant jump), the view auto-aligns to the nearest page top (advancing to the
+  next page if past the halfway point) — scrolling always settles on a whole page, with
+  a feel closer to ComicScreen. Tap-scroll distance (half / 3/4 / full screen) and
+  animation duration settings are unchanged.
+- **Onboarding cleanup**: the "Send crash reports" and "Share analytics" toggles are
+  hidden from the welcome screen (code kept, UI commented out).
+
+### Changes
+
+- Release pipeline: APK assets renamed to `mihonsy-x.y.z-abi.apk`; release notes now
+  automatically include both Chinese and English changelog sections.
+
 ## v1.0.1 (MihonSY)
 
 > Based on TachiyomiSY 1.13.2 upstream source.
