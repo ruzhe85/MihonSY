@@ -6,6 +6,17 @@
 
 [中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
 
+## v1.0.3 (MihonSY)
+
+### Improvements & Fixes
+
+- **Webtoon tap-scroll tuning**: the "full screen" preset now scrolls one screen
+  height minus a 23dp peek margin — each tap scrolls a complete screen with a
+  sliver of the next page visible at the bottom; the "half" and "3/4 screen"
+  presets are unchanged.
+- **Removed** the 1.0.2 "snap-to-page-boundary" behavior (it made the scroll
+  distance drift from the setting; rolled back).
+
 ## v1.0.2 (MihonSY)
 
 > Based on TachiyomiSY 1.13.2 upstream source (self-developed update, not an upstream sync).

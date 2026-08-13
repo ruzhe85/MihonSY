@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <changelog bulletedList="true">
+    <changelogversion versionName="1.0.3" changeDate="August 13,2026">
+        <changelogtext>[b]MihonSY 1.0.3 (4)[/b]</changelogtext>
+        <changelogtext>[b]调整[/b] 条漫点击滚动「全屏」档位改为滚动"屏幕高度 − 23dp 边距"，每次点击完整滚动一屏并露出一点下一页内容；「半屏」「3/4 屏」档位不变</changelogtext>
+        <changelogtext>[b]移除[/b] 1.0.2 的"滚动后自动吸附页面"功能（实测导致滚动距离偏离设置值）</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.0.2" changeDate="August 13,2026">
         <changelogtext>[b]MihonSY 1.0.2 (3)[/b]</changelogtext>
-        <changelogtext>[b]新增[/b] 条漫点击滚动自动对齐页面：滚动结束后吸附到最近的页面顶部（越过半页则前进到下一页），始终停在完整页面上（ComicScreen 手感）</changelogtext>
+        <changelogtext>[b]新增[/b] 条漫点击滚动自动对齐页面：滚动结束后吸附到最近的页面顶部（越过半页则前进到下一页），始终停在完整页面上</changelogtext>
         <changelogtext>[b]调整[/b] 欢迎页不再显示"崩溃日志"与"数据分析"选项</changelogtext>
     </changelogversion>
     <changelogversion versionName="1.0.1" changeDate="August 13,2026">
