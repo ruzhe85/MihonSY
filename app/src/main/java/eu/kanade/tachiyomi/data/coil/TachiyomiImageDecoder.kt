@@ -156,6 +156,10 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                     }
 
                     // --- Enhancement Integration (ported from mihon_img_upscale) ---
+                    logcat(LogPriority.DEBUG) {
+                        "MihonSY: decode enhanced=${options.enhanced} mode=${Injekt.get<ReaderPreferences>().enhancementMode.get()} " +
+                            "id=${options.mangaId}/${options.chapterId}/${options.pageIndex}"
+                    }
                     if (options.enhanced) {
                         val preferences = Injekt.get<ReaderPreferences>()
                         val enhancementMode = preferences.enhancementMode.get()

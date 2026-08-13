@@ -219,7 +219,7 @@ object ImageEnhancementCache {
         anime4kMode: Int = 0,
         lanczosScale: Int = 200,
     ): String {
-        return "v1_e${enhancementMode}_a${anime4kMode}_l${lanczosScale}"
+        return "v2_e${enhancementMode}_a${anime4kMode}_l${lanczosScale}"
     }
 
     /**
