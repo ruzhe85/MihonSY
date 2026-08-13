@@ -56,6 +56,14 @@ bool Anime4K::init_egl() {
 
   setup_quad();
   initialized = true;
+
+  // MihonSY fix: the context is now initialised but we do NOT want to keep it
+  // bound to this (init) thread. Coil decodes on a thread pool and enhancement
+  // may run on any thread; an EGL context can be current on only one thread at
+  // a time, and a context still bound to the init thread fails with
+  // EGL_BAD_ACCESS when another thread tries eglMakeCurrent. Detach it here so
+  // process() can rebind it on whichever thread happens to run.
+  eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
   return true;
 }
 
@@ -180,10 +188,9 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
 
   // MihonSY fix: an EGL context can be current on only one thread at a time.
   // Coil decodes on a thread pool, so consecutive calls may come from different
-  // threads. eglMakeCurrent on a context still bound to another thread fails
-  // with EGL_BAD_ACCESS, which made every enhancement fail (return -1) after
-  // the first one. Release any stale thread binding before re-binding here.
-  // The Kotlin-side Semaphore(1) guarantees no two threads enter concurrently.
+  // threads. init_egl() detaches the context after setup, so it is free to be
+  // bound by whichever thread runs here. Release any stale binding on THIS
+  // thread, then rebind. The Kotlin-side Semaphore(1) guarantees serial entry.
   eglReleaseThread();
   if (!eglMakeCurrent(display, surface, surface, context)) {
     ANIME4K_LOGE("Failed to make EGL context current in process()");
@@ -256,6 +263,10 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
   glReadPixels(0, 0, curr_w, curr_h, GL_RGBA, GL_UNSIGNED_BYTE, out_pixels);
 
   glDeleteFramebuffers(1, &fbo);
+
+  // MihonSY fix: detach the context again so the next call (possibly on a
+  // different Coil thread) can rebind it without EGL_BAD_ACCESS.
+  eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
   return 0;
 }
 
