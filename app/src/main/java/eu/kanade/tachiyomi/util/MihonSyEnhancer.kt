@@ -95,17 +95,39 @@ object MihonSyEnhancer {
     /**
      * Runs [block] on the background enhancement thread and posts [onResult] (or [onError])
      * back to the main thread. Used by the reader to avoid blocking the UI.
+     *
+     * @param onProgress receives a simulated 0..100 progress while [block] runs (the native
+     *   calls are one-shot, so progress is estimated), then 100 once done.
      */
-    fun submit(block: () -> Bitmap?, onResult: (Bitmap) -> Unit, onError: (Exception) -> Unit = {}) {
+    fun submit(
+        block: () -> Bitmap?,
+        onResult: (Bitmap) -> Unit,
+        onError: (Exception) -> Unit = {},
+        onProgress: (Int) -> Unit = {},
+    ) {
         executor.execute {
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+            var progress = 0
+            val ticker = object : Runnable {
+                override fun run() {
+                    if (progress < 90) {
+                        progress += 15
+                        handler.post { onProgress(progress) }
+                        handler.postDelayed(this, 120)
+                    }
+                }
+            }
+            handler.post { onProgress(0) }
+            handler.postDelayed(ticker, 120)
             try {
                 val result = block()
                 if (result != null) {
-                    android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(result) }
+                    handler.post { onProgress(100) }
+                    handler.post { onResult(result) }
                 }
             } catch (e: Exception) {
                 logcat(LogPriority.WARN, e) { "Enhancement failed" }
-                android.os.Handler(android.os.Looper.getMainLooper()).post { onError(e) }
+                handler.post { onError(e) }
             }
         }
     }

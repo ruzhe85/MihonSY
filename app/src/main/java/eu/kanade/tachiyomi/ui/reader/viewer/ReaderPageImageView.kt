@@ -11,7 +11,10 @@ import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.view.Gravity
+import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.widget.TextView
 import android.widget.FrameLayout
 import androidx.annotation.AttrRes
 import androidx.annotation.CallSuper
@@ -160,6 +163,8 @@ open class ReaderPageImageView @JvmOverloads constructor(
     fun setImage(drawable: Drawable, config: Config) {
         this.config = config
         enhanceGeneration++
+        // MihonSY: hide any leftover enhancement status from the previous image.
+        enhanceStatusView?.visibility = View.GONE
         if (drawable is Animatable) {
             prepareAnimatedImageView()
             setAnimatedImage(drawable, config)
@@ -172,6 +177,8 @@ open class ReaderPageImageView @JvmOverloads constructor(
     fun setImage(source: BufferedSource, isAnimated: Boolean, config: Config) {
         this.config = config
         enhanceGeneration++
+        // MihonSY: hide any leftover enhancement status from the previous image.
+        enhanceStatusView?.visibility = View.GONE
         if (isAnimated) {
             prepareAnimatedImageView()
             setAnimatedImage(source, config)
@@ -194,9 +201,46 @@ open class ReaderPageImageView @JvmOverloads constructor(
     private var enhanceGeneration = 0L
 
     /**
+     * MihonSY: small overlay at the bottom-left showing the image enhancement state.
+     * Shows a percentage while enhancing, "OK" when finished, hidden when disabled.
+     * Created lazily so it does not exist on images that are never enhanced.
+     */
+    private var enhanceStatusView: TextView? = null
+
+    private fun ensureEnhanceStatusView(): TextView {
+        enhanceStatusView?.let { return it }
+        val tv = TextView(context).apply {
+            textSize = 11f
+            setTextColor(0xFF000000.toInt())
+            alpha = 0.7f
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0x55FFFFFF.toInt())
+                cornerRadius = dpToPx(4f)
+            }
+            setPadding(dpToPx(6f), dpToPx(2f), dpToPx(6f), dpToPx(2f))
+            visibility = View.GONE
+        }
+        val lp = LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply {
+            gravity = Gravity.BOTTOM or Gravity.START
+            marginStart = dpToPx(8f)
+            bottomMargin = dpToPx(8f)
+        }
+        addView(tv, lp)
+        enhanceStatusView = tv
+        return tv
+    }
+
+    private fun dpToPx(dp: Float): Int = (dp * resources.displayMetrics.density).toInt()
+
+    /**
      * Runs MihonSY image enhancement (Anime4K GPU shaders or Lanczos3) on the decoded bitmap
      * in the background, then swaps the enhanced bitmap into the view if the image is still
      * current. The original is shown immediately, enhancement upgrades it in place.
+     *
+     * A small bottom-left overlay reports the simulated progress and ends with "OK".
      */
     private fun maybeEnhance(original: Bitmap) {
         val preferences = Injekt.get<ReaderPreferences>()
@@ -204,16 +248,31 @@ open class ReaderPageImageView @JvmOverloads constructor(
         if (original.isRecycled) return
 
         val generation = ++enhanceGeneration
+        val statusView = ensureEnhanceStatusView()
+        statusView.visibility = View.VISIBLE
         MihonSyEnhancer.submit(
             block = { MihonSyEnhancer.enhance(original) },
+            onProgress = { progress ->
+                if (generation == enhanceGeneration) {
+                    statusView.text = if (progress >= 100) "OK" else "$progress%"
+                }
+            },
             onResult = { enhanced ->
                 if (generation != enhanceGeneration || !isVisible || enhanced.isRecycled) {
                     enhanced.recycle()
                     return@submit
                 }
+                statusView.text = "OK"
+                // Hide shortly after finishing so it does not linger on the page.
+                statusView.postDelayed({ statusView.visibility = View.GONE }, 1500)
                 (pageView as? SubsamplingScaleImageView)?.let { view ->
                     view.recycle()
                     view.setImage(ImageSource.bitmap(enhanced))
+                }
+            },
+            onError = {
+                if (generation == enhanceGeneration) {
+                    statusView.visibility = View.GONE
                 }
             },
         )
@@ -344,12 +403,20 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 isVisible = true
                 maybeEnhance(data.bitmap)
             }
-            // MihonSY: every mode (pager, webtoon, long-strip direct decode) now goes
-            // through Coil into a software Bitmap so image enhancement can apply
-            // everywhere. Coil's ViewSizeResolver + INEXACT precision samples huge
-            // images down to the view size, keeping memory usage safe even for very
-            // long webtoon strips, and SSIV tiles the resulting bitmap for zooming.
+            // MihonSY: when image enhancement is disabled, keep the original SSIV
+            // direct-decode path (streaming the full-resolution image in tiles, best
+            // quality for zooming). When enhancement is enabled, decode through Coil
+            // into a software bitmap instead so enhance() can process it — Coil's
+            // ViewSizeResolver + INEXACT samples huge images for memory safety.
             is BufferedSource -> {
+                val enhancementEnabled = Injekt.get<ReaderPreferences>().enhancementMode.get() != 0
+                if (!enhancementEnabled) {
+                    setHardwareConfig(ImageUtil.canUseHardwareBitmap(data))
+                    setImage(ImageSource.inputStream(data.inputStream()))
+                    isVisible = true
+                    return@apply
+                }
+
                 ImageRequest.Builder(context)
                     .data(data)
                     .memoryCachePolicy(CachePolicy.DISABLED)
