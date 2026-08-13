@@ -206,6 +206,9 @@ class ReaderPreferences(
     val anime4kMode: Preference<Int> = preferenceStore.getInt("pref_anime4k_mode", 0) // 0 Fast, 1 High, 2 Ultra
 
     val lanczosScale: Preference<Int> = preferenceStore.getInt("pref_lanczos_scale", 200) // 150/200/300 = 1.5x/2x/3x
+
+    /** Independent toggle: show the bottom-left enhancement status overlay (elapsed seconds / OK). */
+    val showEnhancementStatus: Preference<Boolean> = preferenceStore.getBoolean("pref_show_enhancement_status", false)
     // MihonSY image enhancement <--
     // MihonSY <--
 

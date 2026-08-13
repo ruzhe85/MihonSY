@@ -332,6 +332,13 @@ object SettingsReaderScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_lanczos_scale),
                     enabled = enhancementMode == 2,
                 ),
+                // MihonSY: independent toggle for the enhancement status overlay.
+                // Enhancing does NOT auto-show it; the user must enable this.
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = readerPreferences.showEnhancementStatus,
+                    title = stringResource(MR.strings.pref_show_enhancement_status),
+                    subtitle = stringResource(MR.strings.pref_show_enhancement_status_summary),
+                ),
             ),
         )
     }

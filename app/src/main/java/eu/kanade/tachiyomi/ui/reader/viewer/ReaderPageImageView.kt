@@ -242,7 +242,8 @@ open class ReaderPageImageView @JvmOverloads constructor(
      *
      * A small bottom-left overlay shows a real stopwatch (elapsed seconds) while
      * enhancing, then "OK" when done — so the user can observe performance.
-     * The overlay only appears when image enhancement is enabled.
+     * The overlay only appears when BOTH image enhancement is enabled AND the
+     * "show enhancement status" toggle is on.
      */
     private fun maybeEnhance(original: Bitmap) {
         val preferences = Injekt.get<ReaderPreferences>()
@@ -250,12 +251,13 @@ open class ReaderPageImageView @JvmOverloads constructor(
         if (original.isRecycled) return
 
         val generation = ++enhanceGeneration
-        val statusView = ensureEnhanceStatusView()
-        statusView.visibility = View.VISIBLE
+        val showStatus = preferences.showEnhancementStatus.get()
+        val statusView = if (showStatus) ensureEnhanceStatusView() else null
+        statusView?.visibility = View.VISIBLE
         MihonSyEnhancer.submit(
             block = { MihonSyEnhancer.enhance(original) },
             onProgress = { elapsedMillis ->
-                if (generation == enhanceGeneration) {
+                if (generation == enhanceGeneration && statusView != null) {
                     // Real stopwatch: show elapsed seconds while enhancing.
                     statusView.text = String.format(java.util.Locale.US, "%.1fs", elapsedMillis / 1000f)
                 }
@@ -265,9 +267,11 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     enhanced.recycle()
                     return@submit
                 }
-                statusView.text = "OK"
-                // Hide shortly after finishing so it does not linger on the page.
-                statusView.postDelayed({ statusView.visibility = View.GONE }, 1500)
+                statusView?.let { tv ->
+                    tv.text = "OK"
+                    // Hide shortly after finishing so it does not linger on the page.
+                    tv.postDelayed({ tv.visibility = View.GONE }, 1500)
+                }
                 (pageView as? SubsamplingScaleImageView)?.let { view ->
                     view.recycle()
                     view.setImage(ImageSource.bitmap(enhanced))
@@ -275,7 +279,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
             },
             onError = {
                 if (generation == enhanceGeneration) {
-                    statusView.visibility = View.GONE
+                    statusView?.visibility = View.GONE
                 }
             },
         )

@@ -358,6 +358,8 @@
     <string name="pref_lanczos">Lanczos3</string>
     <string name="pref_lanczos_summary">经典 CPU 插值，确定性强且省内存</string>
     <string name="pref_lanczos_scale">Lanczos 倍率</string>
+    <string name="pref_show_enhancement_status">显示增强状态</string>
+    <string name="pref_show_enhancement_status_summary">在图片左下方显示增强耗时（完成后显示 OK）</string>
     <string name="lanczos_scale_1_5x">1.5x</string>
     <string name="lanczos_scale_2x">2x</string>
     <string name="lanczos_scale_3x">3x</string>

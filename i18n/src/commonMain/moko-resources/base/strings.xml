@@ -513,6 +513,8 @@
     <string name="pref_lanczos">Lanczos3</string>
     <string name="pref_lanczos_summary">Classic CPU resampling, deterministic and memory-friendly</string>
     <string name="pref_lanczos_scale">Lanczos scale</string>
+    <string name="pref_show_enhancement_status">Show enhancement status</string>
+    <string name="pref_show_enhancement_status_summary">Show enhancement elapsed time at the bottom-left of the image (OK when done)</string>
     <string name="lanczos_scale_1_5x">1.5x</string>
     <string name="lanczos_scale_2x">2x</string>
     <string name="lanczos_scale_3x">3x</string>
