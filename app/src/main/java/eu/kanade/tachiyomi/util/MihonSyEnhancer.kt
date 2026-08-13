@@ -136,17 +136,30 @@ object MihonSyEnhancer {
      * Returns the enhanced bitmap, or null when no enhancement applies / fails.
      *
      * @param input must be an ARGB_8888 bitmap.
+     * @param onComplete optional callback invoked with (enhanced != null, elapsedMillis)
+     *   so callers can show a meaningful status (time taken / success).
      */
-    fun enhance(input: Bitmap, preferences: ReaderPreferences = Injekt.get()): Bitmap? {
-        if (input.isRecycled) return null
+    fun enhance(
+        input: Bitmap,
+        preferences: ReaderPreferences = Injekt.get(),
+        onComplete: ((enhanced: Boolean, elapsedMillis: Long) -> Unit)? = null,
+    ): Bitmap? {
+        val start = SystemClock.uptimeMillis()
+        if (input.isRecycled) {
+            onComplete?.invoke(false, SystemClock.uptimeMillis() - start)
+            return null
+        }
         // MihonSY: never enhance hardware bitmaps — reading their pixels is unreliable
         // (can produce all-black frames on some devices). Decode-time enhancement runs
         // on software bitmaps, so a HARDWARE input simply skips enhancement.
-        if (input.config == Bitmap.Config.HARDWARE) return null
+        if (input.config == Bitmap.Config.HARDWARE) {
+            onComplete?.invoke(false, SystemClock.uptimeMillis() - start)
+            return null
+        }
 
         // Single selector: 0 = Off, 1 = Anime4K, 2 = Lanczos3. Only one algorithm runs,
         // so there is never a question of which one takes priority.
-        return when (preferences.enhancementMode.get()) {
+        val result = when (preferences.enhancementMode.get()) {
             1 -> {
                 val mode = preferences.anime4kMode.get()
                 val argb = ensureArgb(input) ?: return null
@@ -169,6 +182,8 @@ object MihonSyEnhancer {
 
             else -> null
         }
+        onComplete?.invoke(result != null, SystemClock.uptimeMillis() - start)
+        return result
     }
 
     /** Returns [input] if it is already a mutable ARGB_8888 bitmap, otherwise a copy. */

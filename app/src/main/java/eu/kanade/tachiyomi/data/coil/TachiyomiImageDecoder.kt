@@ -200,11 +200,16 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                                             "MihonSY: enhancing page $pageIndex ${bitmap.width}x${bitmap.height} " +
                                                 "config=${bitmap.config} mutable=${bitmap.isMutable} mode=$enhancementMode"
                                         }
-                                        val enhanced = MihonSyEnhancer.enhance(bitmap, preferences)
+                                        var elapsed = 0L
+                                        val enhanced = MihonSyEnhancer.enhance(bitmap, preferences) { _, ms ->
+                                            elapsed = ms
+                                        }
                                         logcat(LogPriority.DEBUG) {
                                             "MihonSY: enhanced page $pageIndex -> ${enhanced?.width}x${enhanced?.height} " +
                                                 "same=${enhanced === bitmap} null=${enhanced == null}"
                                         }
+                                        // Whether the enhanced bitmap is actually used (passes displayability).
+                                        var applied = false
                                         if (enhanced != null && enhanced !== bitmap) {
                                             val finalBitmap = enforceTextureLimit(enhanced)
                                             if (ImageEnhancementCache.isDisplayable(finalBitmap)) {
@@ -213,13 +218,18 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                                                 )
                                                 bitmap.recycle()
                                                 bitmap = finalBitmap
+                                                applied = true
                                             } else {
                                                 logcat(LogPriority.ERROR) { "TachiyomiImageDecoder: Page $pageIndex produced a nearly transparent result, keeping original" }
                                                 if (finalBitmap !== bitmap) finalBitmap.recycle()
                                             }
                                         }
+                                        lastEnhancementStats[enhancementKey(mangaId, chapterId, pageIndex)] =
+                                            EnhancementStats(applied, elapsed)
                                     } catch (e: Exception) {
                                         logcat(LogPriority.ERROR, e) { "TachiyomiImageDecoder: Failed to enhance image on-the-fly" }
+                                        lastEnhancementStats[enhancementKey(mangaId, chapterId, pageIndex)] =
+                                            EnhancementStats(false, 0L)
                                     }
                                 }
                             }
@@ -288,6 +298,24 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
          * Keeps memory bounded while still providing ~2x the view size of source detail.
          */
         const val MAX_ENHANCE_SOURCE_DIMENSION = 2048
+
+        // MihonSY: per-page enhancement outcome so the reader badge can show a real
+        // result (success + elapsed) instead of a meaningless OK. Keyed by page identity.
+        data class EnhancementStats(val enhanced: Boolean, val elapsedMillis: Long)
+
+        private val lastEnhancementStats = java.util.concurrent.ConcurrentHashMap<String, EnhancementStats>()
+
+        fun enhancementKey(mangaId: Long, chapterId: Long, pageIndex: Int): String = "$mangaId-$chapterId-$pageIndex"
+
+        /** Returns the enhancement stats for [mangaId]/[chapterId]/[pageIndex] without removing them. */
+        fun peekEnhancementStats(mangaId: Long, chapterId: Long, pageIndex: Int): EnhancementStats? {
+            return lastEnhancementStats[enhancementKey(mangaId, chapterId, pageIndex)]
+        }
+
+        /** Clears the recorded stats for a page (called when a new image is set). */
+        fun clearEnhancementStats(mangaId: Long, chapterId: Long, pageIndex: Int) {
+            lastEnhancementStats.remove(enhancementKey(mangaId, chapterId, pageIndex))
+        }
     }
 
     /**

@@ -37,6 +37,7 @@ import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.EASE_IN_OUT
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.EASE_OUT_QUAD
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.SCALE_TYPE_CENTER_INSIDE
 import com.github.chrisbanes.photoview.PhotoView
+import eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder
 import eu.kanade.tachiyomi.data.coil.cropBorders
 import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.data.coil.enhanced
@@ -211,6 +212,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
     private var enhancePageIndex: Int = -1
 
     fun setEnhanceIdentity(mangaId: Long, chapterId: Long, pageIndex: Int) {
+        // Clear the previous page's stats so a stale outcome never leaks onto the new page.
+        if (enhanceMangaId != -1L && enhanceChapterId != -1L && enhancePageIndex != -1) {
+            TachiyomiImageDecoder.clearEnhancementStats(enhanceMangaId, enhanceChapterId, enhancePageIndex)
+        }
         enhanceMangaId = mangaId
         enhanceChapterId = chapterId
         enhancePageIndex = pageIndex
@@ -263,8 +268,15 @@ open class ReaderPageImageView @JvmOverloads constructor(
         // MihonSY: only claim enhancement if the decoder actually ran it — the decoder
         // skips enhancement when the page identity is missing (-1).
         if (enhanceMangaId == -1L || enhanceChapterId == -1L || enhancePageIndex == -1) return
+        // MihonSY: show the real outcome — success with elapsed time, or a skip/失败
+        // marker — instead of an unconditional OK that lies when enhancement failed.
+        val stats = TachiyomiImageDecoder.peekEnhancementStats(enhanceMangaId, enhanceChapterId, enhancePageIndex)
         val tv = ensureEnhanceStatusView()
-        tv.text = "OK"
+        tv.text = if (stats?.enhanced == true) {
+            String.format(java.util.Locale.US, "OK %.1fs", stats.elapsedMillis / 1000f)
+        } else {
+            "跳过"
+        }
         tv.visibility = View.VISIBLE
         // MihonSY: badge stays visible until setImage hides it (page change). It is
         // shown both when the Coil load completes and when the page is selected, so
