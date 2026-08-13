@@ -173,14 +173,17 @@ object MihonSyEnhancer {
 
     /** Returns [input] if it is already a mutable ARGB_8888 bitmap, otherwise a copy. */
     private fun ensureArgb(input: Bitmap): Bitmap? {
-        return if (input.config == Bitmap.Config.ARGB_8888 && input.isMutable) {
-            input
-        } else {
-            // Draw into a fresh ARGB_8888 bitmap via Canvas — more reliable than
-            // Bitmap.copy() for non-mutable sources and never produces a black frame.
-            val out = Bitmap.createBitmap(input.width, input.height, Bitmap.Config.ARGB_8888)
-            android.graphics.Canvas(out).drawBitmap(input, 0f, 0f, null)
-            out
+        if (input.config == Bitmap.Config.ARGB_8888 && input.isMutable) {
+            return input
         }
+        // MihonSY fix: RGB_565 sources (Coil's memory-saving default) have no alpha
+        // channel and Bitmap.copy()/Canvas conversion may fill alpha with 0, making
+        // the Lanczos3 alpha-weighted resampler output fully transparent (black).
+        // Copy to ARGB_8888 and force the alpha channel opaque.
+        val copied = input.copy(Bitmap.Config.ARGB_8888, true) ?: return null
+        if (input.config != Bitmap.Config.ARGB_8888) {
+            copied.setHasAlpha(false)
+        }
+        return copied
     }
 }

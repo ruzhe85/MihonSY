@@ -134,8 +134,11 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
 
                                 val decodeOps = BitmapFactory.Options().apply {
                                     inSampleSize = sampleSize
-                                    inPreferredConfig = if (options.bitmapConfig == Bitmap.Config.HARDWARE) {
-                                        Bitmap.Config.ARGB_8888 // Decode to software first
+                                    // MihonSY: when enhancement is on, always decode to
+                                    // software ARGB_8888 — RGB_565 (Coil's default) has no
+                                    // alpha and would make the enhancers output black.
+                                    inPreferredConfig = if (options.enhanced || options.bitmapConfig == Bitmap.Config.HARDWARE) {
+                                        Bitmap.Config.ARGB_8888
                                     } else {
                                         options.bitmapConfig
                                     }
