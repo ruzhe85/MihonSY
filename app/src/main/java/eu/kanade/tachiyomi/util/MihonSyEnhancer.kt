@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.util
 import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.SystemClock
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
@@ -96,36 +97,34 @@ object MihonSyEnhancer {
      * Runs [block] on the background enhancement thread and posts [onResult] (or [onError])
      * back to the main thread. Used by the reader to avoid blocking the UI.
      *
-     * @param onProgress receives a simulated 0..100 progress while [block] runs (the native
-     *   calls are one-shot, so progress is estimated), then 100 once done.
+     * @param onProgress receives the real elapsed time (ms) while [block] runs, about
+     *   every 500ms. The overlay uses it to show a stopwatch so the user can observe
+     *   how long enhancement actually takes.
      */
     fun submit(
         block: () -> Bitmap?,
         onResult: (Bitmap) -> Unit,
         onError: (Exception) -> Unit = {},
-        onProgress: (Int) -> Unit = {},
+        onProgress: (Long) -> Unit = {},
     ) {
         executor.execute {
             val handler = android.os.Handler(android.os.Looper.getMainLooper())
-            var progress = 0
+            val startMillis = SystemClock.uptimeMillis()
             val ticker = object : Runnable {
                 override fun run() {
-                    if (progress < 90) {
-                        progress += 15
-                        handler.post { onProgress(progress) }
-                        handler.postDelayed(this, 120)
-                    }
+                    handler.post { onProgress(SystemClock.uptimeMillis() - startMillis) }
+                    handler.postDelayed(this, 500)
                 }
             }
-            handler.post { onProgress(0) }
-            handler.postDelayed(ticker, 120)
+            handler.postDelayed(ticker, 500)
             try {
                 val result = block()
+                handler.removeCallbacks(ticker)
                 if (result != null) {
-                    handler.post { onProgress(100) }
                     handler.post { onResult(result) }
                 }
             } catch (e: Exception) {
+                handler.removeCallbacks(ticker)
                 logcat(LogPriority.WARN, e) { "Enhancement failed" }
                 handler.post { onError(e) }
             }

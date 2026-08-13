@@ -240,7 +240,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
      * in the background, then swaps the enhanced bitmap into the view if the image is still
      * current. The original is shown immediately, enhancement upgrades it in place.
      *
-     * A small bottom-left overlay reports the simulated progress and ends with "OK".
+     * A small bottom-left overlay shows a real stopwatch (elapsed seconds) while
+     * enhancing, then "OK" when done — so the user can observe performance.
+     * The overlay only appears when image enhancement is enabled.
      */
     private fun maybeEnhance(original: Bitmap) {
         val preferences = Injekt.get<ReaderPreferences>()
@@ -252,9 +254,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
         statusView.visibility = View.VISIBLE
         MihonSyEnhancer.submit(
             block = { MihonSyEnhancer.enhance(original) },
-            onProgress = { progress ->
+            onProgress = { elapsedMillis ->
                 if (generation == enhanceGeneration) {
-                    statusView.text = if (progress >= 100) "OK" else "$progress%"
+                    // Real stopwatch: show elapsed seconds while enhancing.
+                    statusView.text = String.format(java.util.Locale.US, "%.1fs", elapsedMillis / 1000f)
                 }
             },
             onResult = { enhanced ->
