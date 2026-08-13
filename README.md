@@ -14,11 +14,6 @@
 
 ---
 
-> **Forked from** [jobobby04/TachiyomiSY](https://github.com/jobobby04/TachiyomiSY) →
-> [mihonapp/mihon](https://github.com/mihonapp/mihon)
-
----
-
 ## 简介
 
 MihonSY 是 TachiyomiSY（SY）的分支，在保留 SY 全部特性的基础上，针对**条漫阅读体验**做了增强：
