@@ -64,7 +64,27 @@ class WebtoonViewer(
     /**
      * Distance to scroll when the user taps on one side of the recycler view.
      */
-    private var scrollDistance = (activity.resources.displayMetrics.heightPixels * config.tapScrollDistanceFraction).toInt()
+    private var scrollDistance = computeTapScrollDistance()
+
+    /**
+     * MihonSY: computes the tap-scroll distance from the configured fraction.
+     *
+     * The "full screen" preset matches ComicScreen's behavior: scroll one screen
+     * height minus a small peek margin, so a little of the next page peeks at the
+     * bottom edge and every tap visually "changes one screen". Half/3/4 presets
+     * keep their plain fraction-of-screen distance.
+     */
+    private fun computeTapScrollDistance(): Int {
+        val heightPx = activity.resources.displayMetrics.heightPixels
+        val fraction = config.tapScrollDistanceFraction
+        if (fraction >= 1.0f) {
+            // One full screen minus a peek margin (23dp, like ComicScreen's
+            // set_menu_pagekey_offset default) so the next page peeks at the bottom.
+            val marginPx = (TAP_SCROLL_PEEK_MARGIN_DP * activity.resources.displayMetrics.density).toInt()
+            return (heightPx - marginPx).coerceAtLeast(1)
+        }
+        return (heightPx * fraction).toInt()
+    }
 
     /**
      * MihonSY: animator driving the tap-scroll. A ValueAnimator that steps the
@@ -182,7 +202,7 @@ class WebtoonViewer(
 
         // MihonSY: keep tap-scroll distance and animation speed in sync with settings
         config.tapScrollChangedListener = {
-            scrollDistance = (activity.resources.displayMetrics.heightPixels * config.tapScrollDistanceFraction).toInt()
+            scrollDistance = computeTapScrollDistance()
             layoutManager.extraLayoutSpace = scrollDistance
         }
 
@@ -469,3 +489,8 @@ class WebtoonViewer(
 
 // Double the cache size to reduce rebinds/recycles incurred by the extra layout space on scroll direction changes
 private val RECYCLER_VIEW_CACHE_SIZE = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) 4 else 2
+
+// MihonSY: bottom peek margin (dp) left un-scrolled for the "full screen" tap-scroll
+// preset, mirroring ComicScreen's set_menu_pagekey_offset default (23dp). A sliver of
+// the next page stays visible so each tap feels like one full screen changed.
+private const val TAP_SCROLL_PEEK_MARGIN_DP = 23f
