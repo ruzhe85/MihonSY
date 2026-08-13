@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <changelog bulletedList="true">
+    <changelogversion versionName="1.0.4" changeDate="August 13,2026">
+        <changelogtext>[b]MihonSY 1.0.4 (5)[/b]</changelogtext>
+        <changelogtext>[b]优化[/b] 图像增强部分重做：所有阅读模式（翻页 / 条漫 / 长条图）下都能生效；关闭增强时恢复原始高清直出解码</changelogtext>
+        <changelogtext>[b]新增[/b] 增强状态显示器：图像增强设置中新增「显示增强状态」开关（默认关闭），开启后在图片左下方显示增强耗时（完成后显示 OK）</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.0.3" changeDate="August 13,2026">
         <changelogtext>[b]MihonSY 1.0.3 (4)[/b]</changelogtext>
         <changelogtext>[b]调整[/b] 条漫点击滚动「全屏」档位改为滚动"屏幕高度 − 23dp 边距"，每次点击完整滚动一屏并露出一点下一页内容；「半屏」「3/4 屏」档位不变</changelogtext>

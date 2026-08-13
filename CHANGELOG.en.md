@@ -6,6 +6,19 @@
 
 [中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
 
+## v1.0.4 (MihonSY)
+
+### Improvements & Fixes
+
+- **Image enhancement rework**: enhancement now works in every reading mode
+  (paged, webtoon, long-strip); when enhancement is off, the original
+  full-resolution direct decode is restored, so quality and performance are
+  unaffected.
+- **New enhancement status display**: a new independent toggle "Show enhancement
+  status" (off by default) under Image enhancement; when enabled, a bottom-left
+  overlay shows the elapsed enhancement time (OK when done) for performance
+  observation.
+
 ## v1.0.3 (MihonSY)
 
 ### Improvements & Fixes
