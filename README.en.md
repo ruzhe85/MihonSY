@@ -6,7 +6,7 @@
 
 **A manga reader based on [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY)**
 
-Package `eu.kanade.mihonsy` ｜ Version 1.0.3 (4) ｜ Android 8.0+
+Package `eu.kanade.mihonsy` ｜ Version 1.0.4 (5) ｜ Android 8.0+
 
 [English](./README.en.md) | [中文](./README.md)
 
