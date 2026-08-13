@@ -14,6 +14,11 @@ Package `eu.kanade.mihonsy` ｜ Version 1.0.1 (2) ｜ Android 8.0+
 
 ---
 
+> **Forked from** [jobobby04/TachiyomiSY](https://github.com/jobobby04/TachiyomiSY) →
+> [mihonapp/mihon](https://github.com/mihonapp/mihon)
+
+---
+
 ## About
 
 MihonSY is a fork of TachiyomiSY (SY). It keeps all of SY's features and enhances the **webtoon reading experience**:
