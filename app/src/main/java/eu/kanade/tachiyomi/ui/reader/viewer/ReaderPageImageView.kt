@@ -215,7 +215,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
             alpha = 0.7f
             background = android.graphics.drawable.GradientDrawable().apply {
                 setColor(0x55FFFFFF.toInt())
-                cornerRadius = dpToPx(4f)
+                cornerRadius = dpToPx(4f).toFloat()
             }
             setPadding(dpToPx(6f), dpToPx(2f), dpToPx(6f), dpToPx(2f))
             visibility = View.GONE
