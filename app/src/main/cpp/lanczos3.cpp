@@ -128,28 +128,34 @@ Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeLanczosProcess(
   resizeLanczos3(static_cast<const unsigned char *>(pixels), info.width, info.height,
                  static_cast<unsigned char *>(outPixels), dw, dh);
 
-  AndroidBitmap_unlockPixels(env, bitmap);
-  AndroidBitmap_unlockPixels(env, outBitmap);
-
-  // MihonSY defensive check: if the resampler produced an all-transparent/all-black
-  // image (e.g. pixel buffers were not actually accessible), fall back to the
-  // original instead of showing a black frame.
-  if (outPixels != nullptr) {
+  // MihonSY defensive check (BEFORE unlock — the pointer is invalid afterwards):
+  // if the resampler produced an all-transparent or all-black image, fall back to
+  // the original instead of showing a black frame.
+  {
     const auto *px = static_cast<const unsigned char *>(outPixels);
     const size_t total = static_cast<size_t>(dw) * dh * 4;
-    size_t nonZero = 0;
-    const size_t step = std::max<size_t>(1, total / 256);
-    for (size_t k = 0; k < total && nonZero < 8; k += step) {
-      if (px[k] != 0) ++nonZero;
+    size_t step = total / 256;
+    if (step < 4) step = 4;
+    size_t nonZeroRgb = 0;
+    size_t nonZeroAlpha = 0;
+    for (size_t k = 0; k < total && (nonZeroRgb < 8 || nonZeroAlpha < 8); k += step) {
+      // px[k] R, px[k+1] G, px[k+2] B, px[k+3] A
+      if (px[k] != 0 || px[k + 1] != 0 || px[k + 2] != 0) ++nonZeroRgb;
+      if (px[k + 3] != 0) ++nonZeroAlpha;
     }
-    if (nonZero == 0) {
-      LOGE("Lanczos3 output is all-zero, returning original bitmap");
+    if (nonZeroRgb == 0 || nonZeroAlpha == 0) {
+      LOGE("Lanczos3 output is blank (rgb=%zu alpha=%zu), returning original bitmap",
+           nonZeroRgb, nonZeroAlpha);
       jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
       jmethodID recycleMethod = env->GetMethodID(bitmapClass, "recycle", "()V");
       env->CallVoidMethod(outBitmap, recycleMethod);
+      AndroidBitmap_unlockPixels(env, bitmap);
+      AndroidBitmap_unlockPixels(env, outBitmap);
       return bitmap;
     }
   }
 
+  AndroidBitmap_unlockPixels(env, bitmap);
+  AndroidBitmap_unlockPixels(env, outBitmap);
   return outBitmap;
 }

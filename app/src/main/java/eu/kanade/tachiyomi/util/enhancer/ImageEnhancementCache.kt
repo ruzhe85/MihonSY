@@ -117,20 +117,28 @@ object ImageEnhancementCache {
 
     fun isDisplayable(bitmap: Bitmap): Boolean {
         if (bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) return false
-        if (!bitmap.hasAlpha()) return true
 
+        // MihonSY fix: an opaque black frame (RGB=0, alpha=255) passes the old
+        // alpha-only check and gets displayed as a black screen. Sample pixels and
+        // require some non-black content OR some transparency (PNG with alpha).
         val stepX = (bitmap.width / 24).coerceAtLeast(1)
         val stepY = (bitmap.height / 24).coerceAtLeast(1)
         var total = 0
-        var visible = 0
+        var visible = 0          // pixels with alpha > 16
+        var nonBlack = 0         // pixels with any channel > 16
         var alphaSum = 0L
 
         var y = 0
         while (y < bitmap.height) {
             var x = 0
             while (x < bitmap.width) {
-                val alpha = bitmap.getPixel(x, y) ushr 24
+                val p = bitmap.getPixel(x, y)
+                val alpha = p ushr 24
                 if (alpha > 16) visible++
+                val r = (p shr 16) and 0xFF
+                val g = (p shr 8) and 0xFF
+                val b = p and 0xFF
+                if (r > 16 || g > 16 || b > 16) nonBlack++
                 alphaSum += alpha.toLong()
                 total++
                 x += stepX
@@ -139,7 +147,12 @@ object ImageEnhancementCache {
         }
 
         if (total == 0) return false
-        return visible > total / 20 || alphaSum / total > 32
+        // Must have real image content (non-black) OR meaningful transparency
+        // (a fully transparent image is also useless, but a PNG with a mostly
+        // transparent background is still displayable if it has content).
+        val hasContent = nonBlack > total / 20
+        val hasTransparency = alphaSum / total <= 250 && visible > total / 50
+        return hasContent || hasTransparency
     }
 
     /**

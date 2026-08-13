@@ -83,9 +83,10 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                             // resolution than the view size (2x, capped) so the enhancer
                             // works on real source detail — enhancing an already
                             // view-size-sampled bitmap yields no visible quality gain.
+                            // dstWidth may be Int.MAX_VALUE before the view lays out;
+                            // clamp first to avoid overflow (dstWidth * 2 going negative).
                             val (targetW, targetH) = if (options.enhanced) {
-                                min(dstWidth * 2, MAX_ENHANCE_SOURCE_DIMENSION) to
-                                    min(dstHeight * 2, MAX_ENHANCE_SOURCE_DIMENSION)
+                                enhanceTarget(dstWidth) to enhanceTarget(dstHeight)
                             } else {
                                 dstWidth to dstHeight
                             }
@@ -118,8 +119,7 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
 
                                 // MihonSY: same higher-resolution decode when enhancing.
                                 val (targetW, targetH) = if (options.enhanced) {
-                                    min(dstWidth * 2, MAX_ENHANCE_SOURCE_DIMENSION) to
-                                        min(dstHeight * 2, MAX_ENHANCE_SOURCE_DIMENSION)
+                                    enhanceTarget(dstWidth) to enhanceTarget(dstHeight)
                                 } else {
                                     dstWidth to dstHeight
                                 }
@@ -311,6 +311,15 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
          * Keeps memory bounded while still providing ~2x the view size of source detail.
          */
         const val MAX_ENHANCE_SOURCE_DIMENSION = 2048
+
+        /**
+         * MihonSY: safe enhanced-decode target for one dimension. Clamps the view size
+         * first (it can be Int.MAX_VALUE before layout) to avoid overflow, then 2x.
+         */
+        private fun enhanceTarget(viewDimension: Int): Int {
+            if (viewDimension <= 0 || viewDimension == Int.MAX_VALUE) return MAX_ENHANCE_SOURCE_DIMENSION
+            return min(viewDimension * 2, MAX_ENHANCE_SOURCE_DIMENSION)
+        }
 
         // MihonSY: per-page enhancement outcome so the reader badge can show a real
         // result (success + elapsed) instead of a meaningless OK. Keyed by page identity.

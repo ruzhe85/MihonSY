@@ -159,11 +159,15 @@ object MihonSyEnhancer {
 
         // Single selector: 0 = Off, 1 = Anime4K, 2 = Lanczos3. Only one algorithm runs,
         // so there is never a question of which one takes priority.
-        val result = when (preferences.enhancementMode.get()) {
+        val mode = preferences.enhancementMode.get()
+        val result = when (mode) {
             1 -> {
-                val mode = preferences.anime4kMode.get()
-                val argb = ensureArgb(input) ?: return null
-                if (initAnime4K(Injekt.get<Application>(), mode) && anime4kSupportsSize(argb.width, argb.height)) {
+                val a4kMode = preferences.anime4kMode.get()
+                val argb = ensureArgb(input) ?: run {
+                    onComplete?.invoke(false, SystemClock.uptimeMillis() - start)
+                    return null
+                }
+                if (initAnime4K(Injekt.get<Application>(), a4kMode) && anime4kSupportsSize(argb.width, argb.height)) {
                     nativeProcessAnime4K(argb).takeUnless { it === argb }
                 } else {
                     null
@@ -172,7 +176,10 @@ object MihonSyEnhancer {
 
             2 -> {
                 val scale = preferences.lanczosScale.get() / 100f
-                val argb = ensureArgb(input) ?: return null
+                val argb = ensureArgb(input) ?: run {
+                    onComplete?.invoke(false, SystemClock.uptimeMillis() - start)
+                    return null
+                }
                 if (scale > 1f) {
                     nativeLanczosProcess(argb, scale).takeUnless { it === argb }
                 } else {
@@ -182,7 +189,7 @@ object MihonSyEnhancer {
 
             else -> null
         }
-        onComplete?.invoke(result != null, SystemClock.uptimeMillis() - start)
+        onComplete?.invoke(result != null && result !== input, SystemClock.uptimeMillis() - start)
         return result
     }
 
