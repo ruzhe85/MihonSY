@@ -40,6 +40,9 @@ import com.github.chrisbanes.photoview.PhotoView
 import eu.kanade.tachiyomi.data.coil.cropBorders
 import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.data.coil.enhanced
+import eu.kanade.tachiyomi.data.coil.mangaId
+import eu.kanade.tachiyomi.data.coil.chapterId
+import eu.kanade.tachiyomi.data.coil.pageIndex
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonSubsamplingImageView
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
@@ -195,6 +198,20 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     // MihonSY -->
+
+    /**
+     * MihonSY: page identity used as the disk-cache key for enhanced images.
+     * Set by the page holder before loading; -1 values disable the disk cache.
+     */
+    private var enhanceMangaId: Long = -1L
+    private var enhanceChapterId: Long = -1L
+    private var enhancePageIndex: Int = -1
+
+    fun setEnhanceIdentity(mangaId: Long, chapterId: Long, pageIndex: Int) {
+        enhanceMangaId = mangaId
+        enhanceChapterId = chapterId
+        enhancePageIndex = pageIndex
+    }
 
     /**
      * MihonSY: small overlay at the bottom-left showing the image enhancement state.
@@ -388,6 +405,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .memoryCachePolicy(CachePolicy.DISABLED)
                     .diskCachePolicy(CachePolicy.DISABLED)
                     .enhanced(true)
+                    .mangaId(enhanceMangaId)
+                    .chapterId(enhanceChapterId)
+                    .pageIndex(enhancePageIndex)
                     .target(
                         onSuccess = { result ->
                             val image = result as BitmapImage

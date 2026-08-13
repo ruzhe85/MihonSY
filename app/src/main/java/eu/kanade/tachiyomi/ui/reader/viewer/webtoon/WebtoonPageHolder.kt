@@ -206,6 +206,14 @@ class WebtoonPageHolder(
                 Pair(source, isAnimated)
             }
             withUIContext {
+                // MihonSY: pass page identity so enhanced images get a disk-cache key.
+                page?.let { p ->
+                    frame.setEnhanceIdentity(
+                        p.chapter.chapter.manga_id ?: -1L,
+                        p.chapter.chapter.id ?: -1L,
+                        p.index,
+                    )
+                }
                 frame.setImage(
                     source,
                     isAnimated,

@@ -197,6 +197,12 @@ class PagerPageHolder(
                 }
             }
             withUIContext {
+                // MihonSY: pass page identity so enhanced images get a disk-cache key.
+                setEnhanceIdentity(
+                    page.chapter.chapter.manga_id ?: -1L,
+                    page.chapter.chapter.id ?: -1L,
+                    page.index,
+                )
                 setImage(
                     source,
                     isAnimated,

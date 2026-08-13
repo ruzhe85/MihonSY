@@ -44,8 +44,7 @@ val Options.customDecoder: Boolean
 private val customDecoderKey = Extras.Key(default = false)
 
 // MihonSY: signal the decoder to run image enhancement (Anime4K / Lanczos3)
-// on-the-fly while decoding, so enhancement works at original resolution and is
-// cached by Coil like any other decoded image.
+// on-the-fly while decoding, plus the page identity used for the disk cache.
 fun ImageRequest.Builder.enhanced(enable: Boolean) = apply {
     extras[enhancedKey] = enable
 }
@@ -54,3 +53,39 @@ val Options.enhanced: Boolean
     get() = getExtra(enhancedKey)
 
 private val enhancedKey = Extras.Key(default = false)
+
+fun ImageRequest.Builder.mangaId(id: Long) = apply {
+    extras[mangaIdKey] = id
+}
+
+val Options.mangaId: Long
+    get() = getExtra(mangaIdKey)
+
+private val mangaIdKey = Extras.Key(default = -1L)
+
+fun ImageRequest.Builder.chapterId(id: Long) = apply {
+    extras[chapterIdKey] = id
+}
+
+val Options.chapterId: Long
+    get() = getExtra(chapterIdKey)
+
+private val chapterIdKey = Extras.Key(default = -1L)
+
+fun ImageRequest.Builder.pageIndex(index: Int) = apply {
+    extras[pageIndexKey] = index
+}
+
+val Options.pageIndex: Int
+    get() = getExtra(pageIndexKey)
+
+private val pageIndexKey = Extras.Key(default = -1)
+
+fun ImageRequest.Builder.pageVariant(variant: String) = apply {
+    extras[pageVariantKey] = variant
+}
+
+val Options.pageVariant: String
+    get() = getExtra(pageVariantKey)
+
+private val pageVariantKey = Extras.Key(default = "")
