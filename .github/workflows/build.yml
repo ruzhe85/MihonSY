@@ -62,8 +62,8 @@ jobs:
           retention-days: 30
 
       # MihonSY: automatically publish a GitHub Release with the built APKs.
-      # - APK files are renamed to {app-name}-{major}-{abi}.apk
-      #   (e.g. mihonsy-1.0-arm64-v8a.apk, where "1.0" is the major version)
+      # - APK files are renamed to {app-name}-{x.y.z}-{abi}.apk
+      #   (e.g. mihonsy-1.0.1-arm64-v8a.apk, full version name)
       # - Release tag/title use versionName from app/build.gradle.kts
       # - Release body contains both Chinese (CHANGELOG.md) and English
       #   (CHANGELOG.en.md) sections for the current version.
@@ -76,17 +76,15 @@ jobs:
           APK_DIR=app/build/outputs/apk/release
           VERSION_CODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts | head -1)
           VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
-          # Major version: "1.0" part of "1.0.1" (used in asset filenames).
-          MAJOR_VERSION=$(echo "$VERSION_NAME" | awk -F. '{print $1"."$2}')
 
-          echo "versionName=$VERSION_NAME versionCode=$VERSION_CODE major=$MAJOR_VERSION"
+          echo "versionName=$VERSION_NAME versionCode=$VERSION_CODE"
 
-          # Rename APKs to mihonsy-{major}-{abi}.apk.
+          # Rename APKs to mihonsy-{x.y.z}-{abi}.apk (full version name).
           cd "$APK_DIR"
           for apk in *.apk; do
             abi=$(echo "$apk" | sed -E 's/^app-(.+)-release\.apk$/\1/')
             [ "$abi" = "$apk" ] && abi=universal
-            mv "$apk" "mihonsy-${MAJOR_VERSION}-${abi}.apk"
+            mv "$apk" "mihonsy-${VERSION_NAME}-${abi}.apk"
           done
           ls -la
 
@@ -125,7 +123,7 @@ jobs:
           # Fallback if neither section matched.
           if ! grep -qE '^## ' "$NOTES_FILE"; then
             {
-              echo "MihonSY ${VERSION_NAME} (${VERSION_CODE})"
+              echo "MihonSY ${VERSION_NAME}"
               echo ""
               echo "Built automatically from the master branch."
             } > "$NOTES_FILE"
@@ -133,8 +131,8 @@ jobs:
 
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "MihonSY ${VERSION_NAME} (${VERSION_CODE})" \
+            --title "MihonSY ${VERSION_NAME}" \
             --notes-file "$NOTES_FILE" \
-            "${APK_DIR}/mihonsy-${MAJOR_VERSION}-"*.apk
+            "${APK_DIR}/mihonsy-${VERSION_NAME}-"*.apk
 
           echo "Published release $TAG"
