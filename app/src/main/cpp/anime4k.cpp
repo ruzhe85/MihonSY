@@ -178,10 +178,13 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
   if (!init_egl())
     return -1;
 
-  // MihonSY fix: an EGL context is bound to the thread that made it current.
-  // Coil decodes on a thread pool, so the enhancing thread may differ from the
-  // init thread — without this the GL calls silently no-op and glReadPixels
-  // returns an all-black image. Re-make current on every call to rebind it.
+  // MihonSY fix: an EGL context can be current on only one thread at a time.
+  // Coil decodes on a thread pool, so consecutive calls may come from different
+  // threads. eglMakeCurrent on a context still bound to another thread fails
+  // with EGL_BAD_ACCESS, which made every enhancement fail (return -1) after
+  // the first one. Release any stale thread binding before re-binding here.
+  // The Kotlin-side Semaphore(1) guarantees no two threads enter concurrently.
+  eglReleaseThread();
   if (!eglMakeCurrent(display, surface, surface, context)) {
     ANIME4K_LOGE("Failed to make EGL context current in process()");
     return -1;
