@@ -105,10 +105,23 @@ Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeProcessAnime4K(
   }
 
   int actual_out_w, actual_out_h;
-  g_anime4k->process(info.width, info.height, static_cast<unsigned char *>(pixels),
-                     actual_out_w, actual_out_h, static_cast<unsigned char *>(outPixels));
+  int processResult = g_anime4k->process(info.width, info.height,
+                                         static_cast<unsigned char *>(pixels),
+                                         actual_out_w, actual_out_h,
+                                         static_cast<unsigned char *>(outPixels));
 
   AndroidBitmap_unlockPixels(env, bitmap);
   AndroidBitmap_unlockPixels(env, outBitmap);
+
+  // MihonSY fix: if the GL pass failed (e.g. context rebind error) the output
+  // bitmap is uninitialised/black — return the original instead of a black frame.
+  if (processResult != 0) {
+    LOGE("Anime4K process failed (%d), returning original bitmap", processResult);
+    jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
+    jmethodID recycleMethod = env->GetMethodID(bitmapClass, "recycle", "()V");
+    env->CallVoidMethod(outBitmap, recycleMethod);
+    return bitmap;
+  }
+
   return outBitmap;
 }

@@ -178,6 +178,15 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
   if (!init_egl())
     return -1;
 
+  // MihonSY fix: an EGL context is bound to the thread that made it current.
+  // Coil decodes on a thread pool, so the enhancing thread may differ from the
+  // init thread — without this the GL calls silently no-op and glReadPixels
+  // returns an all-black image. Re-make current on every call to rebind it.
+  if (!eglMakeCurrent(display, surface, surface, context)) {
+    ANIME4K_LOGE("Failed to make EGL context current in process()");
+    return -1;
+  }
+
   auto get_tex = [&](const std::string &name, int w, int h) {
     if (textures.count(name)) {
       if (tex_sizes[name].first == w && tex_sizes[name].second == h)
