@@ -313,6 +313,11 @@ class WebtoonViewer(
      * and uniform instead of chunky. A previously running animation is
      * cancelled first so rapid taps never fight each other.
      *
+     * After the animation completes, the view is snapped to the nearest page
+     * boundary (top of a page item), replicating ComicScreen's "landing on a
+     * page" feel — the scroll always settles aligned to a page start instead
+     * of stopping mid-page.
+     *
      * @param totalDistance signed scroll distance in pixels (negative = scroll up)
      * @param durationMillis animation duration; <= 0 means jump instantly
      */
@@ -321,6 +326,9 @@ class WebtoonViewer(
         scrollAnimator?.cancel()
         if (durationMillis <= 0 || totalDistance == 0) {
             recycler.scrollBy(0, totalDistance)
+            // SY --> snap to page boundary even on instant jump
+            snapToPageBoundary()
+            // SY <--
             return
         }
 
@@ -341,16 +349,64 @@ class WebtoonViewer(
 
             doOnEnd {
                 lastAnimatedValue = 0
-                // Only clear the field if we're still the active animator; a
-                // newer animation may have replaced us after cancel().
+                // Only clear the field and snap if we're still the active animator;
+                // a newer animation may have replaced us after cancel().
                 if (scrollAnimator === this) {
                     scrollAnimator = null
+                    // SY --> settle on a page boundary once the tap-scroll ends
+                    snapToPageBoundary()
+                    // SY <--
                 }
             }
         }
         lastAnimatedValue = 0
         scrollAnimator = animator
         animator.start()
+    }
+
+    /**
+     * MihonSY: snaps the webtoon scroll position to the nearest page boundary
+     * (the top of a page item), so tap-scrolling always settles aligned to a
+     * page start like ComicScreen instead of stopping mid-page.
+     *
+     * The first visible page is inspected: if the viewport top is more than
+     * half-way down that page we nudge to the next page's top, otherwise we
+     * nudge back to the current page's top. The nudge is a short smooth scroll
+     * (not animated by our tap animator), clamped to the content range.
+     */
+    private fun snapToPageBoundary() {
+        // Nothing to align yet while the first layout is still pending.
+        if (layoutManager.childCount == 0) return
+
+        val firstVisiblePos = layoutManager.findFirstVisibleItemPosition()
+        if (firstVisiblePos == RecyclerView.NO_POSITION) return
+
+        val firstChild = layoutManager.findViewByPosition(firstVisiblePos) ?: return
+        // The page's top edge relative to the viewport top. Negative means the
+        // page starts above the viewport (we are somewhere inside the page).
+        val pageTopOffset = firstChild.top
+
+        val pageHeight = firstChild.height
+        if (pageHeight <= 0) return
+
+        val dy = when {
+            // Already aligned to the top of this page.
+            pageTopOffset == 0 -> 0
+            // More than half the page is above us: advance to the next page top.
+            -pageTopOffset > pageHeight / 2 -> -pageTopOffset + pageHeight
+            // Otherwise settle back to the current page's top.
+            else -> -pageTopOffset
+        }
+
+        if (dy == 0) return
+
+        // Clamp so we don't overscroll past the content range.
+        val currentOffset = recycler.computeVerticalScrollOffset()
+        val maxOffset = recycler.computeVerticalScrollRange() - recycler.height
+        val targetOffset = currentOffset + dy
+        if (targetOffset < 0 || targetOffset > maxOffset) return
+
+        recycler.smoothScrollBy(0, dy)
     }
 
     /**
@@ -361,6 +417,9 @@ class WebtoonViewer(
             animateScrollBy(-scrollDistance, config.tapScrollDurationMillis)
         } else {
             recycler.scrollBy(0, -scrollDistance)
+            // SY --> snap to page boundary even on instant jump
+            snapToPageBoundary()
+            // SY <--
         }
     }
 
@@ -404,6 +463,9 @@ class WebtoonViewer(
             animateScrollBy(scrollDistance, config.tapScrollDurationMillis)
         } else {
             recycler.scrollBy(0, scrollDistance)
+            // SY --> snap to page boundary even on instant jump
+            snapToPageBoundary()
+            // SY <--
         }
     }
 
