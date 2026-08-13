@@ -260,7 +260,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
         val tv = ensureEnhanceStatusView()
         tv.text = "OK"
         tv.visibility = View.VISIBLE
-        tv.postDelayed({ tv.visibility = View.GONE }, 1500)
+        // MihonSY: keep the badge visible until the page changes (setImage hides it),
+        // so it is still there when the user actually swipes to this page. Previously
+        // it auto-hid after 1.5s, which fired before the page became visible.
     }
     // MihonSY <--
 

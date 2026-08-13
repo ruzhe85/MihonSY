@@ -79,11 +79,22 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                             val dstWidth = options.size.widthPx(options.scale) { srcWidth }
                             val dstHeight = options.size.heightPx(options.scale) { srcHeight }
 
+                            // MihonSY: when enhancement is enabled, decode at a higher
+                            // resolution than the view size (2x, capped) so the enhancer
+                            // works on real source detail — enhancing an already
+                            // view-size-sampled bitmap yields no visible quality gain.
+                            val (targetW, targetH) = if (options.enhanced) {
+                                min(dstWidth * 2, MAX_ENHANCE_SOURCE_DIMENSION) to
+                                    min(dstHeight * 2, MAX_ENHANCE_SOURCE_DIMENSION)
+                            } else {
+                                dstWidth to dstHeight
+                            }
+
                             sampleSize = DecodeUtils.calculateInSampleSize(
                                 srcWidth = srcWidth,
                                 srcHeight = srcHeight,
-                                dstWidth = dstWidth,
-                                dstHeight = dstHeight,
+                                dstWidth = targetW,
+                                dstHeight = targetH,
                                 scale = options.scale,
                             )
                             bitmap = nativeDecoder.decode(sampleSize = sampleSize)
@@ -105,11 +116,19 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                                 val dstWidth = options.size.widthPx(options.scale) { srcWidth }
                                 val dstHeight = options.size.heightPx(options.scale) { srcHeight }
 
+                                // MihonSY: same higher-resolution decode when enhancing.
+                                val (targetW, targetH) = if (options.enhanced) {
+                                    min(dstWidth * 2, MAX_ENHANCE_SOURCE_DIMENSION) to
+                                        min(dstHeight * 2, MAX_ENHANCE_SOURCE_DIMENSION)
+                                } else {
+                                    dstWidth to dstHeight
+                                }
+
                                 sampleSize = DecodeUtils.calculateInSampleSize(
                                     srcWidth = srcWidth,
                                     srcHeight = srcHeight,
-                                    dstWidth = dstWidth,
-                                    dstHeight = dstHeight,
+                                    dstWidth = targetW,
+                                    dstHeight = targetH,
                                     scale = options.scale,
                                 )
 
@@ -252,6 +271,12 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
 
         /** Serialises decode + enhancement so GPU/CPU enhancement work never contends. */
         private val decodeSemaphore = Semaphore(1)
+
+        /**
+         * MihonSY: cap on the long edge used for on-the-fly enhancement decoding.
+         * Keeps memory bounded while still providing ~2x the view size of source detail.
+         */
+        const val MAX_ENHANCE_SOURCE_DIMENSION = 2048
     }
 
     /**
