@@ -54,12 +54,20 @@ void resizeLanczos3(const unsigned char *src, int sw, int sh, unsigned char *dst
       }
 
       unsigned char *d = drow + static_cast<size_t>(x) * 4;
-      if (alpha > 0.0001f) {
-        d[0] = static_cast<unsigned char>(std::min(255.0f, r / alpha));
-        d[1] = static_cast<unsigned char>(std::min(255.0f, g / alpha));
-        d[2] = static_cast<unsigned char>(std::min(255.0f, b / alpha));
-        d[3] = static_cast<unsigned char>(std::min(255.0f, alpha * 255.0f));
+      // MihonSY fix: the Lanczos kernel has negative lobes, so the weighted sum of
+      // alpha (and thus the divisor) can be <= 0 even for fully opaque images.
+      // That made every pixel fall into the black branch -> black screen.
+      // Clamp the divisor, and if the summed coverage is still ~0 keep the pixel
+      // transparent (alpha 0) rather than writing opaque black RGB.
+      const float alphaSum = std::max(0.0f, alpha);
+      if (alphaSum > 0.0001f) {
+        const float inv = 1.0f / alphaSum;
+        d[0] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, r * inv)));
+        d[1] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, g * inv)));
+        d[2] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, b * inv)));
+        d[3] = static_cast<unsigned char>(std::min(255.0f, alphaSum * 255.0f));
       } else {
+        // Zero coverage: transparent black (alpha 0). Do NOT write opaque black.
         d[0] = d[1] = d[2] = d[3] = 0;
       }
     }
@@ -122,5 +130,26 @@ Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeLanczosProcess(
 
   AndroidBitmap_unlockPixels(env, bitmap);
   AndroidBitmap_unlockPixels(env, outBitmap);
+
+  // MihonSY defensive check: if the resampler produced an all-transparent/all-black
+  // image (e.g. pixel buffers were not actually accessible), fall back to the
+  // original instead of showing a black frame.
+  if (outPixels != nullptr) {
+    const auto *px = static_cast<const unsigned char *>(outPixels);
+    const size_t total = static_cast<size_t>(dw) * dh * 4;
+    size_t nonZero = 0;
+    const size_t step = std::max<size_t>(1, total / 256);
+    for (size_t k = 0; k < total && nonZero < 8; k += step) {
+      if (px[k] != 0) ++nonZero;
+    }
+    if (nonZero == 0) {
+      LOGE("Lanczos3 output is all-zero, returning original bitmap");
+      jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
+      jmethodID recycleMethod = env->GetMethodID(bitmapClass, "recycle", "()V");
+      env->CallVoidMethod(outBitmap, recycleMethod);
+      return bitmap;
+    }
+  }
+
   return outBitmap;
 }

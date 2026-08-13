@@ -139,6 +139,10 @@ object MihonSyEnhancer {
      */
     fun enhance(input: Bitmap, preferences: ReaderPreferences = Injekt.get()): Bitmap? {
         if (input.isRecycled) return null
+        // MihonSY: never enhance hardware bitmaps — reading their pixels is unreliable
+        // (can produce all-black frames on some devices). Decode-time enhancement runs
+        // on software bitmaps, so a HARDWARE input simply skips enhancement.
+        if (input.config == Bitmap.Config.HARDWARE) return null
 
         // Single selector: 0 = Off, 1 = Anime4K, 2 = Lanczos3. Only one algorithm runs,
         // so there is never a question of which one takes priority.
@@ -169,14 +173,14 @@ object MihonSyEnhancer {
 
     /** Returns [input] if it is already a mutable ARGB_8888 bitmap, otherwise a copy. */
     private fun ensureArgb(input: Bitmap): Bitmap? {
-        // Hardware bitmaps cannot be copied directly; go through a software pixel read.
-        if (input.config == Bitmap.Config.HARDWARE) {
-            return input.copy(Bitmap.Config.ARGB_8888, true)
-        }
         return if (input.config == Bitmap.Config.ARGB_8888 && input.isMutable) {
             input
         } else {
-            input.copy(Bitmap.Config.ARGB_8888, true)
+            // Draw into a fresh ARGB_8888 bitmap via Canvas — more reliable than
+            // Bitmap.copy() for non-mutable sources and never produces a black frame.
+            val out = Bitmap.createBitmap(input.width, input.height, Bitmap.Config.ARGB_8888)
+            android.graphics.Canvas(out).drawBitmap(input, 0f, 0f, null)
+            out
         }
     }
 }
