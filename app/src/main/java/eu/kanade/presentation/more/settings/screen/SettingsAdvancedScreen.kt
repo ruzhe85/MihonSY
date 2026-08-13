@@ -432,11 +432,9 @@ object SettingsAdvancedScreen : SearchableSettings {
                     enabled = !ImageUtil.HARDWARE_BITMAP_UNSUPPORTED &&
                         GLUtil.DEVICE_TEXTURE_LIMIT > GLUtil.SAFE_TEXTURE_LIMIT,
                 ),
-                Preference.PreferenceItem.SwitchPreference(
-                    preference = basePreferences.alwaysDecodeLongStripWithSSIV,
-                    title = stringResource(MR.strings.pref_always_decode_long_strip_with_ssiv_2),
-                    subtitle = stringResource(MR.strings.pref_always_decode_long_strip_with_ssiv_summary),
-                ),
+                // MihonSY: the "always decode long strips with SSIV" option is removed —
+                // every mode now decodes through Coil so image enhancement applies
+                // everywhere, and the direct-decode path no longer exists.
                 Preference.PreferenceItem.TextPreference(
                     title = stringResource(MR.strings.pref_display_profile),
                     subtitle = basePreferences.displayProfile.get(),

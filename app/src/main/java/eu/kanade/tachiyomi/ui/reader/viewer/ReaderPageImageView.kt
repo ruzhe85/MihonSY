@@ -34,7 +34,6 @@ import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.EASE_IN_OUT
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.EASE_OUT_QUAD
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.SCALE_TYPE_CENTER_INSIDE
 import com.github.chrisbanes.photoview.PhotoView
-import eu.kanade.domain.base.BasePreferences
 import eu.kanade.tachiyomi.data.coil.cropBorders
 import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonSubsamplingImageView
@@ -63,9 +62,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
     private val isWebtoon: Boolean = false,
 ) : FrameLayout(context, attrs, defStyleAttrs, defStyleRes) {
 
-    private val alwaysDecodeLongStripWithSSIV by lazy {
-        Injekt.get<BasePreferences>().alwaysDecodeLongStripWithSSIV.get()
-    }
+    // MihonSY: the alwaysDecodeLongStripWithSSIV preference no longer gates the decode
+    // path — every mode decodes through Coil into a software bitmap so image
+    // enhancement applies everywhere.
 
     private var pageView: View? = null
 
@@ -202,7 +201,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
     private fun maybeEnhance(original: Bitmap) {
         val preferences = Injekt.get<ReaderPreferences>()
         if (preferences.enhancementMode.get() == 0) return
-        if (original.isRecycled || original.config != Bitmap.Config.ARGB_8888) return
+        if (original.isRecycled) return
 
         val generation = ++enhanceGeneration
         MihonSyEnhancer.submit(
@@ -345,14 +344,12 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 isVisible = true
                 maybeEnhance(data.bitmap)
             }
+            // MihonSY: every mode (pager, webtoon, long-strip direct decode) now goes
+            // through Coil into a software Bitmap so image enhancement can apply
+            // everywhere. Coil's ViewSizeResolver + INEXACT precision samples huge
+            // images down to the view size, keeping memory usage safe even for very
+            // long webtoon strips, and SSIV tiles the resulting bitmap for zooming.
             is BufferedSource -> {
-                if (!isWebtoon || alwaysDecodeLongStripWithSSIV) {
-                    setHardwareConfig(ImageUtil.canUseHardwareBitmap(data))
-                    setImage(ImageSource.inputStream(data.inputStream()))
-                    isVisible = true
-                    return@apply
-                }
-
                 ImageRequest.Builder(context)
                     .data(data)
                     .memoryCachePolicy(CachePolicy.DISABLED)

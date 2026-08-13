@@ -118,7 +118,6 @@ object MihonSyEnhancer {
      */
     fun enhance(input: Bitmap, preferences: ReaderPreferences = Injekt.get()): Bitmap? {
         if (input.isRecycled) return null
-        if (input.config != Bitmap.Config.ARGB_8888) return null
 
         // Single selector: 0 = Off, 1 = Anime4K, 2 = Lanczos3. Only one algorithm runs,
         // so there is never a question of which one takes priority.
@@ -149,6 +148,10 @@ object MihonSyEnhancer {
 
     /** Returns [input] if it is already a mutable ARGB_8888 bitmap, otherwise a copy. */
     private fun ensureArgb(input: Bitmap): Bitmap? {
+        // Hardware bitmaps cannot be copied directly; go through a software pixel read.
+        if (input.config == Bitmap.Config.HARDWARE) {
+            return input.copy(Bitmap.Config.ARGB_8888, true)
+        }
         return if (input.config == Bitmap.Config.ARGB_8888 && input.isMutable) {
             input
         } else {
