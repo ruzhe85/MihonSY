@@ -116,6 +116,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     open fun onPageSelected(forward: Boolean) {
+        // MihonSY: this page is now the visible one — show the enhancement OK badge
+        // (it was suppressed during background pre-load; now the user can actually see it).
+        showEnhancementDoneBadge()
         with(pageView as? SubsamplingScaleImageView) {
             if (this == null) return
             if (isReady) {
@@ -257,12 +260,15 @@ open class ReaderPageImageView @JvmOverloads constructor(
     private fun showEnhancementDoneBadge() {
         val preferences = Injekt.get<ReaderPreferences>()
         if (preferences.enhancementMode.get() == 0 || !preferences.showEnhancementStatus.get()) return
+        // MihonSY: only claim enhancement if the decoder actually ran it — the decoder
+        // skips enhancement when the page identity is missing (-1).
+        if (enhanceMangaId == -1L || enhanceChapterId == -1L || enhancePageIndex == -1) return
         val tv = ensureEnhanceStatusView()
         tv.text = "OK"
         tv.visibility = View.VISIBLE
-        // MihonSY: keep the badge visible until the page changes (setImage hides it),
-        // so it is still there when the user actually swipes to this page. Previously
-        // it auto-hid after 1.5s, which fired before the page became visible.
+        // MihonSY: badge stays visible until setImage hides it (page change). It is
+        // shown both when the Coil load completes and when the page is selected, so
+        // pre-loaded pages show it exactly when the user swipes to them.
     }
     // MihonSY <--
 

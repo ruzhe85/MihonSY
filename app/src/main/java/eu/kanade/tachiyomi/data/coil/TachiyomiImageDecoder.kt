@@ -193,7 +193,15 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
 
                                 if (!usedCache && !ImageEnhancementCache.isSkipped(mangaId, chapterId, pageIndex, configHash, pageVariant)) {
                                     try {
+                                        logcat(LogPriority.DEBUG) {
+                                            "MihonSY: enhancing page $pageIndex ${bitmap.width}x${bitmap.height} " +
+                                                "config=${bitmap.config} mutable=${bitmap.isMutable} mode=$enhancementMode"
+                                        }
                                         val enhanced = MihonSyEnhancer.enhance(bitmap, preferences)
+                                        logcat(LogPriority.DEBUG) {
+                                            "MihonSY: enhanced page $pageIndex -> ${enhanced?.width}x${enhanced?.height} " +
+                                                "same=${enhanced === bitmap} null=${enhanced == null}"
+                                        }
                                         if (enhanced != null && enhanced !== bitmap) {
                                             val finalBitmap = enforceTextureLimit(enhanced)
                                             if (ImageEnhancementCache.isDisplayable(finalBitmap)) {
