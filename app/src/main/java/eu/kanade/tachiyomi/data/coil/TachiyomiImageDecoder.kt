@@ -168,18 +168,24 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                             val chapterId = options.chapterId
                             val pageIndex = options.pageIndex
                             val pageVariant = options.pageVariant
+                            val cacheable = mangaId != -1L && chapterId != -1L && pageIndex != -1
 
-                            if (mangaId != -1L && chapterId != -1L && pageIndex != -1) {
+                            // MihonSY: the disk cache needs a stable page identity, but
+                            // enhancement itself must run even when identity is missing
+                            // (some holders deliver -1). Previously a missing identity
+                            // skipped enhancement entirely — hence "badge always 跳过
+                            // with no enhancing log".
+                            var usedCache = false
+                            var isSkipped = false
+                            var configHash = ""
+                            if (cacheable) {
                                 ImageEnhancementCache.init(context)
-
-                                val configHash = ImageEnhancementCache.getConfigHash(
+                                configHash = ImageEnhancementCache.getConfigHash(
                                     enhancementMode = enhancementMode,
                                     anime4kMode = preferences.anime4kMode.get(),
                                     lanczosScale = preferences.lanczosScale.get(),
                                 )
 
-                                // Check cache first
-                                var usedCache = false
                                 val cachedFile = ImageEnhancementCache.getCachedImage(mangaId, chapterId, pageIndex, configHash, pageVariant)
                                 if (cachedFile != null) {
                                     try {
@@ -197,44 +203,47 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                                         logcat(LogPriority.ERROR, e) { "TachiyomiImageDecoder: Failed to decode cached enhanced image" }
                                     }
                                 }
+                                isSkipped = ImageEnhancementCache.isSkipped(mangaId, chapterId, pageIndex, configHash, pageVariant)
+                            }
 
-                                if (!usedCache && !ImageEnhancementCache.isSkipped(mangaId, chapterId, pageIndex, configHash, pageVariant)) {
-                                    try {
-                                        logcat(LogPriority.DEBUG) {
-                                            "MihonSY: enhancing page $pageIndex ${bitmap.width}x${bitmap.height} " +
-                                                "config=${bitmap.config} mutable=${bitmap.isMutable} mode=$enhancementMode"
-                                        }
-                                        var elapsed = 0L
-                                        val enhanced = MihonSyEnhancer.enhance(bitmap, preferences) { _, ms ->
-                                            elapsed = ms
-                                        }
-                                        logcat(LogPriority.DEBUG) {
-                                            "MihonSY: enhanced page $pageIndex -> ${enhanced?.width}x${enhanced?.height} " +
-                                                "same=${enhanced === bitmap} null=${enhanced == null}"
-                                        }
-                                        // Whether the enhanced bitmap is actually used (passes displayability).
-                                        var applied = false
-                                        if (enhanced != null && enhanced !== bitmap) {
-                                            val finalBitmap = enforceTextureLimit(enhanced)
-                                            if (ImageEnhancementCache.isDisplayable(finalBitmap)) {
+                            if (!usedCache && !isSkipped) {
+                                try {
+                                    logcat(LogPriority.DEBUG) {
+                                        "MihonSY: enhancing page $pageIndex ${bitmap.width}x${bitmap.height} " +
+                                            "config=${bitmap.config} mutable=${bitmap.isMutable} mode=$enhancementMode"
+                                    }
+                                    var elapsed = 0L
+                                    val enhanced = MihonSyEnhancer.enhance(bitmap, preferences) { _, ms ->
+                                        elapsed = ms
+                                    }
+                                    logcat(LogPriority.DEBUG) {
+                                        "MihonSY: enhanced page $pageIndex -> ${enhanced?.width}x${enhanced?.height} " +
+                                            "same=${enhanced === bitmap} null=${enhanced == null}"
+                                    }
+                                    // Whether the enhanced bitmap is actually used (passes displayability).
+                                    var applied = false
+                                    if (enhanced != null && enhanced !== bitmap) {
+                                        val finalBitmap = enforceTextureLimit(enhanced)
+                                        if (ImageEnhancementCache.isDisplayable(finalBitmap)) {
+                                            if (cacheable) {
                                                 ImageEnhancementCache.saveToCache(
                                                     mangaId, chapterId, pageIndex, configHash, finalBitmap, pageVariant,
                                                 )
-                                                bitmap.recycle()
-                                                bitmap = finalBitmap
-                                                applied = true
-                                            } else {
-                                                logcat(LogPriority.ERROR) { "TachiyomiImageDecoder: Page $pageIndex produced a nearly transparent result, keeping original" }
-                                                if (finalBitmap !== bitmap) finalBitmap.recycle()
                                             }
+                                            bitmap.recycle()
+                                            bitmap = finalBitmap
+                                            applied = true
+                                        } else {
+                                            logcat(LogPriority.ERROR) { "TachiyomiImageDecoder: Page $pageIndex produced a nearly transparent result, keeping original" }
+                                            if (finalBitmap !== bitmap) finalBitmap.recycle()
                                         }
-                                        lastEnhancementStats[enhancementKey(mangaId, chapterId, pageIndex)] =
-                                            EnhancementStats(applied, elapsed)
-                                    } catch (e: Exception) {
-                                        logcat(LogPriority.ERROR, e) { "TachiyomiImageDecoder: Failed to enhance image on-the-fly" }
-                                        lastEnhancementStats[enhancementKey(mangaId, chapterId, pageIndex)] =
-                                            EnhancementStats(false, 0L)
                                     }
+                                    lastEnhancementStats[enhancementKey(mangaId, chapterId, pageIndex)] =
+                                        EnhancementStats(applied, elapsed)
+                                } catch (e: Exception) {
+                                    logcat(LogPriority.ERROR, e) { "TachiyomiImageDecoder: Failed to enhance image on-the-fly" }
+                                    lastEnhancementStats[enhancementKey(mangaId, chapterId, pageIndex)] =
+                                        EnhancementStats(false, 0L)
                                 }
                             }
                         }
