@@ -13,15 +13,20 @@ import coil3.fetch.SourceFetchResult
 import coil3.request.Options
 import coil3.request.bitmapConfig
 import com.hippo.unifile.UniFile
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.util.MihonSyEnhancer
 import eu.kanade.tachiyomi.util.storage.CbzCrypto
 import eu.kanade.tachiyomi.util.storage.CbzCrypto.getCoverStream
+import logcat.LogPriority
 import mihon.core.common.archive.archiveReader
 import okio.BufferedSource
 import tachiyomi.core.common.util.system.ImageUtil
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.decoder.ImageDecoder
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.BufferedInputStream
+import kotlin.math.min
 
 /**
  * A [Decoder] that uses built-in [ImageDecoder] to decode images that is not supported by the system.
@@ -54,18 +59,57 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         val dstWidth = options.size.widthPx(options.scale) { srcWidth }
         val dstHeight = options.size.heightPx(options.scale) { srcHeight }
 
-        val sampleSize = DecodeUtils.calculateInSampleSize(
-            srcWidth = srcWidth,
-            srcHeight = srcHeight,
-            dstWidth = dstWidth,
-            dstHeight = dstHeight,
-            scale = options.scale,
-        )
+        // MihonSY: when enhancement is enabled, decode at a higher resolution than the
+        // target view size (at most 2x the target, or full size if the image is small)
+        // so the enhancement works on more source detail — enhancing an already
+        // view-size-sampled bitmap yields no visible quality gain. Memory is capped by
+        // the 2x bound; long-strip webtoons are still downsampled from absurd sizes.
+        val sampleSize = if (options.enhanced && dstWidth > 0 && dstHeight > 0) {
+            val enhanceDstWidth = min(dstWidth * 2, MAX_ENHANCE_SOURCE_DIMENSION)
+            val enhanceDstHeight = min(dstHeight * 2, MAX_ENHANCE_SOURCE_DIMENSION)
+            DecodeUtils.calculateInSampleSize(
+                srcWidth = srcWidth,
+                srcHeight = srcHeight,
+                dstWidth = enhanceDstWidth,
+                dstHeight = enhanceDstHeight,
+                scale = options.scale,
+            )
+        } else {
+            DecodeUtils.calculateInSampleSize(
+                srcWidth = srcWidth,
+                srcHeight = srcHeight,
+                dstWidth = dstWidth,
+                dstHeight = dstHeight,
+                scale = options.scale,
+            )
+        }
 
         var bitmap = decoder.decode(sampleSize = sampleSize)
         decoder.recycle()
 
         check(bitmap != null) { "Failed to decode image" }
+
+        // MihonSY: on-the-fly image enhancement. Runs at the higher decoded resolution
+        // so enhancement quality is not degraded by Coil's view-size sampling. The
+        // enhanced bitmap replaces the original and is cached by Coil like any other
+        // decoded image, which also makes scrolling back to a page cheap.
+        if (options.enhanced && bitmap.isRecycled.not()) {
+            val enhanced = try {
+                val prefs = Injekt.get<ReaderPreferences>()
+                if (prefs.enhancementMode.get() != 0) {
+                    MihonSyEnhancer.enhance(bitmap, prefs)
+                } else {
+                    null
+                }
+            } catch (e: Exception) {
+                logcat(LogPriority.WARN, e) { "On-the-fly enhancement failed" }
+                null
+            }
+            if (enhanced != null && enhanced !== bitmap) {
+                bitmap.recycle()
+                bitmap = enhanced
+            }
+        }
 
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
@@ -118,5 +162,9 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
 
     companion object {
         var displayProfile: ByteArray? = null
+
+        // MihonSY: cap the resolution used for on-the-fly enhancement (long edge).
+        // Keeps memory bounded while still providing ~2x the view size of source detail.
+        const val MAX_ENHANCE_SOURCE_DIMENSION = 2048
     }
 }

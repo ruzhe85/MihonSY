@@ -42,3 +42,15 @@ val Options.customDecoder: Boolean
     get() = getExtra(customDecoderKey)
 
 private val customDecoderKey = Extras.Key(default = false)
+
+// MihonSY: signal the decoder to run image enhancement (Anime4K / Lanczos3)
+// on-the-fly while decoding, so enhancement works at original resolution and is
+// cached by Coil like any other decoded image.
+fun ImageRequest.Builder.enhanced(enable: Boolean) = apply {
+    extras[enhancedKey] = enable
+}
+
+val Options.enhanced: Boolean
+    get() = getExtra(enhancedKey)
+
+private val enhancedKey = Extras.Key(default = false)

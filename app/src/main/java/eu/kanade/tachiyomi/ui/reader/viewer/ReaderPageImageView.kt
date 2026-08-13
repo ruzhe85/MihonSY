@@ -39,9 +39,9 @@ import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.SCALE_TYPE_
 import com.github.chrisbanes.photoview.PhotoView
 import eu.kanade.tachiyomi.data.coil.cropBorders
 import eu.kanade.tachiyomi.data.coil.customDecoder
+import eu.kanade.tachiyomi.data.coil.enhanced
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonSubsamplingImageView
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import eu.kanade.tachiyomi.util.MihonSyEnhancer
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.view.isVisibleOnScreen
 import okio.BufferedSource
@@ -162,7 +162,6 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     fun setImage(drawable: Drawable, config: Config) {
         this.config = config
-        enhanceGeneration++
         // MihonSY: hide any leftover enhancement status from the previous image.
         enhanceStatusView?.visibility = View.GONE
         if (drawable is Animatable) {
@@ -176,7 +175,6 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     fun setImage(source: BufferedSource, isAnimated: Boolean, config: Config) {
         this.config = config
-        enhanceGeneration++
         // MihonSY: hide any leftover enhancement status from the previous image.
         enhanceStatusView?.visibility = View.GONE
         if (isAnimated) {
@@ -197,13 +195,11 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     // MihonSY -->
-    /** Monotonic counter used to discard enhancement results that belong to an older image. */
-    private var enhanceGeneration = 0L
 
     /**
      * MihonSY: small overlay at the bottom-left showing the image enhancement state.
-     * Shows a percentage while enhancing, "OK" when finished, hidden when disabled.
-     * Created lazily so it does not exist on images that are never enhanced.
+     * Shows "OK" briefly when the enhanced image has been applied, hidden otherwise.
+     * Created lazily and only when the "show enhancement status" toggle is on.
      */
     private var enhanceStatusView: TextView? = null
 
@@ -211,10 +207,11 @@ open class ReaderPageImageView @JvmOverloads constructor(
         enhanceStatusView?.let { return it }
         val tv = TextView(context).apply {
             textSize = 11f
-            setTextColor(0xFF000000.toInt())
-            alpha = 0.7f
+            setTextColor(0xFFFFFFFF.toInt()) // white text
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            alpha = 1f
             background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0x55FFFFFF.toInt())
+                setColor(0x99000000.toInt()) // dark translucent background for contrast on white pages
                 cornerRadius = dpToPx(4f).toFloat()
             }
             setPadding(dpToPx(6f), dpToPx(2f), dpToPx(6f), dpToPx(2f))
@@ -236,53 +233,17 @@ open class ReaderPageImageView @JvmOverloads constructor(
     private fun dpToPx(dp: Float): Int = (dp * resources.displayMetrics.density).toInt()
 
     /**
-     * Runs MihonSY image enhancement (Anime4K GPU shaders or Lanczos3) on the decoded bitmap
-     * in the background, then swaps the enhanced bitmap into the view if the image is still
-     * current. The original is shown immediately, enhancement upgrades it in place.
-     *
-     * A small bottom-left overlay shows a real stopwatch (elapsed seconds) while
-     * enhancing, then "OK" when done — so the user can observe performance.
-     * The overlay only appears when BOTH image enhancement is enabled AND the
-     * "show enhancement status" toggle is on.
+     * MihonSY: shows the "OK" badge briefly after an enhanced image is displayed.
+     * Enhancement itself happens synchronously inside the Coil decoder; this only
+     * reports that it applied. No-op unless the "show enhancement status" toggle is on.
      */
-    private fun maybeEnhance(original: Bitmap) {
+    private fun showEnhancementDoneBadge() {
         val preferences = Injekt.get<ReaderPreferences>()
-        if (preferences.enhancementMode.get() == 0) return
-        if (original.isRecycled) return
-
-        val generation = ++enhanceGeneration
-        val showStatus = preferences.showEnhancementStatus.get()
-        val statusView = if (showStatus) ensureEnhanceStatusView() else null
-        statusView?.visibility = View.VISIBLE
-        MihonSyEnhancer.submit(
-            block = { MihonSyEnhancer.enhance(original) },
-            onProgress = { elapsedMillis ->
-                if (generation == enhanceGeneration && statusView != null) {
-                    // Real stopwatch: show elapsed seconds while enhancing.
-                    statusView.text = String.format(java.util.Locale.US, "%.1fs", elapsedMillis / 1000f)
-                }
-            },
-            onResult = { enhanced ->
-                if (generation != enhanceGeneration || !isVisible || enhanced.isRecycled) {
-                    enhanced.recycle()
-                    return@submit
-                }
-                statusView?.let { tv ->
-                    tv.text = "OK"
-                    // Hide shortly after finishing so it does not linger on the page.
-                    tv.postDelayed({ tv.visibility = View.GONE }, 1500)
-                }
-                (pageView as? SubsamplingScaleImageView)?.let { view ->
-                    view.recycle()
-                    view.setImage(ImageSource.bitmap(enhanced))
-                }
-            },
-            onError = {
-                if (generation == enhanceGeneration) {
-                    statusView?.visibility = View.GONE
-                }
-            },
-        )
+        if (preferences.enhancementMode.get() == 0 || !preferences.showEnhancementStatus.get()) return
+        val tv = ensureEnhanceStatusView()
+        tv.text = "OK"
+        tv.visibility = View.VISIBLE
+        tv.postDelayed({ tv.visibility = View.GONE }, 1500)
     }
     // MihonSY <--
 
@@ -408,13 +369,11 @@ open class ReaderPageImageView @JvmOverloads constructor(
             is BitmapDrawable -> {
                 setImage(ImageSource.bitmap(data.bitmap))
                 isVisible = true
-                maybeEnhance(data.bitmap)
             }
             // MihonSY: when image enhancement is disabled, keep the original SSIV
             // direct-decode path (streaming the full-resolution image in tiles, best
             // quality for zooming). When enhancement is enabled, decode through Coil
-            // into a software bitmap instead so enhance() can process it — Coil's
-            // ViewSizeResolver + INEXACT samples huge images for memory safety.
+            // and enhance on-the-fly inside the decoder at original resolution.
             is BufferedSource -> {
                 val enhancementEnabled = Injekt.get<ReaderPreferences>().enhancementMode.get() != 0
                 if (!enhancementEnabled) {
@@ -428,12 +387,15 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .data(data)
                     .memoryCachePolicy(CachePolicy.DISABLED)
                     .diskCachePolicy(CachePolicy.DISABLED)
+                    .enhanced(true)
                     .target(
                         onSuccess = { result ->
                             val image = result as BitmapImage
                             setImage(ImageSource.bitmap(image.bitmap))
                             isVisible = true
-                            maybeEnhance(image.bitmap)
+                            // MihonSY: enhancement already applied inside the decoder;
+                            // briefly show the OK badge if the status toggle is on.
+                            showEnhancementDoneBadge()
                         },
                     )
                     .listener(
