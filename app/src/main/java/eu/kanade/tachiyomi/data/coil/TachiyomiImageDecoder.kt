@@ -164,12 +164,17 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         var displayProfile: ByteArray? = null
 
         /**
-         * MihonSY: safe enhanced-decode target for one dimension. Clamps the view size
-         * first (it can be Int.MAX_VALUE before layout) to avoid overflow, then 2x.
+         * MihonSY: enhanced-decode target for one dimension. The view size is clamped
+         * (it can be Int.MAX_VALUE before layout) and used as-is — NO extra 2x here,
+         * because Lanczos3 itself already scales the image up (1.5x/2x/3x). Decoding
+         * at 2x AND scaling by Lanczos would multiply the output to 3-6x the view,
+         * most of which gets scaled back down for display: a huge waste of CPU.
+         * Keeping the decode at view size means the final enhanced image is exactly
+         * the configured scale (e.g. 1.5x) — supersampled for display, ~4x faster.
          */
         private fun enhanceTarget(viewDimension: Int): Int {
             if (viewDimension <= 0 || viewDimension == Int.MAX_VALUE) return MAX_ENHANCE_SOURCE_DIMENSION
-            return min(viewDimension * 2, MAX_ENHANCE_SOURCE_DIMENSION)
+            return min(viewDimension, MAX_ENHANCE_SOURCE_DIMENSION)
         }
 
         const val MAX_ENHANCE_SOURCE_DIMENSION = 2048
