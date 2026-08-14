@@ -434,6 +434,23 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
   // Read back final result
   glReadPixels(0, 0, curr_w, curr_h, GL_RGBA, GL_UNSIGNED_BYTE, out_pixels);
 
+  // MihonSY debug: sample average RGB of the output to detect channel
+  // corruption (e.g. greenish cast = G channel biased).
+  if (curr_w * curr_h > 0) {
+    const size_t total = static_cast<size_t>(curr_w) * curr_h;
+    const size_t step = (total > 20000) ? (total / 20000) : 1;
+    unsigned long long sr = 0, sg = 0, sb = 0, cnt = 0;
+    for (size_t i = 0; i < total * 4; i += step * 4) {
+      sr += out_pixels[i];
+      sg += out_pixels[i + 1];
+      sb += out_pixels[i + 2];
+      cnt++;
+    }
+    ANIME4K_LOGD("Output %dx%d avg RGB: R=%llu G=%llu B=%llu (n=%llu)",
+                 curr_w, curr_h, cnt ? sr / cnt : 0, cnt ? sg / cnt : 0,
+                 cnt ? sb / cnt : 0, cnt);
+  }
+
   glDeleteFramebuffers(1, &fbo);
 
   // MihonSY fix: detach the context again so the next call (possibly on a
