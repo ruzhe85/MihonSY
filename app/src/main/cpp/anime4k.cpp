@@ -151,6 +151,16 @@ int Anime4K::load(const std::vector<std::string> &shaders,
   if (!init_egl())
     return -1;
 
+  // MihonSY fix: init_egl() detaches the context after setup so other threads
+  // can rebind it. But compiling shaders below needs a CURRENT context — with
+  // none bound, glCreateShader/glCompileShader fail silently (len-0 info log)
+  // and every pass gets skipped. Rebinding here lets all shaders compile.
+  eglReleaseThread();
+  if (!eglMakeCurrent(display, surface, surface, context)) {
+    ANIME4K_LOGE("Failed to make EGL context current for shader compile");
+    return -1;
+  }
+
   for (size_t i = 0; i < shaders.size(); ++i) {
     const std::string &src = shaders[i];
     std::stringstream ss(src);
@@ -237,6 +247,9 @@ int Anime4K::load(const std::vector<std::string> &shaders,
     ANIME4K_LOGD("Loaded pass: %s -> %s (Scale %.1fx)", pass.desc.c_str(),
                  pass.save_target.c_str(), pass.scale_x);
   }
+
+  // Detach again so the context is free for whichever thread runs process().
+  eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
   return 0;
 }
 
