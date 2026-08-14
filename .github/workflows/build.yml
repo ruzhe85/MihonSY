@@ -53,27 +53,12 @@ jobs:
           ls -la app/build/outputs/apk/release/
           $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs app/build/outputs/apk/release/app-arm64-v8a-release.apk | head -5
 
-      # MihonSY: rename APKs to mihonsy-{version}-{abi}.apk before uploading so the
-      # artifact is as readable as a release (arm64-v8a / armeabi-v7a / x86 / x86_64 / universal).
-      - name: Rename APKs for artifact
-        run: |
-          set -e
-          APK_DIR=app/build/outputs/apk/release
-          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
-          cd "$APK_DIR"
-          for apk in *.apk; do
-            abi=$(echo "$apk" | sed -E 's/^app-(.+)-release\.apk$/\1/')
-            [ "$abi" = "$apk" ] && abi=universal
-            mv "$apk" "mihonsy-${VERSION_NAME}-${abi}.apk"
-          done
-          ls -la
-
       - name: Upload APKs (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: mihonsy-apk
           path: |
-            app/build/outputs/apk/release/mihonsy-*.apk
+            app/build/outputs/apk/release/*.apk
           retention-days: 30
 
       # MihonSY: automatically publish a GitHub Release with the built APKs.
@@ -95,11 +80,8 @@ jobs:
           echo "versionName=$VERSION_NAME versionCode=$VERSION_CODE"
 
           # Rename APKs to mihonsy-{x.y.z}-{abi}.apk (full version name).
-          # Only touch the original app-*-release.apk files — the artifact step
-          # already renamed them, and re-running this on mihonsy-* files would
-          # error ('mv: same file').
           cd "$APK_DIR"
-          for apk in app-*-release.apk; do
+          for apk in *.apk; do
             abi=$(echo "$apk" | sed -E 's/^app-(.+)-release\.apk$/\1/')
             [ "$abi" = "$apk" ] && abi=universal
             mv "$apk" "mihonsy-${VERSION_NAME}-${abi}.apk"
