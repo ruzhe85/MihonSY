@@ -98,8 +98,10 @@ internal class ArchivePageLoader(private val reader: ArchiveReader) : PageLoader
                     // for the enhancement decoder.
                     stream = {
                         imageBytes?.copyOf()?.inputStream()
-                            ?: mutex.withLock {
-                                reader.getInputStream(entry.name)!!.buffered().use { it.readBytes() }
+                            ?: runBlocking {
+                                mutex.withLock {
+                                    reader.getInputStream(entry.name)!!.buffered().use { it.readBytes() }
+                                }
                             }.inputStream()
                     }
                     // SY <--
