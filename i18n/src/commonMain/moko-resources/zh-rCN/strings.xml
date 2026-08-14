@@ -345,7 +345,7 @@
     <string name="pref_webtoon_original_resolution">原始分辨率</string>
     <string name="pref_image_enhancement_group">图像增强</string>
     <string name="pref_enhancement_mode">增强算法</string>
-    <string name="pref_enhancement_mode_summary">Lanczos3 增强，所有阅读模式与图片尺寸均生效，首图处理需数秒。</string>
+    <string name="pref_enhancement_mode_summary">Lanczos3 首图进入黑屏，增强完成后正常显示。</string>
     <string name="enhancement_off">关闭</string>
     <string name="enhancement_anime4k">Anime4K</string>
     <string name="enhancement_lanczos3">Lanczos3</string>

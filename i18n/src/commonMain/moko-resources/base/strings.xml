@@ -500,7 +500,7 @@
     <string name="pref_webtoon_original_resolution">Original resolution</string>
     <string name="pref_image_enhancement_group">Image enhancement</string>
     <string name="pref_enhancement_mode">Enhancement algorithm</string>
-    <string name="pref_enhancement_mode_summary">Lanczos3 enhancement, applies to all reading modes and image sizes; the first image takes a few seconds.</string>
+    <string name="pref_enhancement_mode_summary">Lanczos3: the first image shows black until enhancement completes, then displays normally.</string>
     <string name="enhancement_off">Off</string>
     <string name="enhancement_anime4k">Anime4K</string>
     <string name="enhancement_lanczos3">Lanczos3</string>
