@@ -122,6 +122,10 @@ object MihonSyEnhancer {
                 handler.removeCallbacks(ticker)
                 if (result != null) {
                     handler.post { onResult(result) }
+                } else {
+                    // MihonSY: a null result (enhancement failed/skipped) still needs
+                    // to be surfaced so the reader badge can report 跳过.
+                    handler.post { onError(NoEnhancementException()) }
                 }
             } catch (e: Exception) {
                 handler.removeCallbacks(ticker)
@@ -209,3 +213,9 @@ object MihonSyEnhancer {
         return copied
     }
 }
+
+/**
+ * MihonSY: thrown when enhancement produced no bitmap (failed or skipped), so the
+ * submit() flow can surface a non-success outcome to the reader badge.
+ */
+class NoEnhancementException : Exception("Enhancement produced no result")

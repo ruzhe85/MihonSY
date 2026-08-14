@@ -37,15 +37,11 @@ import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.EASE_IN_OUT
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.EASE_OUT_QUAD
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.SCALE_TYPE_CENTER_INSIDE
 import com.github.chrisbanes.photoview.PhotoView
-import eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder
 import eu.kanade.tachiyomi.data.coil.cropBorders
 import eu.kanade.tachiyomi.data.coil.customDecoder
-import eu.kanade.tachiyomi.data.coil.enhanced
-import eu.kanade.tachiyomi.data.coil.mangaId
-import eu.kanade.tachiyomi.data.coil.chapterId
-import eu.kanade.tachiyomi.data.coil.pageIndex
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonSubsamplingImageView
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.util.MihonSyEnhancer
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.view.isVisibleOnScreen
 import okio.BufferedSource
@@ -117,9 +113,6 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     open fun onPageSelected(forward: Boolean) {
-        // MihonSY: this page is now the visible one — show the enhancement OK badge
-        // (it was suppressed during background pre-load; now the user can actually see it).
-        showEnhancementDoneBadge()
         with(pageView as? SubsamplingScaleImageView) {
             if (this == null) return
             if (isReady) {
@@ -169,6 +162,8 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     fun setImage(drawable: Drawable, config: Config) {
         this.config = config
+        // MihonSY: invalidate any in-flight enhancement from the previous image.
+        enhanceGeneration++
         // MihonSY: hide any leftover enhancement status from the previous image.
         enhanceStatusView?.visibility = View.GONE
         if (drawable is Animatable) {
@@ -182,6 +177,8 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     fun setImage(source: BufferedSource, isAnimated: Boolean, config: Config) {
         this.config = config
+        // MihonSY: invalidate any in-flight enhancement from the previous image.
+        enhanceGeneration++
         // MihonSY: hide any leftover enhancement status from the previous image.
         enhanceStatusView?.visibility = View.GONE
         if (isAnimated) {
@@ -202,28 +199,12 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     // MihonSY -->
-
-    /**
-     * MihonSY: page identity used as the disk-cache key for enhanced images.
-     * Set by the page holder before loading; -1 values disable the disk cache.
-     */
-    private var enhanceMangaId: Long = -1L
-    private var enhanceChapterId: Long = -1L
-    private var enhancePageIndex: Int = -1
-
-    fun setEnhanceIdentity(mangaId: Long, chapterId: Long, pageIndex: Int) {
-        // Clear the previous page's stats so a stale outcome never leaks onto the new page.
-        if (enhanceMangaId != -1L && enhanceChapterId != -1L && enhancePageIndex != -1) {
-            TachiyomiImageDecoder.clearEnhancementStats(enhanceMangaId, enhanceChapterId, enhancePageIndex)
-        }
-        enhanceMangaId = mangaId
-        enhanceChapterId = chapterId
-        enhancePageIndex = pageIndex
-    }
+    /** Monotonic counter used to discard stale enhancement results after page changes. */
+    private var enhanceGeneration = 0L
 
     /**
      * MihonSY: small overlay at the bottom-left showing the image enhancement state.
-     * Shows "OK" briefly when the enhanced image has been applied, hidden otherwise.
+     * Shows the real outcome (elapsed time on success, 跳过 on failure).
      * Created lazily and only when the "show enhancement status" toggle is on.
      */
     private var enhanceStatusView: TextView? = null
@@ -258,29 +239,87 @@ open class ReaderPageImageView @JvmOverloads constructor(
     private fun dpToPx(dp: Float): Int = (dp * resources.displayMetrics.density).toInt()
 
     /**
-     * MihonSY: shows the "OK" badge briefly after an enhanced image is displayed.
-     * Enhancement itself happens synchronously inside the Coil decoder; this only
-     * reports that it applied. No-op unless the "show enhancement status" toggle is on.
+     * MihonSY: shows the enhancement outcome badge. Success shows the real elapsed
+     * time; failure/skip shows 跳过. No-op unless enhancement is on AND the status
+     * toggle is on.
      */
-    private fun showEnhancementDoneBadge() {
+    private fun showEnhancementOutcome(success: Boolean, elapsedMillis: Long) {
         val preferences = Injekt.get<ReaderPreferences>()
         if (preferences.enhancementMode.get() == 0 || !preferences.showEnhancementStatus.get()) return
-        // MihonSY: only claim enhancement if the decoder actually ran it — the decoder
-        // skips enhancement when the page identity is missing (-1).
-        if (enhanceMangaId == -1L || enhanceChapterId == -1L || enhancePageIndex == -1) return
-        // MihonSY: show the real outcome — success with elapsed time, or a skip/失败
-        // marker — instead of an unconditional OK that lies when enhancement failed.
-        val stats = TachiyomiImageDecoder.peekEnhancementStats(enhanceMangaId, enhanceChapterId, enhancePageIndex)
         val tv = ensureEnhanceStatusView()
-        tv.text = if (stats?.enhanced == true) {
-            String.format(java.util.Locale.US, "OK %.1fs", stats.elapsedMillis / 1000f)
+        tv.text = if (success) {
+            String.format(java.util.Locale.US, "OK %.1fs", elapsedMillis / 1000f)
         } else {
             "跳过"
         }
         tv.visibility = View.VISIBLE
-        // MihonSY: badge stays visible until setImage hides it (page change). It is
-        // shown both when the Coil load completes and when the page is selected, so
-        // pre-loaded pages show it exactly when the user swipes to them.
+    }
+
+    /**
+     * MihonSY: asynchronously enhances the page image (Lanczos3) without blocking the
+     * reader — the original is already displayed at full resolution. The enhanced
+     * bitmap replaces the original in place when ready. Any failure leaves the
+     * original and reports 跳过 via the badge.
+     */
+    private fun maybeEnhanceAsync(bytes: ByteArray) {
+        val preferences = Injekt.get<ReaderPreferences>()
+        val mode = preferences.enhancementMode.get()
+        if (mode == 0) return
+        val generation = ++enhanceGeneration
+        val statusView = if (preferences.showEnhancementStatus.get()) ensureEnhanceStatusView() else null
+        val startTime = android.os.SystemClock.uptimeMillis()
+
+        // Decode the source into a mutable ARGB bitmap on the background thread.
+        MihonSyEnhancer.submit(
+            block = {
+                val opts = android.graphics.BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                    inDither = false
+                }
+                val original = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return@submit null
+                // Cap memory for huge webtoon strips: sample down to a sane long edge.
+                val maxDim = 4096
+                val sampled = if (original.width > maxDim || original.height > maxDim) {
+                    val ratio = maxDim.toFloat() / maxOf(original.width, original.height)
+                    val scaled = Bitmap.createScaledBitmap(
+                        original,
+                        (original.width * ratio).toInt().coerceAtLeast(1),
+                        (original.height * ratio).toInt().coerceAtLeast(1),
+                        true,
+                    )
+                    if (scaled !== original) original.recycle()
+                    scaled
+                } else {
+                    original
+                }
+                MihonSyEnhancer.enhance(sampled, preferences)
+            },
+            onProgress = { elapsedMillis ->
+                if (generation == enhanceGeneration && statusView != null) {
+                    statusView.text = String.format(java.util.Locale.US, "%.1fs", elapsedMillis / 1000f)
+                    statusView.visibility = View.VISIBLE
+                }
+            },
+            onResult = { enhanced ->
+                val elapsed = android.os.SystemClock.uptimeMillis() - startTime
+                if (generation != enhanceGeneration || enhanced.isRecycled || !isVisibleOnScreen()) {
+                    enhanced.recycle()
+                    return@submit
+                }
+                (pageView as? SubsamplingScaleImageView)?.let { view ->
+                    view.recycle()
+                    view.setImage(ImageSource.bitmap(enhanced))
+                    isVisible = true
+                }
+                showEnhancementOutcome(success = true, elapsedMillis = elapsed)
+            },
+            onError = {
+                val elapsed = android.os.SystemClock.uptimeMillis() - startTime
+                if (generation == enhanceGeneration) {
+                    showEnhancementOutcome(success = false, elapsedMillis = elapsed)
+                }
+            },
+        )
     }
     // MihonSY <--
 
@@ -407,49 +446,29 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 setImage(ImageSource.bitmap(data.bitmap))
                 isVisible = true
             }
-            // MihonSY: when image enhancement is disabled, keep the original SSIV
-            // direct-decode path (streaming the full-resolution image in tiles, best
-            // quality for zooming). When enhancement is enabled, decode through Coil
-            // and enhance on-the-fly inside the decoder at original resolution.
+            // MihonSY: show the original at full resolution immediately, then run the
+            // (lightweight) enhancement asynchronously and swap it in when done. The
+            // original is always shown first so there is never a blank frame.
             is BufferedSource -> {
-                val enhancementEnabled = Injekt.get<ReaderPreferences>().enhancementMode.get() != 0
-                if (!enhancementEnabled) {
-                    setHardwareConfig(ImageUtil.canUseHardwareBitmap(data))
-                    setImage(ImageSource.inputStream(data.inputStream()))
-                    isVisible = true
-                    return@apply
+                // MihonSY: snapshot bytes BEFORE SSIV consumes the stream, so the
+                // background enhancement can decode from them. Skip when enhancement
+                // is off to avoid copying the whole image for nothing.
+                val enhancementOn = Injekt.get<ReaderPreferences>().enhancementMode.get() != 0
+                val bytes = if (enhancementOn) {
+                    try {
+                        data.peek().readByteArray()
+                    } catch (e: Exception) {
+                        null
+                    }
+                } else {
+                    null
                 }
-
-                ImageRequest.Builder(context)
-                    .data(data)
-                    .memoryCachePolicy(CachePolicy.DISABLED)
-                    .diskCachePolicy(CachePolicy.DISABLED)
-                    .enhanced(true)
-                    .mangaId(enhanceMangaId)
-                    .chapterId(enhanceChapterId)
-                    .pageIndex(enhancePageIndex)
-                    .target(
-                        onSuccess = { result ->
-                            val image = result as BitmapImage
-                            setImage(ImageSource.bitmap(image.bitmap))
-                            isVisible = true
-                            // MihonSY: enhancement already applied inside the decoder;
-                            // briefly show the OK badge if the status toggle is on.
-                            showEnhancementDoneBadge()
-                        },
-                    )
-                    .listener(
-                        onError = { _, result ->
-                            onImageLoadError(result.throwable)
-                        },
-                    )
-                    .size(ViewSizeResolver(this@ReaderPageImageView))
-                    .precision(Precision.INEXACT)
-                    .cropBorders(config.cropBorders)
-                    .customDecoder(true)
-                    .crossfade(false)
-                    .build()
-                    .let(context.imageLoader::enqueue)
+                setHardwareConfig(ImageUtil.canUseHardwareBitmap(data))
+                setImage(ImageSource.inputStream(data.inputStream()))
+                isVisible = true
+                if (bytes != null) {
+                    maybeEnhanceAsync(bytes)
+                }
             }
             else -> {
                 throw IllegalArgumentException("Not implemented for class ${data::class.simpleName}")
