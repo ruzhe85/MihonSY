@@ -31,6 +31,10 @@ private:
     float scale_x;
     float scale_y;
     std::string desc;
+    // MihonSY: true when the shader declares a conditional upsample
+    // ('//!WHEN OUTPUT.w MAIN.w / 1.2 > ... *'). The first pass of an upscaler
+    // chain scales 2x; later layers keep the enlarged size.
+    bool conditional_upsample = false;
   };
 
   bool init_egl();

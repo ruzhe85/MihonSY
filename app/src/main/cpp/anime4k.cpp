@@ -151,10 +151,18 @@ int Anime4K::load(const std::vector<std::string> &shaders,
         bindings.push_back(line.substr(8));
       if (line.find("//!SAVE") == 0)
         pass.save_target = line.substr(8);
+      // MihonSY fix: Anime4K v4 shaders express upscaling as a conditional
+      // '//!WHEN OUTPUT.w MAIN.w / 1.2 > ... *'. Only the FIRST pass of an
+      // upscaler chain scales 2x (its WIDTH references MAIN); later layers keep
+      // the enlarged size ('//!WIDTH conv2d_tf.w'). Marking every WHEN-* pass 2x
+      // would blow the output to 2^18. So: 2x only when the pass binds MAIN and
+      // has a '*' scale marker anywhere (WIDTH/HEIGHT/WHEN).
       if (line.find("//!WIDTH") == 0 && line.find("*") != std::string::npos)
         pass.scale_x = 2.0f;
       if (line.find("//!HEIGHT") == 0 && line.find("*") != std::string::npos)
         pass.scale_y = 2.0f;
+      if (line.find("//!WHEN") == 0 && line.find("*") != std::string::npos)
+        pass.conditional_upsample = true;
       if (line.find("//!") != 0)
         fragment_body += line + "\n";
     }
@@ -230,8 +238,23 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
   int curr_w = width, curr_h = height;
 
   for (const auto &pass : passes) {
-    int next_w = curr_w * pass.scale_x;
-    int next_h = curr_h * pass.scale_y;
+    // MihonSY: a conditional upsample pass scales 2x ONLY when it reads the
+    // original MAIN texture (the first layer of the upscaler). Later layers bind
+    // their own enlarged save targets (e.g. conv2d_tf) and keep that size — scale
+    // stays 1 so curr_w/curr_h propagate unchanged. Without this, every WHEN-*
+    // layer would double again (2^18 explosion) and the output would be garbage.
+    float sx = pass.scale_x;
+    float sy = pass.scale_y;
+    if (pass.conditional_upsample) {
+      bool binds_main = false;
+      for (const auto &b : pass.bind_targets) {
+        if (b == "MAIN") { binds_main = true; break; }
+      }
+      sx = binds_main ? 2.0f : 1.0f;
+      sy = binds_main ? 2.0f : 1.0f;
+    }
+    int next_w = curr_w * sx;
+    int next_h = curr_h * sy;
     GLuint out_tex = get_tex(pass.save_target, next_w, next_h);
 
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
@@ -273,8 +296,18 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
 void Anime4K::get_output_size(int width, int height, int &out_w, int &out_h) {
   float curr_w = width, curr_h = height;
   for (const auto &pass : passes) {
-    curr_w *= pass.scale_x;
-    curr_h *= pass.scale_y;
+    float sx = pass.scale_x;
+    float sy = pass.scale_y;
+    if (pass.conditional_upsample) {
+      bool binds_main = false;
+      for (const auto &b : pass.bind_targets) {
+        if (b == "MAIN") { binds_main = true; break; }
+      }
+      sx = binds_main ? 2.0f : 1.0f;
+      sy = binds_main ? 2.0f : 1.0f;
+    }
+    curr_w *= sx;
+    curr_h *= sy;
   }
   out_w = (int)curr_w;
   out_h = (int)curr_h;
