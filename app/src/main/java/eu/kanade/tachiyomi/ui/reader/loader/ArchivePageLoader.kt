@@ -87,8 +87,21 @@ internal class ArchivePageLoader(private val reader: ArchiveReader) : PageLoader
                 val imageBytes by lazy { runBlocking { imageBytesDeferred?.await() } }
                 // SY <--
                 ReaderPage(i).apply {
-                    // SY -->
-                    stream = { imageBytes?.copyOf()?.inputStream() ?: reader.getInputStream(entry.name)!! }
+                    // MihonSY fix: CBZ-backed pages used to hand out the raw zip
+                    // entry stream (reader.getInputStream) without holding the mutex.
+                    // With enhancement on, Coil decodes asynchronously on a thread
+                    // pool while the reader preloads the next page — several threads
+                    // then read the SAME zip file descriptor concurrently, which
+                    // crashes the app (native). Read the entry into a private
+                    // ByteArray under the mutex and return a standalone memory
+                    // stream: concurrency-safe AND a clean standard-image stream
+                    // for the enhancement decoder.
+                    stream = {
+                        imageBytes?.copyOf()?.inputStream()
+                            ?: mutex.withLock {
+                                reader.getInputStream(entry.name)!!.buffered().use { it.readBytes() }
+                            }.inputStream()
+                    }
                     // SY <--
                     status = Page.State.Ready
                 }
