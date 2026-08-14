@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <changelog bulletedList="true">
+    <changelogversion versionName="1.0.5" changeDate="August 15,2026">
+        <changelogtext>[b]MihonSY 1.0.5 (6)[/b]</changelogtext>
+        <changelogtext>[b]修复[/b] 开启图像增强时，已下载的 CBZ 章节不再闪退，增强可正常处理</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.0.4" changeDate="August 13,2026">
         <changelogtext>[b]MihonSY 1.0.4 (5)[/b]</changelogtext>
         <changelogtext>[b]优化[/b] 图像增强部分重做：所有阅读模式（翻页 / 条漫 / 长条图）下都能生效；关闭增强时恢复原始高清直出解码</changelogtext>
