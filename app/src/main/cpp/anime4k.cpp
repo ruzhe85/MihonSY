@@ -446,6 +446,29 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
     for (size_t i = 0; i < n; ++i, a += 4) *a = 255;
   }
 
+  // MihonSY fix: Anime4K conv weights are trained on colour data, so its R/G/B
+  // gains are slightly asymmetric — pure greyscale manga (R=G=B input) comes out
+  // with a small colour cast (red on Fast/High, green on Ultra; measured up to
+  // ±8 in mid/dark areas). Detect near-greyscale pixels (low chroma) and snap
+  // them to their luminance — restores neutral greys for b/w manga while colour
+  // regions (higher chroma) keep the full Anime4K enhancement.
+  if (curr_w > 0 && curr_h > 0) {
+    const size_t n = static_cast<size_t>(curr_w) * curr_h;
+    unsigned char *p = out_pixels;
+    const int CHROMA_THRESHOLD = 12;
+    for (size_t i = 0; i < n; ++i, p += 4) {
+      const int r = p[0], g = p[1], b = p[2];
+      const int mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+      const int mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+      if (mx - mn < CHROMA_THRESHOLD) {
+        const int luma = (r + g + b + 1) / 3;
+        p[0] = static_cast<unsigned char>(luma);
+        p[1] = static_cast<unsigned char>(luma);
+        p[2] = static_cast<unsigned char>(luma);
+      }
+    }
+  }
+
   // MihonSY debug: sample average RGBA of the output to detect channel
   // corruption (e.g. greenish cast = G channel biased) and alpha transparency.
   if (curr_w * curr_h > 0) {
