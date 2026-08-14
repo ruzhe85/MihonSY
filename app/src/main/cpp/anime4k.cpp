@@ -110,19 +110,37 @@ GLuint Anime4K::compile_program(const std::string &name,
     GLint status;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
     if (!status) {
-      char log[512];
-      glGetShaderInfoLog(shader, 512, nullptr, log);
-      ANIME4K_LOGE("Shader compile error: %s", log);
+      char log[1024] = {0};
+      GLint len = 0;
+      glGetShaderInfoLog(shader, sizeof(log), &len, log);
+      ANIME4K_LOGE("Shader compile error (type %d, len %d): %s", (int)type, (int)len, log);
     }
     return shader;
   };
 
   GLuint vs = compile(GL_VERTEX_SHADER, VERTEX_SHADER_SOURCE);
   GLuint fs = compile(GL_FRAGMENT_SHADER, source.c_str());
+  if (vs == 0 || fs == 0) {
+    if (vs) glDeleteShader(vs);
+    if (fs) glDeleteShader(fs);
+    return 0;
+  }
   GLuint program = glCreateProgram();
   glAttachShader(program, vs);
   glAttachShader(program, fs);
   glLinkProgram(program);
+  GLint linkStatus = 0;
+  glGetProgramiv(program, GL_LINK_STATUS, &linkStatus);
+  if (!linkStatus) {
+    char log[1024] = {0};
+    GLint len = 0;
+    glGetProgramInfoLog(program, sizeof(log), &len, log);
+    ANIME4K_LOGE("Program link error: %s", log);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    glDeleteProgram(program);
+    return 0;
+  }
   glDeleteShader(vs);
   glDeleteShader(fs);
   return program;
@@ -193,10 +211,27 @@ int Anime4K::load(const std::vector<std::string> &shaders,
                  "_tex, vTexCoord + off / " + b + "_size)\n";
       full_fs += "#define " + b + "_pos vTexCoord\n";
     }
+    // MihonSY fix: mpv-style shaders hardcode 'go_0(x,y) (MAIN_texOff(...))' and
+    // 'MAIN' refers to the CURRENT pass input (= the first bind target), not
+    // always the original image. Later conv layers bind e.g. conv2d_tf only, so
+    // MAIN_texOff is undefined there and the shader fails to compile. Alias
+    // MAIN to the first bind target so go_0/MAIN_* always resolve.
+    if (!bindings.empty()) {
+      const std::string &first = bindings.front();
+      if (first != "MAIN") {
+        full_fs += "#define MAIN_tex(pos) " + first + "_tex(pos)\n";
+        full_fs += "#define MAIN_texOff(off) " + first + "_texOff(off)\n";
+        full_fs += "#define MAIN_pos " + first + "_pos\n";
+      }
+    }
     full_fs += fragment_body;
     full_fs += "\nvoid main() { fragColor = hook(); }\n";
 
     pass.program = compile_program(shader_names[i], full_fs);
+    if (pass.program == 0) {
+      ANIME4K_LOGE("Skipping pass (compile failed): %s", pass.desc.c_str());
+      continue;
+    }
     pass.bind_targets = bindings;
     passes.push_back(pass);
     ANIME4K_LOGD("Loaded pass: %s -> %s (Scale %.1fx)", pass.desc.c_str(),
