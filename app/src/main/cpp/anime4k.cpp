@@ -273,6 +273,7 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
     }
     int next_w = curr_w * sx;
     int next_h = curr_h * sy;
+    GLuint out_tex;
     if (pass.save_target.empty()) {
       // Last pass of a chain often has no SAVE — it renders to the output.
       out_tex = get_tex("__OUT__", next_w, next_h);
