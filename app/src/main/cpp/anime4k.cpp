@@ -434,21 +434,34 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
   // Read back final result
   glReadPixels(0, 0, curr_w, curr_h, GL_RGBA, GL_UNSIGNED_BYTE, out_pixels);
 
-  // MihonSY debug: sample average RGB of the output to detect channel
-  // corruption (e.g. greenish cast = G channel biased).
+  // MihonSY fix: Restore/Depth-to-Space shaders do 'return result + MAIN_tex(...)',
+  // so output alpha = result.a + MAIN.a — the mat4 result alpha is an arbitrary
+  // (often <1) value, leaving the bitmap semi-transparent. Display blends it with
+  // the background → colour cast (red on Fast/High, green on Ultra). Manga images
+  // are fully opaque; force alpha=255 on the CPU side without touching the shader
+  // feature channels.
+  if (curr_w > 0 && curr_h > 0) {
+    const size_t n = static_cast<size_t>(curr_w) * curr_h;
+    unsigned char *a = out_pixels + 3;
+    for (size_t i = 0; i < n; ++i, a += 4) *a = 255;
+  }
+
+  // MihonSY debug: sample average RGBA of the output to detect channel
+  // corruption (e.g. greenish cast = G channel biased) and alpha transparency.
   if (curr_w * curr_h > 0) {
     const size_t total = static_cast<size_t>(curr_w) * curr_h;
     const size_t step = (total > 20000) ? (total / 20000) : 1;
-    unsigned long long sr = 0, sg = 0, sb = 0, cnt = 0;
+    unsigned long long sr = 0, sg = 0, sb = 0, sa = 0, cnt = 0;
     for (size_t i = 0; i < total * 4; i += step * 4) {
       sr += out_pixels[i];
       sg += out_pixels[i + 1];
       sb += out_pixels[i + 2];
+      sa += out_pixels[i + 3];
       cnt++;
     }
-    ANIME4K_LOGD("Output %dx%d avg RGB: R=%llu G=%llu B=%llu (n=%llu)",
+    ANIME4K_LOGD("Output %dx%d avg RGBA: R=%llu G=%llu B=%llu A=%llu (n=%llu)",
                  curr_w, curr_h, cnt ? sr / cnt : 0, cnt ? sg / cnt : 0,
-                 cnt ? sb / cnt : 0, cnt);
+                 cnt ? sb / cnt : 0, cnt ? sa / cnt : 0, cnt);
   }
 
   glDeleteFramebuffers(1, &fbo);
