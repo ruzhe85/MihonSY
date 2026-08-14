@@ -67,72 +67,72 @@ jobs:
       # - Release tag/title use versionName from app/build.gradle.kts
       # - Release body contains both Chinese (CHANGELOG.md) and English
       #   (CHANGELOG.en.md) sections for the current version.
-      - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -e
+#       - name: Publish GitHub Release
+#         env:
+#           GH_TOKEN: ${{ github.token }}
+#         run: |
+#           set -e
 
-          APK_DIR=app/build/outputs/apk/release
-          VERSION_CODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts | head -1)
-          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
+#           APK_DIR=app/build/outputs/apk/release
+#           VERSION_CODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts | head -1)
+#           VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
 
-          echo "versionName=$VERSION_NAME versionCode=$VERSION_CODE"
+#           echo "versionName=$VERSION_NAME versionCode=$VERSION_CODE"
 
-          # Rename APKs to mihonsy-{x.y.z}-{abi}.apk (full version name).
-          cd "$APK_DIR"
-          for apk in *.apk; do
-            abi=$(echo "$apk" | sed -E 's/^app-(.+)-release\.apk$/\1/')
-            [ "$abi" = "$apk" ] && abi=universal
-            mv "$apk" "mihonsy-${VERSION_NAME}-${abi}.apk"
-          done
-          ls -la
+#           # Rename APKs to mihonsy-{x.y.z}-{abi}.apk (full version name).
+#           cd "$APK_DIR"
+#           for apk in *.apk; do
+#             abi=$(echo "$apk" | sed -E 's/^app-(.+)-release\.apk$/\1/')
+#             [ "$abi" = "$apk" ] && abi=universal
+#             mv "$apk" "mihonsy-${VERSION_NAME}-${abi}.apk"
+#           done
+#           ls -la
 
-          TAG="v${VERSION_NAME}"
+#           TAG="v${VERSION_NAME}"
 
-          # Delete any existing release/tag with the same name so rebuilds can republish.
-          cd "$GITHUB_WORKSPACE"
-          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
-          git tag -d "$TAG" 2>/dev/null || true
-          git push origin ":refs/tags/$TAG" 2>/dev/null || true
+#           # Delete any existing release/tag with the same name so rebuilds can republish.
+#           cd "$GITHUB_WORKSPACE"
+#           gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
+#           git tag -d "$TAG" 2>/dev/null || true
+#           git push origin ":refs/tags/$TAG" 2>/dev/null || true
 
-          # Extract the version's section from a changelog file.
-          extract_section() {
-            awk -v ver="v${VERSION_NAME}" '
-              /^## / {
-                if (section) exit
-                if (index($0, ver) > 0) { section=1; next }
-              }
-              section { print }
-            ' "$1"
-          }
+#           # Extract the version's section from a changelog file.
+#           extract_section() {
+#             awk -v ver="v${VERSION_NAME}" '
+#               /^## / {
+#                 if (section) exit
+#                 if (index($0, ver) > 0) { section=1; next }
+#               }
+#               section { print }
+#             ' "$1"
+#           }
 
-          NOTES_FILE=$(mktemp)
-          {
-            echo "## 中文 / Chinese"
-            echo ""
-            extract_section CHANGELOG.md || true
-            echo ""
-            echo "---"
-            echo ""
-            echo "## English"
-            echo ""
-            extract_section CHANGELOG.en.md || true
-          } > "$NOTES_FILE"
+#           NOTES_FILE=$(mktemp)
+#           {
+#             echo "## 中文 / Chinese"
+#             echo ""
+#             extract_section CHANGELOG.md || true
+#             echo ""
+#             echo "---"
+#             echo ""
+#             echo "## English"
+#             echo ""
+#             extract_section CHANGELOG.en.md || true
+#           } > "$NOTES_FILE"
 
-          # Fallback if neither section matched.
-          if ! grep -qE '^## ' "$NOTES_FILE"; then
-            {
-              echo "MihonSY ${VERSION_NAME}"
-              echo ""
-              echo "Built automatically from the master branch."
-            } > "$NOTES_FILE"
-          fi
+#           # Fallback if neither section matched.
+#           if ! grep -qE '^## ' "$NOTES_FILE"; then
+#             {
+#               echo "MihonSY ${VERSION_NAME}"
+#               echo ""
+#               echo "Built automatically from the master branch."
+#             } > "$NOTES_FILE"
+#           fi
 
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "MihonSY ${VERSION_NAME}" \
-            --notes-file "$NOTES_FILE" \
-            "${APK_DIR}/mihonsy-${VERSION_NAME}-"*.apk
+#           gh release create "$TAG" \
+#             --repo "$GITHUB_REPOSITORY" \
+#             --title "MihonSY ${VERSION_NAME}" \
+#             --notes-file "$NOTES_FILE" \
+#             "${APK_DIR}/mihonsy-${VERSION_NAME}-"*.apk
 
-          echo "Published release $TAG"
+#           echo "Published release $TAG"
