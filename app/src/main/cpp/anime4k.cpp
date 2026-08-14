@@ -367,6 +367,9 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
     } else {
       out_tex = get_tex(pass.save_target, next_w, next_h);
     }
+    ANIME4K_LOGD("Render %s: in %dx%d -> out %dx%d (save=%s)", pass.desc.c_str(),
+                 curr_w, curr_h, next_w, next_h,
+                 pass.save_target.empty() ? "__OUT__" : pass.save_target.c_str());
 
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                            out_tex, 0);
