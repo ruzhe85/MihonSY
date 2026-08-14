@@ -21,7 +21,7 @@ MihonSY 是 TachiyomiSY（SY）的分支，在保留 SY 全部特性的基础上
 - 点击滚动距离与匀速动画可调
 - 更聪明的自动条漫判定
 - Komga 追番进度**逐本精确**同步
-- 轻量图像增强（Anime4K / Lanczos3，无大模型）
+- 轻量图像增强（Lanczos3，无大模型）
 - 原始分辨率 1:1 显示
 
 > ⚠️ 本应用**移除了原版更新检查**，不会联网检查更新；与官方 TachiyomiSY 包名不同，可共存安装，但**请勿混淆两个版本的数据**（备份/恢复时注意区分）。
@@ -50,12 +50,11 @@ MihonSY 是 TachiyomiSY（SY）的分支，在保留 SY 全部特性的基础上
 
 | 算法 | 类型 | 档位 |
 |------|------|------|
-| **Anime4K** | GPU Shader（硬件加速） | Fast / High / Ultra |
-| **Lanczos3** | CPU 经典插值 | 1.5x / 2x / 3x |
+| **Lanczos3** | 经典插值 | 1.5x / 2x / 2.5x / 3x |
 
 - 针对漫画/条漫线条优化，加载快、内存占用低。
 - **不含** waifu2x / Real-CUGAN / Real-ESRGAN 等重型模型（避免卡顿）。
-- 入口：全局设置 → 阅读器 → 图像增强。
+- 入口：全局设置 → 阅读器 → 图像增强；阅读器设置内可直接开关「显示增强状态」。
 
 ### 5. 原始分辨率显示
 
@@ -111,8 +110,7 @@ gh run download <run-id> --repo ruzhe85/MihonSY
 
 | 路径 | 说明 |
 |------|------|
-| `app/src/main/cpp/` | Anime4K / Lanczos3 原生实现（JNI + GLES） |
-| `app/src/main/assets/anime4k/` | Anime4K GLSL shader 资源 |
+| `app/src/main/cpp/` | Lanczos3 原生实现（JNI） |
 | `.../reader/viewer/webtoon/` | 条漫点击滚动、匀速动画、原始分辨率 |
 | `.../reader/setting/ReaderPreferences.kt` | 偏好项定义 |
 | `.../util/MihonSyEnhancer.kt` | 图像增强调度 |

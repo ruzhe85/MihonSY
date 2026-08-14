@@ -21,7 +21,7 @@ MihonSY is a fork of TachiyomiSY (SY). It keeps all of SY's features and enhance
 - Adjustable tap-to-scroll distance with constant-speed animation
 - Smarter automatic webtoon detection
 - Komga tracking progress synced **per book**, precisely
-- Lightweight image enhancement (Anime4K / Lanczos3, no heavy models)
+- Lightweight image enhancement (Lanczos3, no heavy models)
 - Original-resolution (1:1) display
 
 > ⚠️ This app has the **update checker removed** and never checks for updates online. It uses a different package name from the official TachiyomiSY, so both can be installed side by side — but **do not mix data between the two versions** (be careful when backing up / restoring).
@@ -50,12 +50,12 @@ MihonSY is a fork of TachiyomiSY (SY). It keeps all of SY's features and enhance
 
 | Algorithm | Type | Presets |
 |-----------|------|---------|
-| **Anime4K** | GPU shader (hardware accelerated) | Fast / High / Ultra |
-| **Lanczos3** | CPU classic resampling | 1.5x / 2x / 3x |
+| **Lanczos3** | Classic resampling | 1.5x / 2x / 2.5x / 3x |
 
 - Optimized for manga/webtoon line art; fast to load and low memory usage.
 - **No** heavy models such as waifu2x / Real-CUGAN / Real-ESRGAN (avoids lag).
-- **Where**: Global settings → Reader → Image enhancement.
+- **Where**: Global settings → Reader → Image enhancement; the reader settings
+  dialog can toggle "Show enhancement status" directly.
 
 ### 5. Original-Resolution Display
 
@@ -111,8 +111,7 @@ gh run download <run-id> --repo ruzhe85/MihonSY
 
 | Path | Description |
 |------|-------------|
-| `app/src/main/cpp/` | Anime4K / Lanczos3 native implementation (JNI + GLES) |
-| `app/src/main/assets/anime4k/` | Anime4K GLSL shader assets |
+| `app/src/main/cpp/` | Lanczos3 native implementation (JNI) |
 | `.../reader/viewer/webtoon/` | Tap-to-scroll, constant-speed animation, original resolution |
 | `.../reader/setting/ReaderPreferences.kt` | Preference definitions |
 | `.../util/MihonSyEnhancer.kt` | Image enhancement orchestration |
