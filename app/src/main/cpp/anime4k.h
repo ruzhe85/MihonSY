@@ -35,6 +35,10 @@ private:
     // ('//!WHEN OUTPUT.w MAIN.w / 1.2 > ... *'). The first pass of an upscaler
     // chain scales 2x; later layers keep the enlarged size.
     bool conditional_upsample = false;
+    // MihonSY: map a shader-side texture name (e.g. "HOOKED") to the real
+    // texture the renderer created (e.g. "MAIN"). Key = bind name used in the
+    // shader; value = texture key in textures[]. Populated from //!HOOK.
+    std::map<std::string, std::string> bind_alias;
   };
 
   bool init_egl();

@@ -143,12 +143,28 @@ int Anime4K::load(const std::vector<std::string> &shaders,
 
     std::string fragment_body;
     std::vector<std::string> bindings;
+    // MihonSY: mpv-style '//!HOOK MAIN' declares the pass's input source; a later
+    // '//!BIND HOOKED' is just an alias for that source. Shader code still refers
+    // to HOOKED_tex, so the macro name must stay; only the GL texture bound for it
+    // must resolve to the real one (MAIN) at draw time.
+    std::string hook_target;
 
     while (std::getline(ss, line)) {
       if (line.find("//!DESC") == 0)
         pass.desc = line.substr(8);
-      if (line.find("//!BIND") == 0)
-        bindings.push_back(line.substr(8));
+      if (line.find("//!HOOK") == 0)
+        hook_target = line.substr(8); // e.g. "MAIN"
+      if (line.find("//!BIND") == 0) {
+        const std::string b = line.substr(8);
+        bindings.push_back(b);
+        // MihonSY: mpv semantics — '//!BIND HOOKED' means "the current hook input
+        // (from //!HOOK, e.g. MAIN)". Only this exact alias resolves to the hook
+        // target. Any other BIND name (conv2d_tf, STATSMAX, ...) refers to a
+        // texture created by an earlier pass's SAVE and must stay as-is.
+        if (b == "HOOKED" && !hook_target.empty()) {
+          pass.bind_alias[b] = hook_target;
+        }
+      }
       if (line.find("//!SAVE") == 0)
         pass.save_target = line.substr(8);
       // MihonSY fix: Anime4K v4 shaders express upscaling as a conditional
@@ -239,39 +255,58 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
 
   for (const auto &pass : passes) {
     // MihonSY: a conditional upsample pass scales 2x ONLY when it reads the
-    // original MAIN texture (the first layer of the upscaler). Later layers bind
-    // their own enlarged save targets (e.g. conv2d_tf) and keep that size — scale
-    // stays 1 so curr_w/curr_h propagate unchanged. Without this, every WHEN-*
-    // layer would double again (2^18 explosion) and the output would be garbage.
+    // original MAIN texture (directly or via a HOOK alias like HOOKED). Later
+    // layers bind their own enlarged save targets (e.g. conv2d_tf) and keep that
+    // size. Without this, every WHEN-* layer would double again (2^18 explosion).
     float sx = pass.scale_x;
     float sy = pass.scale_y;
     if (pass.conditional_upsample) {
       bool binds_main = false;
       for (const auto &b : pass.bind_targets) {
-        if (b == "MAIN") { binds_main = true; break; }
+        // Resolve alias (HOOKED -> MAIN) before comparing.
+        auto it = pass.bind_alias.find(b);
+        const std::string real = (it != pass.bind_alias.end()) ? it->second : b;
+        if (real == "MAIN") { binds_main = true; break; }
       }
       sx = binds_main ? 2.0f : 1.0f;
       sy = binds_main ? 2.0f : 1.0f;
     }
     int next_w = curr_w * sx;
     int next_h = curr_h * sy;
-    GLuint out_tex = get_tex(pass.save_target, next_w, next_h);
+    if (pass.save_target.empty()) {
+      // Last pass of a chain often has no SAVE — it renders to the output.
+      out_tex = get_tex("__OUT__", next_w, next_h);
+    } else {
+      out_tex = get_tex(pass.save_target, next_w, next_h);
+    }
 
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                            out_tex, 0);
     glViewport(0, 0, next_w, next_h);
     glUseProgram(pass.program);
 
+    bool valid = true;
     for (size_t j = 0; j < pass.bind_targets.size(); ++j) {
       const std::string &bname = pass.bind_targets[j];
+      auto it = pass.bind_alias.find(bname);
+      const std::string real = (it != pass.bind_alias.end()) ? it->second : bname;
+      auto texIt = textures.find(real);
+      if (texIt == textures.end()) {
+        // MihonSY: never bind a missing texture — that renders black. Skip the
+        // pass instead (original image stays).
+        ANIME4K_LOGE("Pass '%s' binds missing texture '%s', skipping", pass.desc.c_str(), real.c_str());
+        valid = false;
+        break;
+      }
       glActiveTexture(GL_TEXTURE0 + j);
-      glBindTexture(GL_TEXTURE_2D, textures[bname]);
+      glBindTexture(GL_TEXTURE_2D, texIt->second);
       glUniform1i(glGetUniformLocation(pass.program, (bname + "_tex").c_str()),
                   (int)j);
       glUniform2f(glGetUniformLocation(pass.program, (bname + "_size").c_str()),
-                  (float)tex_sizes[bname].first,
-                  (float)tex_sizes[bname].second);
+                  (float)tex_sizes[real].first,
+                  (float)tex_sizes[real].second);
     }
+    if (!valid) break;
 
     glBindVertexArray(quad_vao);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -301,7 +336,9 @@ void Anime4K::get_output_size(int width, int height, int &out_w, int &out_h) {
     if (pass.conditional_upsample) {
       bool binds_main = false;
       for (const auto &b : pass.bind_targets) {
-        if (b == "MAIN") { binds_main = true; break; }
+        auto it = pass.bind_alias.find(b);
+        const std::string real = (it != pass.bind_alias.end()) ? it->second : b;
+        if (real == "MAIN") { binds_main = true; break; }
       }
       sx = binds_main ? 2.0f : 1.0f;
       sy = binds_main ? 2.0f : 1.0f;
