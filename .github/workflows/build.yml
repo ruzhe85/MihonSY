@@ -95,8 +95,11 @@ jobs:
           echo "versionName=$VERSION_NAME versionCode=$VERSION_CODE"
 
           # Rename APKs to mihonsy-{x.y.z}-{abi}.apk (full version name).
+          # Only touch the original app-*-release.apk files — the artifact step
+          # already renamed them, and re-running this on mihonsy-* files would
+          # error ('mv: same file').
           cd "$APK_DIR"
-          for apk in *.apk; do
+          for apk in app-*-release.apk; do
             abi=$(echo "$apk" | sed -E 's/^app-(.+)-release\.apk$/\1/')
             [ "$abi" = "$apk" ] && abi=universal
             mv "$apk" "mihonsy-${VERSION_NAME}-${abi}.apk"
