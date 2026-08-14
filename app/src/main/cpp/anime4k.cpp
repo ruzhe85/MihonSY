@@ -347,22 +347,16 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
   int curr_w = width, curr_h = height;
 
   for (const auto &pass : passes) {
-    // MihonSY: a conditional upsample pass scales 2x ONLY when it reads the
-    // original MAIN texture (directly or via a HOOK alias like HOOKED). Later
-    // layers bind their own enlarged save targets (e.g. conv2d_tf) and keep that
-    // size. Without this, every WHEN-* layer would double again (2^18 explosion).
+    // MihonSY: ONLY the final Depth-to-Space pass of an upscaler actually outputs
+    // 2x (it re-arranges pixels into a larger image). Every conv layer in between
+    // runs at 1x ('//!WIDTH conv2d_tf.w' = keep size); their '//!WHEN ... *' only
+    // marks them as part of the conditional upscale chain. Scaling any conv layer
+    // 2x made all 19 layers run at 2x resolution → VRAM explosion → app crash.
     float sx = pass.scale_x;
     float sy = pass.scale_y;
-    if (pass.conditional_upsample) {
-      bool binds_main = false;
-      for (const auto &b : pass.bind_targets) {
-        // Resolve alias (HOOKED -> MAIN) before comparing.
-        auto it = pass.bind_alias.find(b);
-        const std::string real = (it != pass.bind_alias.end()) ? it->second : b;
-        if (real == "MAIN") { binds_main = true; break; }
-      }
-      sx = binds_main ? 2.0f : 1.0f;
-      sy = binds_main ? 2.0f : 1.0f;
+    if (pass.conditional_upsample && pass.desc.find("Depth-to-Space") != std::string::npos) {
+      sx = 2.0f;
+      sy = 2.0f;
     }
     int next_w = curr_w * sx;
     int next_h = curr_h * sy;
@@ -427,15 +421,10 @@ void Anime4K::get_output_size(int width, int height, int &out_w, int &out_h) {
   for (const auto &pass : passes) {
     float sx = pass.scale_x;
     float sy = pass.scale_y;
-    if (pass.conditional_upsample) {
-      bool binds_main = false;
-      for (const auto &b : pass.bind_targets) {
-        auto it = pass.bind_alias.find(b);
-        const std::string real = (it != pass.bind_alias.end()) ? it->second : b;
-        if (real == "MAIN") { binds_main = true; break; }
-      }
-      sx = binds_main ? 2.0f : 1.0f;
-      sy = binds_main ? 2.0f : 1.0f;
+    // Only the final Depth-to-Space pass outputs 2x (mirror of process()).
+    if (pass.conditional_upsample && pass.desc.find("Depth-to-Space") != std::string::npos) {
+      sx = 2.0f;
+      sy = 2.0f;
     }
     curr_w *= sx;
     curr_h *= sy;
