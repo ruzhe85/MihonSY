@@ -10,13 +10,9 @@
 
 ### Improvements & Fixes
 
-- **CBZ-downloaded chapters can now be enhanced**: enabling image enhancement no
-  longer crashes the reader when opening a downloaded CBZ chapter. Fixed a
-  multi-threaded concurrent read of the same zip file (serialized + per-call
-  in-memory copy) so the enhancement pipeline processes downloaded pages
+- **Downloaded chapters can be enhanced too**: enabling image enhancement no
+  longer crashes the reader on downloaded CBZ chapters — they now enhance
   normally.
-- **Updated app icon**: new blue pixel-art maid mascot holding the SY book,
-  matching the MihonSY theme better.
 
 ## v1.0.4 (MihonSY)
 
