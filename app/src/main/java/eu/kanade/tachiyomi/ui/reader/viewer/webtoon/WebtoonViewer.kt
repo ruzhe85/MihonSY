@@ -75,7 +75,12 @@ class WebtoonViewer(
      * keep their plain fraction-of-screen distance.
      */
     private fun computeTapScrollDistance(): Int {
-        val heightPx = activity.resources.displayMetrics.heightPixels
+        // MihonSY fix: use the ACTUAL reader container height, not the physical
+        // screen. displayMetrics.heightPixels is the whole display — on tablets
+        // (and with system bars / gesture hints / app bars) the visible reader
+        // area is much smaller, so "one screen" scrolled only ~1/3. recycler.height
+        // is the real laid-out height; fall back to screen height before layout.
+        val heightPx = if (recycler.height > 0) recycler.height else activity.resources.displayMetrics.heightPixels
         val fraction = config.tapScrollDistanceFraction
         if (fraction >= 1.0f) {
             // One full screen minus a peek margin (23dp, like ComicScreen's
@@ -208,6 +213,18 @@ class WebtoonViewer(
 
         frame.layoutParams = ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT)
         frame.addView(recycler)
+
+        // MihonSY fix: recompute the tap-scroll distance once the reader is actually
+        // laid out — recycler.height is the real visible height (correct on tablets,
+        // where the physical screen height is much larger than the reader area).
+        // Settings changes also trigger this via tapScrollChangedListener below.
+        recycler.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            val newDistance = computeTapScrollDistance()
+            if (newDistance != scrollDistance) {
+                scrollDistance = newDistance
+                layoutManager.extraLayoutSpace = newDistance
+            }
+        }
     }
 
     private fun checkAllowPreload(page: ReaderPage?): Boolean {
