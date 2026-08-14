@@ -364,16 +364,25 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
     }
     int next_w = curr_w * sx;
     int next_h = curr_h * sy;
-    GLuint out_tex;
-    if (pass.save_target.empty()) {
-      // Last pass of a chain often has no SAVE — it renders to the output.
-      out_tex = get_tex("__OUT__", next_w, next_h);
-    } else {
-      out_tex = get_tex(pass.save_target, next_w, next_h);
+    // MihonSY fix: a pass that both BINDs and SAVEs the same texture (e.g.
+    // Depth-to-Space does '//!BIND MAIN' + '//!SAVE MAIN') would render INTO the
+    // texture it samples — a GL feedback loop whose result is undefined (green
+    // garbage on the device). Detect self-reference and render to __OUT__ so the
+    // sampled texture stays intact; the final readback uses __OUT__ anyway.
+    bool self_ref = false;
+    if (!pass.save_target.empty()) {
+      for (const auto &b : pass.bind_targets) {
+        auto it = pass.bind_alias.find(b);
+        const std::string real = (it != pass.bind_alias.end()) ? it->second : b;
+        if (real == pass.save_target) { self_ref = true; break; }
+      }
     }
-    ANIME4K_LOGD("Render %s: in %dx%d -> out %dx%d (save=%s)", pass.desc.c_str(),
-                 curr_w, curr_h, next_w, next_h,
-                 pass.save_target.empty() ? "__OUT__" : pass.save_target.c_str());
+    std::string out_name = pass.save_target;
+    if (self_ref || out_name.empty()) out_name = "__OUT__";
+    GLuint out_tex = get_tex(out_name, next_w, next_h);
+    ANIME4K_LOGD("Render %s: in %dx%d -> out %dx%d (save=%s%s)", pass.desc.c_str(),
+                 curr_w, curr_h, next_w, next_h, out_name.c_str(),
+                 self_ref ? ", self-ref->__OUT__" : "");
 
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                            out_tex, 0);
