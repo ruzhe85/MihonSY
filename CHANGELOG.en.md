@@ -14,10 +14,16 @@
   (paged, webtoon, long-strip); when enhancement is off, the original
   full-resolution direct decode is restored, so quality and performance are
   unaffected.
+- **Lanczos3 much faster**: decode at view size + separable convolution
+  (~12x faster); a new **2.5x** scale preset (1.5x / 2x / 2.5x / 3x).
 - **New enhancement status display**: a new independent toggle "Show enhancement
   status" (off by default) under Image enhancement; when enabled, a bottom-left
   overlay shows the elapsed enhancement time (OK when done) for performance
   observation.
+- **Webtoon tap-scroll distance fixed on tablets**: the scroll distance now uses
+  the actual visible reader height instead of the physical screen height — on
+  tablets a "one screen" tap scrolled only ~1/3 before; now it scrolls a full
+  screen (all presets: half / 3/4 / full).
 
 ## v1.0.3 (MihonSY)
 
