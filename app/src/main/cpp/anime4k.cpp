@@ -415,6 +415,16 @@ int Anime4K::process(int width, int height, unsigned char *pixels, int &out_w,
     glBindVertexArray(quad_vao);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
+    // MihonSY: a self-referencing pass (BIND+SAVE same texture) renders to __OUT__
+    // to avoid the GL feedback loop; copy the result back into the real
+    // save_target so subsequent passes see the updated texture (mpv semantics:
+    // read old value inside the pass, write new value for the next pass).
+    if (self_ref && !pass.save_target.empty() && pass.save_target != "__OUT__") {
+      GLuint real_tex = get_tex(pass.save_target, next_w, next_h);
+      glBindTexture(GL_TEXTURE_2D, real_tex);
+      glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, next_w, next_h);
+    }
+
     curr_w = next_w;
     curr_h = next_h;
   }
