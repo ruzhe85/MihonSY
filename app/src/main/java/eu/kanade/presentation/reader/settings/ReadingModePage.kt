@@ -88,10 +88,10 @@ private fun ColumnScope.ImageEnhancementSettings(screenModel: ReaderSettingsScre
     )
 
     val enhancementMode by screenModel.preferences.enhancementMode.collectAsState()
-    SettingsChipRow(MR.strings.pref_enhancement_mode) {
-        // MihonSY: Anime4K (index 1) is hidden — Lanczos3 measured better in
-        // practice; the index mapping (0 Off / 1 Anime4K / 2 Lanczos3) is kept so
-        // old stored values remain meaningful.
+    // MihonSY: no label — the "图像增强" heading + explanation Text above already
+    // serve as the section title; the chip row sits directly below.
+    SettingsChipRow {
+        // Anime4K (index 1) hidden — Lanczos3 measured better in practice.
         ReaderPreferences.EnhancementModes.forEachIndexed { index, label ->
             if (index == 1) return@forEachIndexed
             FilterChip(
@@ -102,18 +102,11 @@ private fun ColumnScope.ImageEnhancementSettings(screenModel: ReaderSettingsScre
         }
     }
 
-    // MihonSY: enhancement status overlay toggle, available right here in the
-    // reader settings so the user does not have to dig into the app settings.
-    CheckboxItem(
-        label = stringResource(MR.strings.pref_show_enhancement_status),
-        pref = screenModel.preferences.showEnhancementStatus,
-    )
-
     if (enhancementMode == 1) {
         // Anime4K (index 1) hidden — an old stored value of 1 shows no chip.
     } else if (enhancementMode == 2) {
         val lanczosScale by screenModel.preferences.lanczosScale.collectAsState()
-        SettingsChipRow(MR.strings.pref_lanczos_scale) {
+        SettingsChipRow {
             ReaderPreferences.LanczosScaleOptions.forEach { (value, label) ->
                 FilterChip(
                     selected = lanczosScale == value,
@@ -123,6 +116,13 @@ private fun ColumnScope.ImageEnhancementSettings(screenModel: ReaderSettingsScre
             }
         }
     }
+
+    // MihonSY: enhancement status overlay toggle, available right here in the
+    // reader settings so the user does not have to dig into the app settings.
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_show_enhancement_status),
+        pref = screenModel.preferences.showEnhancementStatus,
+    )
 }
 // MihonSY <--
 

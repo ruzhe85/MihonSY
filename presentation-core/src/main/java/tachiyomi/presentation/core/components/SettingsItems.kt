@@ -427,9 +427,12 @@ fun IconItem(
 // SY <--
 
 @Composable
-fun SettingsChipRow(labelRes: StringResource, content: @Composable FlowRowScope.() -> Unit) {
+fun SettingsChipRow(labelRes: StringResource? = null, content: @Composable FlowRowScope.() -> Unit) {
     Column {
-        HeadingItem(labelRes)
+        // MihonSY: omit the section title when labelRes is null — useful when the
+        // title already lives above the row (e.g. "图像增强" heading with the
+        // explanation Text, then chips directly below).
+        labelRes?.let { HeadingItem(it) }
         FlowRow(
             modifier = Modifier.padding(
                 start = SettingsItemsPaddings.Horizontal,
