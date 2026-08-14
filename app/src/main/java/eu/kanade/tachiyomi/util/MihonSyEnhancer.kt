@@ -37,6 +37,10 @@ object MihonSyEnhancer {
     var isAnime4kInitialized = false
         private set
 
+    /** MihonSY: the Anime4K mode (0 Fast / 1 High / 2 Ultra) the native renderer was loaded with. */
+    @Volatile
+    private var anime4kInitializedMode = -1
+
     // JNI bindings ------------------------------------------------------------------
 
     private external fun nativeInitAnime4K(shaders: Array<String>, names: Array<String>): Boolean
@@ -51,7 +55,12 @@ object MihonSyEnhancer {
      * the native GLES renderer. Safe to call multiple times (idempotent).
      */
     fun initAnime4K(context: Context, mode: Int): Boolean {
-        if (isAnime4kInitialized) return true
+        // MihonSY fix: the boolean cache alone made mode switches ineffective — after
+        // initialising Fast, switching to Ultra returned true immediately and kept
+        // rendering with the old shaders (Restore 1x instead of Restore+Upscale 2x),
+        // so Ultra looked identical to Fast at 0.1s. Track the loaded mode and reload
+        // whenever it changes.
+        if (isAnime4kInitialized && anime4kInitializedMode == mode) return true
 
         val shaders = mutableListOf<String>()
         val names = mutableListOf<String>()
@@ -75,7 +84,9 @@ object MihonSyEnhancer {
                 }
             }
             isAnime4kInitialized = nativeInitAnime4K(shaders.toTypedArray(), names.toTypedArray())
-            if (!isAnime4kInitialized) {
+            if (isAnime4kInitialized) {
+                anime4kInitializedMode = mode
+            } else {
                 logcat(LogPriority.WARN) { "Anime4K native init failed" }
             }
             isAnime4kInitialized
@@ -86,9 +97,14 @@ object MihonSyEnhancer {
     }
 
     /** Anime4K renders through a full-image framebuffer, so it can only handle images that fit the GPU texture limit. */
-    fun anime4kSupportsSize(width: Int, height: Int): Boolean {
+    fun anime4kSupportsSize(width: Int, height: Int, mode: Int = 0): Boolean {
         val maxTexture = nativeGetMaxTextureSize()
-        return maxTexture <= 0 || (width <= maxTexture && height <= maxTexture)
+        if (maxTexture <= 0) return true
+        // MihonSY fix: Ultra (mode 2) scales the image 2x, so the OUTPUT texture
+        // must fit the limit — checking only the input let 2x outputs exceed the
+        // limit and render garbage/blank frames.
+        val scale = if (mode >= 2) 2 else 1
+        return width * scale <= maxTexture && height * scale <= maxTexture
     }
 
     // Enhancement entry points -------------------------------------------------------
@@ -180,7 +196,7 @@ object MihonSyEnhancer {
                         val argb = ensureArgb(input)
                         if (argb != null &&
                             initAnime4K(Injekt.get<Application>(), a4kMode) &&
-                            anime4kSupportsSize(argb.width, argb.height)
+                            anime4kSupportsSize(argb.width, argb.height, a4kMode)
                         ) {
                             a4kResult = nativeProcessAnime4K(argb).takeUnless { it === argb }
                         }
