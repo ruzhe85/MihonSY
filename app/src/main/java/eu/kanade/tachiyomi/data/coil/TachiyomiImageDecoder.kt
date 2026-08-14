@@ -13,6 +13,8 @@ import coil3.fetch.SourceFetchResult
 import coil3.request.Options
 import coil3.request.bitmapConfig
 import com.hippo.unifile.UniFile
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.util.MihonSyEnhancer
 import eu.kanade.tachiyomi.util.storage.CbzCrypto
 import eu.kanade.tachiyomi.util.storage.CbzCrypto.getCoverStream
 import mihon.core.common.archive.archiveReader
@@ -22,9 +24,15 @@ import tachiyomi.decoder.ImageDecoder
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.BufferedInputStream
+import kotlin.math.min
 
 /**
  * A [Decoder] that uses built-in [ImageDecoder] to decode images that is not supported by the system.
+ *
+ * MihonSY: when [Options.enhanced] is set (Lanczos3 enhancement enabled), this decoder is used for
+ * ALL image formats, decodes at a higher resolution than the view size so the enhancer works on
+ * real source detail, then runs the (pure-CPU) Lanczos3 resampler synchronously. No disk cache, no
+ * threading — the simplest possible pipeline.
  */
 class TachiyomiImageDecoder(private val resources: ImageSource, private val options: Options) : Decoder {
     private val context = Injekt.get<Application>()
@@ -54,11 +62,20 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         val dstWidth = options.size.widthPx(options.scale) { srcWidth }
         val dstHeight = options.size.heightPx(options.scale) { srcHeight }
 
+        // MihonSY: when enhancing, decode at up to 2x the view size (capped) so the
+        // enhancer has real source detail to work on. dstWidth may be Int.MAX_VALUE
+        // before the view lays out; clamp first to avoid overflow.
+        val (targetW, targetH) = if (options.enhanced) {
+            enhanceTarget(dstWidth) to enhanceTarget(dstHeight)
+        } else {
+            dstWidth to dstHeight
+        }
+
         val sampleSize = DecodeUtils.calculateInSampleSize(
             srcWidth = srcWidth,
             srcHeight = srcHeight,
-            dstWidth = dstWidth,
-            dstHeight = dstHeight,
+            dstWidth = targetW,
+            dstHeight = targetH,
             scale = options.scale,
         )
 
@@ -66,6 +83,24 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         decoder.recycle()
 
         check(bitmap != null) { "Failed to decode image" }
+
+        // MihonSY: run Lanczos3 enhancement synchronously on the decoded bitmap. The
+        // decoder is called on Coil's background thread, so this never blocks the UI.
+        // Any failure leaves the original bitmap — a black frame can never appear.
+        if (options.enhanced) {
+            try {
+                val preferences = Injekt.get<ReaderPreferences>()
+                if (preferences.enhancementMode.get() != 0) {
+                    val enhanced = MihonSyEnhancer.enhance(bitmap, preferences)
+                    if (enhanced != null && enhanced !== bitmap && !enhanced.isRecycled) {
+                        bitmap.recycle()
+                        bitmap = enhanced
+                    }
+                }
+            } catch (e: Exception) {
+                // Fall back to the original on any failure.
+            }
+        }
 
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
@@ -88,7 +123,9 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
     class Factory : Decoder.Factory {
 
         override fun create(result: SourceFetchResult, options: Options, imageLoader: ImageLoader): Decoder? {
-            return if (options.customDecoder || isApplicable(result.source.source())) {
+            // MihonSY: when enhancement is enabled this decoder handles ALL formats so
+            // JPG/PNG pages also get enhanced; otherwise only the system-unsupported ones.
+            return if (options.enhanced || options.customDecoder || isApplicable(result.source.source())) {
                 TachiyomiImageDecoder(result.source, options)
             } else {
                 null
@@ -118,5 +155,16 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
 
     companion object {
         var displayProfile: ByteArray? = null
+
+        /**
+         * MihonSY: safe enhanced-decode target for one dimension. Clamps the view size
+         * first (it can be Int.MAX_VALUE before layout) to avoid overflow, then 2x.
+         */
+        private fun enhanceTarget(viewDimension: Int): Int {
+            if (viewDimension <= 0 || viewDimension == Int.MAX_VALUE) return MAX_ENHANCE_SOURCE_DIMENSION
+            return min(viewDimension * 2, MAX_ENHANCE_SOURCE_DIMENSION)
+        }
+
+        const val MAX_ENHANCE_SOURCE_DIMENSION = 2048
     }
 }

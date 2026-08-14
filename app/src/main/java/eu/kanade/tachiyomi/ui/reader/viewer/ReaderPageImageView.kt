@@ -39,9 +39,9 @@ import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.SCALE_TYPE_
 import com.github.chrisbanes.photoview.PhotoView
 import eu.kanade.tachiyomi.data.coil.cropBorders
 import eu.kanade.tachiyomi.data.coil.customDecoder
+import eu.kanade.tachiyomi.data.coil.enhanced
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonSubsamplingImageView
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import eu.kanade.tachiyomi.util.MihonSyEnhancer
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.view.isVisibleOnScreen
 import okio.BufferedSource
@@ -162,8 +162,6 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     fun setImage(drawable: Drawable, config: Config) {
         this.config = config
-        // MihonSY: invalidate any in-flight enhancement from the previous image.
-        enhanceGeneration++
         // MihonSY: hide any leftover enhancement status from the previous image.
         enhanceStatusView?.visibility = View.GONE
         if (drawable is Animatable) {
@@ -177,8 +175,6 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     fun setImage(source: BufferedSource, isAnimated: Boolean, config: Config) {
         this.config = config
-        // MihonSY: invalidate any in-flight enhancement from the previous image.
-        enhanceGeneration++
         // MihonSY: hide any leftover enhancement status from the previous image.
         enhanceStatusView?.visibility = View.GONE
         if (isAnimated) {
@@ -199,9 +195,6 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     // MihonSY -->
-    /** Monotonic counter used to discard stale enhancement results after page changes. */
-    private var enhanceGeneration = 0L
-
     /**
      * MihonSY: small overlay at the bottom-left showing the image enhancement state.
      * Shows the real outcome (elapsed time on success, 跳过 on failure).
@@ -256,94 +249,21 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     /**
-     * MihonSY: asynchronously enhances the page image (Lanczos3) without blocking the
-     * reader — the original is already displayed at full resolution. The enhanced
-     * bitmap replaces the original in place when ready. Any failure leaves the
-     * original and reports 跳过 via the badge.
+     * MihonSY: shows the enhancement outcome badge. Success shows the real elapsed
+     * time; failure/skip shows 跳过. No-op unless enhancement is on AND the status
+     * toggle is on. Enhancement itself runs synchronously inside the Coil decoder,
+     * so this is only called from the Coil success/error listeners.
      */
-    private fun maybeEnhanceAsync(bytes: ByteArray) {
+    private fun showEnhancementOutcome(success: Boolean, elapsedMillis: Long) {
         val preferences = Injekt.get<ReaderPreferences>()
-        val mode = preferences.enhancementMode.get()
-        if (mode == 0) return
-        // MihonSY: only enhance the page the user is actually looking at — pre-loaded
-        // neighbours queue behind the single-threaded enhancer and make it feel slow.
-        // Webtoon pages scroll continuously; requiring a fully-visible rect would
-        // skip enhancement the moment a page is partially off-screen.
-        val shouldEnhance = if (isWebtoon) isShown else isVisibleOnScreen()
-        if (!shouldEnhance) return
-        val generation = ++enhanceGeneration
-        val statusView = if (preferences.showEnhancementStatus.get()) ensureEnhanceStatusView() else null
-        val startTime = android.os.SystemClock.uptimeMillis()
-
-        // Decode the source into a mutable ARGB bitmap on the background thread.
-        MihonSyEnhancer.submit(
-            block = {
-                // MihonSY: cap the enhanced source at a sane long edge. Lanczos3 at 2x
-                // on a 4096px image takes tens of seconds on a phone; 2048 (-> 4096
-                // after 2x) is already beyond any phone screen and fast enough (~1-3s).
-                val maxDim = 2048
-                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-                var sampleSize = 1
-                if (bounds.outWidth > 0 && bounds.outHeight > 0) {
-                    val longest = maxOf(bounds.outWidth, bounds.outHeight)
-                    while (longest / (sampleSize * 2) >= maxDim) sampleSize *= 2
-                }
-                val opts = android.graphics.BitmapFactory.Options().apply {
-                    inPreferredConfig = Bitmap.Config.ARGB_8888
-                    inDither = false
-                    inSampleSize = sampleSize
-                }
-                val original = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return@submit null
-                // The decode above may overshoot slightly (power-of-two samples);
-                // scale down the last bit so the enhancer input respects maxDim.
-                val sampled = if (original.width > maxDim || original.height > maxDim) {
-                    val ratio = maxDim.toFloat() / maxOf(original.width, original.height)
-                    val scaled = Bitmap.createScaledBitmap(
-                        original,
-                        (original.width * ratio).toInt().coerceAtLeast(1),
-                        (original.height * ratio).toInt().coerceAtLeast(1),
-                        true,
-                    )
-                    if (scaled !== original) original.recycle()
-                    scaled
-                } else {
-                    original
-                }
-                val enhanced = MihonSyEnhancer.enhance(sampled, preferences)
-                // The source bitmap is no longer needed once enhancement ran.
-                if (enhanced !== sampled) sampled.recycle()
-                enhanced
-            },
-            onProgress = { elapsedMillis ->
-                if (generation == enhanceGeneration && statusView != null) {
-                    statusView.text = String.format(java.util.Locale.US, "%.1fs", elapsedMillis / 1000f)
-                    statusView.visibility = View.VISIBLE
-                }
-            },
-            onResult = { enhanced ->
-                val elapsed = android.os.SystemClock.uptimeMillis() - startTime
-                // MihonSY: apply whenever the page still owns this image (generation
-                // unchanged) — the view may have scrolled off-screen, but keeping the
-                // enhanced bitmap means it is ready when the user scrolls back.
-                if (generation != enhanceGeneration || enhanced.isRecycled) {
-                    enhanced.recycle()
-                    return@submit
-                }
-                (pageView as? SubsamplingScaleImageView)?.let { view ->
-                    view.recycle()
-                    view.setImage(ImageSource.bitmap(enhanced))
-                    isVisible = true
-                }
-                showEnhancementOutcome(success = true, elapsedMillis = elapsed)
-            },
-            onError = {
-                val elapsed = android.os.SystemClock.uptimeMillis() - startTime
-                if (generation == enhanceGeneration) {
-                    showEnhancementOutcome(success = false, elapsedMillis = elapsed)
-                }
-            },
-        )
+        if (preferences.enhancementMode.get() == 0 || !preferences.showEnhancementStatus.get()) return
+        val tv = ensureEnhanceStatusView()
+        tv.text = if (success) {
+            String.format(java.util.Locale.US, "OK %.1fs", elapsedMillis / 1000f)
+        } else {
+            "跳过"
+        }
+        tv.visibility = View.VISIBLE
     }
     // MihonSY <--
 
@@ -470,29 +390,51 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 setImage(ImageSource.bitmap(data.bitmap))
                 isVisible = true
             }
-            // MihonSY: show the original at full resolution immediately, then run the
-            // (lightweight) enhancement asynchronously and swap it in when done. The
-            // original is always shown first so there is never a blank frame.
+            // MihonSY: when enhancement is on, decode through Coil so the Lanczos3
+            // enhancer runs inside the decoder (on a background thread, at higher
+            // resolution). When off, keep the original SSIV direct-decode path.
             is BufferedSource -> {
-                // MihonSY: snapshot bytes BEFORE SSIV consumes the stream, so the
-                // background enhancement can decode from them. Skip when enhancement
-                // is off to avoid copying the whole image for nothing.
                 val enhancementOn = Injekt.get<ReaderPreferences>().enhancementMode.get() != 0
-                val bytes = if (enhancementOn) {
-                    try {
-                        data.peek().readByteArray()
-                    } catch (e: Exception) {
-                        null
-                    }
-                } else {
-                    null
+                if (!enhancementOn) {
+                    setHardwareConfig(ImageUtil.canUseHardwareBitmap(data))
+                    setImage(ImageSource.inputStream(data.inputStream()))
+                    isVisible = true
+                    return@apply
                 }
-                setHardwareConfig(ImageUtil.canUseHardwareBitmap(data))
-                setImage(ImageSource.inputStream(data.inputStream()))
-                isVisible = true
-                if (bytes != null) {
-                    maybeEnhanceAsync(bytes)
-                }
+
+                val startTime = android.os.SystemClock.uptimeMillis()
+                ImageRequest.Builder(context)
+                    .data(data)
+                    .memoryCachePolicy(CachePolicy.DISABLED)
+                    .diskCachePolicy(CachePolicy.DISABLED)
+                    .enhanced(true)
+                    .customDecoder(true)
+                    .target(
+                        onSuccess = { result ->
+                            val image = result as BitmapImage
+                            setImage(ImageSource.bitmap(image.bitmap))
+                            isVisible = true
+                            showEnhancementOutcome(
+                                success = true,
+                                elapsedMillis = android.os.SystemClock.uptimeMillis() - startTime,
+                            )
+                        },
+                    )
+                    .listener(
+                        onError = { _, _ ->
+                            onImageLoadError(null)
+                            showEnhancementOutcome(
+                                success = false,
+                                elapsedMillis = android.os.SystemClock.uptimeMillis() - startTime,
+                            )
+                        },
+                    )
+                    .size(ViewSizeResolver(this@ReaderPageImageView))
+                    .precision(Precision.INEXACT)
+                    .cropBorders(config.cropBorders)
+                    .crossfade(false)
+                    .build()
+                    .let(context.imageLoader::enqueue)
             }
             else -> {
                 throw IllegalArgumentException("Not implemented for class ${data::class.simpleName}")

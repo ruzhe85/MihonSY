@@ -42,3 +42,13 @@ val Options.customDecoder: Boolean
     get() = getExtra(customDecoderKey)
 
 private val customDecoderKey = Extras.Key(default = false)
+
+// MihonSY: signal the decoder to run Lanczos3 enhancement on the decoded bitmap.
+fun ImageRequest.Builder.enhanced(enable: Boolean) = apply {
+    extras[enhancedKey] = enable
+}
+
+val Options.enhanced: Boolean
+    get() = getExtra(enhancedKey)
+
+private val enhancedKey = Extras.Key(default = false)
