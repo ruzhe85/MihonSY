@@ -517,6 +517,7 @@
     <string name="pref_show_enhancement_status_summary">Show enhancement elapsed time at the bottom-left of the image (OK when done)</string>
     <string name="lanczos_scale_1_5x">1.5x</string>
     <string name="lanczos_scale_2x">2x</string>
+    <string name="lanczos_scale_2_5x">2.5x</string>
     <string name="lanczos_scale_3x">3x</string>
     <string name="pref_hide_threshold">Sensitivity for hiding menu on scroll</string>
     <string name="pref_highest">Highest</string>

@@ -362,6 +362,7 @@
     <string name="pref_show_enhancement_status_summary">在图片左下方显示增强耗时（完成后显示 OK）</string>
     <string name="lanczos_scale_1_5x">1.5x</string>
     <string name="lanczos_scale_2x">2x</string>
+    <string name="lanczos_scale_2_5x">2.5x</string>
     <string name="lanczos_scale_3x">3x</string>
     <string name="vertical_plus_viewer">条漫（页间有空隙）</string>
     <string name="action_select_inverse">反选</string>

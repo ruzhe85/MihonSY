@@ -325,6 +325,7 @@ class ReaderPreferences(
         val LanczosScaleOptions = listOf(
             150 to MR.strings.lanczos_scale_1_5x,
             200 to MR.strings.lanczos_scale_2x,
+            250 to MR.strings.lanczos_scale_2_5x,
             300 to MR.strings.lanczos_scale_3x,
         )
         // MihonSY image enhancement <--
