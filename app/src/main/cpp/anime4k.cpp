@@ -161,56 +161,11 @@ int Anime4K::load(const std::vector<std::string> &shaders,
     return -1;
   }
 
-  for (size_t i = 0; i < shaders.size(); ++i) {
-    const std::string &src = shaders[i];
-    std::stringstream ss(src);
-    std::string line;
-    Pass pass;
-    pass.scale_x = 1.0f;
-    pass.scale_y = 1.0f;
-
-    std::string fragment_body;
-    std::vector<std::string> bindings;
-    // MihonSY: mpv-style '//!HOOK MAIN' declares the pass's input source; a later
-    // '//!BIND HOOKED' is just an alias for that source. Shader code still refers
-    // to HOOKED_tex, so the macro name must stay; only the GL texture bound for it
-    // must resolve to the real one (MAIN) at draw time.
-    std::string hook_target;
-
-    while (std::getline(ss, line)) {
-      if (line.find("//!DESC") == 0)
-        pass.desc = line.substr(8);
-      if (line.find("//!HOOK") == 0)
-        hook_target = line.substr(8); // e.g. "MAIN"
-      if (line.find("//!BIND") == 0) {
-        const std::string b = line.substr(8);
-        bindings.push_back(b);
-        // MihonSY: mpv semantics — '//!BIND HOOKED' means "the current hook input
-        // (from //!HOOK, e.g. MAIN)". Only this exact alias resolves to the hook
-        // target. Any other BIND name (conv2d_tf, STATSMAX, ...) refers to a
-        // texture created by an earlier pass's SAVE and must stay as-is.
-        if (b == "HOOKED" && !hook_target.empty()) {
-          pass.bind_alias[b] = hook_target;
-        }
-      }
-      if (line.find("//!SAVE") == 0)
-        pass.save_target = line.substr(8);
-      // MihonSY fix: Anime4K v4 shaders express upscaling as a conditional
-      // '//!WHEN OUTPUT.w MAIN.w / 1.2 > ... *'. Only the FIRST pass of an
-      // upscaler chain scales 2x (its WIDTH references MAIN); later layers keep
-      // the enlarged size ('//!WIDTH conv2d_tf.w'). Marking every WHEN-* pass 2x
-      // would blow the output to 2^18. So: 2x only when the pass binds MAIN and
-      // has a '*' scale marker anywhere (WIDTH/HEIGHT/WHEN).
-      if (line.find("//!WIDTH") == 0 && line.find("*") != std::string::npos)
-        pass.scale_x = 2.0f;
-      if (line.find("//!HEIGHT") == 0 && line.find("*") != std::string::npos)
-        pass.scale_y = 2.0f;
-      if (line.find("//!WHEN") == 0 && line.find("*") != std::string::npos)
-        pass.conditional_upsample = true;
-      if (line.find("//!") != 0)
-        fragment_body += line + "\n";
-    }
-
+  // MihonSY: compile one accumulated pass (all its directives + fragment body)
+  // into a program and push it. Returns false if compilation failed.
+  auto flush_pass = [&](Pass &pass, const std::string &name,
+                        std::vector<std::string> &bindings,
+                        const std::string &fragment_body) -> bool {
     std::string full_fs = "#version 300 es\nprecision highp float;\nin vec2 "
                           "vTexCoord;\nout vec4 fragColor;\n";
     for (const auto &b : bindings) {
@@ -237,15 +192,98 @@ int Anime4K::load(const std::vector<std::string> &shaders,
     full_fs += fragment_body;
     full_fs += "\nvoid main() { fragColor = hook(); }\n";
 
-    pass.program = compile_program(shader_names[i], full_fs);
+    pass.program = compile_program(name, full_fs);
     if (pass.program == 0) {
       ANIME4K_LOGE("Skipping pass (compile failed): %s", pass.desc.c_str());
-      continue;
+      return false;
     }
     pass.bind_targets = bindings;
     passes.push_back(pass);
     ANIME4K_LOGD("Loaded pass: %s -> %s (Scale %.1fx)", pass.desc.c_str(),
                  pass.save_target.c_str(), pass.scale_x);
+    return true;
+  };
+
+  for (size_t i = 0; i < shaders.size(); ++i) {
+    const std::string &src = shaders[i];
+    std::stringstream ss(src);
+    std::string line;
+
+    // MihonSY: each file contains MULTIPLE '//!DESC' sections (Clamp has 3,
+    // Restore 8, Upscale 18). Each section is an independent pass with its own
+    // hook()/get_luma()/uniforms — merging them into one shader caused
+    // 'redefinition' compile errors. Start a fresh pass on every DESC.
+    Pass pass;
+    pass.scale_x = 1.0f;
+    pass.scale_y = 1.0f;
+    std::string fragment_body;
+    std::vector<std::string> bindings;
+    std::string hook_target;
+    bool in_pass = false;
+
+    while (std::getline(ss, line)) {
+      if (line.find("//!DESC") == 0) {
+        // New pass section: flush the previous one (if any), then start fresh.
+        if (in_pass) {
+          flush_pass(pass, shader_names[i], bindings, fragment_body);
+          pass = Pass();
+          pass.scale_x = 1.0f;
+          pass.scale_y = 1.0f;
+          fragment_body.clear();
+          bindings.clear();
+          hook_target.clear();
+        }
+        in_pass = true;
+        pass.desc = line.substr(8);
+        continue;
+      }
+      if (!in_pass) continue; // license header etc. before the first DESC
+
+      if (line.find("//!HOOK") == 0) {
+        hook_target = line.substr(8); // e.g. "MAIN"
+        continue;
+      }
+      if (line.find("//!BIND") == 0) {
+        const std::string b = line.substr(8);
+        bindings.push_back(b);
+        // MihonSY: mpv semantics — '//!BIND HOOKED' means "the current hook input
+        // (from //!HOOK, e.g. MAIN)". Only this exact alias resolves to the hook
+        // target. Any other BIND name (conv2d_tf, STATSMAX, ...) refers to a
+        // texture created by an earlier pass's SAVE and must stay as-is.
+        if (b == "HOOKED" && !hook_target.empty()) {
+          pass.bind_alias[b] = hook_target;
+        }
+        continue;
+      }
+      if (line.find("//!SAVE") == 0) {
+        pass.save_target = line.substr(8);
+        continue;
+      }
+      // MihonSY fix: Anime4K v4 shaders express upscaling as a conditional
+      // '//!WHEN OUTPUT.w MAIN.w / 1.2 > ... *'. Only the FIRST pass of an
+      // upscaler chain scales 2x (its WIDTH references MAIN); later layers keep
+      // the enlarged size ('//!WIDTH conv2d_tf.w'). Marking every WHEN-* pass 2x
+      // would blow the output to 2^18. So: 2x only when the pass binds MAIN and
+      // has a '*' scale marker anywhere (WIDTH/HEIGHT/WHEN).
+      if (line.find("//!WIDTH") == 0 && line.find("*") != std::string::npos) {
+        pass.scale_x = 2.0f;
+        continue;
+      }
+      if (line.find("//!HEIGHT") == 0 && line.find("*") != std::string::npos) {
+        pass.scale_y = 2.0f;
+        continue;
+      }
+      if (line.find("//!WHEN") == 0 && line.find("*") != std::string::npos) {
+        pass.conditional_upsample = true;
+        continue;
+      }
+      if (line.find("//!") != 0)
+        fragment_body += line + "\n";
+    }
+    // Flush the last section of this file.
+    if (in_pass) {
+      flush_pass(pass, shader_names[i], bindings, fragment_body);
+    }
   }
 
   // Detach again so the context is free for whichever thread runs process().
