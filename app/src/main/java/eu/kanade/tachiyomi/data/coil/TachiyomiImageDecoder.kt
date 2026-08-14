@@ -111,8 +111,10 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                         bitmap = enhanced
                     }
                 }
-            } catch (e: Exception) {
-                // Fall back to the original on any failure.
+            } catch (e: Throwable) {
+                // Fall back to the original on ANY failure (incl. OutOfMemoryError,
+                // which Exception does not catch — an OOM here used to crash the
+                // whole reader on large downloaded pages).
             }
         }
 
@@ -121,10 +123,14 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
             options.bitmapConfig == Bitmap.Config.HARDWARE &&
             ImageUtil.canUseHardwareBitmap(bitmap)
         ) {
-            val hwBitmap = bitmap.copy(Bitmap.Config.HARDWARE, false)
-            if (hwBitmap != null) {
-                bitmap.recycle()
-                bitmap = hwBitmap
+            try {
+                val hwBitmap = bitmap.copy(Bitmap.Config.HARDWARE, false)
+                if (hwBitmap != null) {
+                    bitmap.recycle()
+                    bitmap = hwBitmap
+                }
+            } catch (e: Throwable) {
+                // Keep the software bitmap on failure.
             }
         }
 
