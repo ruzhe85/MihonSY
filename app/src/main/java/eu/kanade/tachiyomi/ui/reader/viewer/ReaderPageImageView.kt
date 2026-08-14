@@ -379,7 +379,12 @@ open class ReaderPageImageView @JvmOverloads constructor(
             // Enhancement now applies to every reading mode (webtoon/strip included).
             is BufferedSource -> {
                 val preferences = Injekt.get<ReaderPreferences>()
-                val enhancementOn = preferences.enhancementMode.get() != 0
+                // MihonSY: only enhance streams that actually look like a standard
+                // image (JPEG/PNG/WebP/GIF magic). Downloaded chapters packed as CBZ
+                // (encrypted or raw archives) can yield non-image streams; feeding
+                // those to the enhancement decoder crashed the reader. Non-standard
+                // streams fall back to the original SSIV direct-decode path.
+                val enhancementOn = preferences.enhancementMode.get() != 0 && isStandardImageStream(data)
                 if (!enhancementOn) {
                     setHardwareConfig(ImageUtil.canUseHardwareBitmap(data))
                     setImage(ImageSource.inputStream(data.inputStream()))
@@ -520,3 +525,24 @@ open class ReaderPageImageView @JvmOverloads constructor(
 }
 
 private const val MAX_ZOOM_SCALE = 5F
+
+/**
+ * MihonSY: true when the stream begins with a known image magic number
+ * (JPEG/PNG/WebP/GIF). Downloaded CBZ-packed chapters can hand the reader a
+ * non-image stream (encrypted/raw archive data); the enhancement decoder
+ * crashes on those, so they must skip enhancement and use the standard path.
+ * [BufferedSource.peek] does not consume the stream.
+ */
+private fun isStandardImageStream(source: BufferedSource): Boolean {
+    return try {
+        source.peek().use { peek ->
+            val head = peek.readByteArray(16)
+            (head.size >= 3 && head[0] == 0xFF.toByte() && head[1] == 0xD8.toByte() && head[2] == 0xFF.toByte()) || // JPEG
+                (head.size >= 8 && head[0] == 0x89.toByte() && head[1] == 0x50.toByte() && head[2] == 0x4E.toByte() && head[3] == 0x47.toByte() && head[4] == 0x0D.toByte() && head[5] == 0x0A.toByte() && head[6] == 0x1A.toByte() && head[7] == 0x0A.toByte()) || // PNG
+                (head.size >= 12 && head[0] == 0x52.toByte() && head[1] == 0x49.toByte() && head[2] == 0x46.toByte() && head[3] == 0x46.toByte() && head[8] == 0x57.toByte() && head[9] == 0x45.toByte() && head[10] == 0x42.toByte() && head[11] == 0x50.toByte()) || // WEBP
+                (head.size >= 6 && head[0] == 0x47.toByte() && head[1] == 0x49.toByte() && head[2] == 0x46.toByte() && head[3] == 0x38.toByte()) // GIF
+        }
+    } catch (e: Exception) {
+        false
+    }
+}
