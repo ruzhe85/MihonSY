@@ -278,15 +278,25 @@ open class ReaderPageImageView @JvmOverloads constructor(
         // Decode the source into a mutable ARGB bitmap on the background thread.
         MihonSyEnhancer.submit(
             block = {
+                // MihonSY: cap the enhanced source at a sane long edge. Lanczos3 at 2x
+                // on a 4096px image takes tens of seconds on a phone; 2048 (-> 4096
+                // after 2x) is already beyond any phone screen and fast enough (~1-3s).
+                val maxDim = 2048
+                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                var sampleSize = 1
+                if (bounds.outWidth > 0 && bounds.outHeight > 0) {
+                    val longest = maxOf(bounds.outWidth, bounds.outHeight)
+                    while (longest / (sampleSize * 2) >= maxDim) sampleSize *= 2
+                }
                 val opts = android.graphics.BitmapFactory.Options().apply {
                     inPreferredConfig = Bitmap.Config.ARGB_8888
                     inDither = false
+                    inSampleSize = sampleSize
                 }
                 val original = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return@submit null
-                // MihonSY: cap the long edge at 2048 — Lanczos3 at 2x on a 4096px
-                // image takes tens of seconds on a phone; 2048 (-> 4096 after 2x) is
-                // already beyond any phone screen and fast enough (~1-3s).
-                val maxDim = 2048
+                // The decode above may overshoot slightly (power-of-two samples);
+                // scale down the last bit so the enhancer input respects maxDim.
                 val sampled = if (original.width > maxDim || original.height > maxDim) {
                     val ratio = maxDim.toFloat() / maxOf(original.width, original.height)
                     val scaled = Bitmap.createScaledBitmap(
