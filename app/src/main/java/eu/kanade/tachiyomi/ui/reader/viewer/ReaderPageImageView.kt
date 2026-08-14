@@ -373,13 +373,13 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 setImage(ImageSource.bitmap(data.bitmap))
                 isVisible = true
             }
-            // MihonSY: when enhancement is on (and not in a webtoon/strip reading mode),
-            // decode through Coil so the Lanczos3 enhancer runs inside the decoder (on
-            // a background thread, at higher resolution). In webtoon modes and when
-            // enhancement is off, keep the original SSIV direct-decode path.
+            // MihonSY: when enhancement is on, decode through Coil so the enhancer
+            // runs inside the decoder (on a background thread, at higher resolution).
+            // When enhancement is off, keep the original SSIV direct-decode path.
+            // Enhancement now applies to every reading mode (webtoon/strip included).
             is BufferedSource -> {
                 val preferences = Injekt.get<ReaderPreferences>()
-                val enhancementOn = preferences.enhancementMode.get() != 0 && !isWebtoon
+                val enhancementOn = preferences.enhancementMode.get() != 0
                 if (!enhancementOn) {
                     setHardwareConfig(ImageUtil.canUseHardwareBitmap(data))
                     setImage(ImageSource.inputStream(data.inputStream()))

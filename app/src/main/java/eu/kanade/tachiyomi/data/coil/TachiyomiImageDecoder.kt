@@ -65,14 +65,21 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         // MihonSY: when enhancing, decode at up to 2x the view size (capped) so the
         // enhancer has real source detail to work on. dstWidth may be Int.MAX_VALUE
         // before the view lays out; clamp first to avoid overflow.
-        // Webtoon strips (extreme aspect ratio) are NOT enhanced: their width already
-        // matches the screen, and sampling-by-height would crush the width (1080x8000
-        // sampled to 2048-tall -> 270px wide), making 2x Lanczos far blurrier than the
-        // original. We detect them here and skip enhancement for this decode.
-        val isWebtoonStrip = options.enhanced && srcHeight > 0 && srcWidth > 0 &&
+        // Webtoon strips (extreme aspect ratio): the height must NOT limit sampling —
+        // sampling by height would crush the width (1080x8000 sampled to 2048-tall ->
+        // 270px wide). For strips the width is the display-critical dimension, so we
+        // keep the FULL source height (no height-based downsampling) and only sample
+        // by width. A4K (GPU) handles the full-height texture; Ultra's 2x output is
+        // then naturally rejected by the texture-size guard if it would exceed the
+        // GPU limit.
+        val isTallStrip = srcHeight > 0 && srcWidth > 0 &&
             srcHeight.toFloat() / srcWidth.toFloat() > 2.5f
-        val (targetW, targetH) = if (options.enhanced && !isWebtoonStrip) {
-            enhanceTarget(dstWidth) to enhanceTarget(dstHeight)
+        val (targetW, targetH) = if (options.enhanced) {
+            if (isTallStrip) {
+                enhanceTarget(dstWidth) to srcHeight
+            } else {
+                enhanceTarget(dstWidth) to enhanceTarget(dstHeight)
+            }
         } else {
             dstWidth to dstHeight
         }
@@ -93,8 +100,8 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         // MihonSY: run Lanczos3 enhancement synchronously on the decoded bitmap. The
         // decoder is called on Coil's background thread, so this never blocks the UI.
         // Any failure leaves the original bitmap — a black frame can never appear.
-        // Webtoon strips are skipped (see above) to avoid the width-crushing artifact.
-        if (options.enhanced && !isWebtoonStrip) {
+        // Applies to every image size (strips included, sampled by width only).
+        if (options.enhanced) {
             try {
                 val preferences = Injekt.get<ReaderPreferences>()
                 if (preferences.enhancementMode.get() != 0) {
