@@ -234,23 +234,6 @@ open class ReaderPageImageView @JvmOverloads constructor(
     /**
      * MihonSY: shows the enhancement outcome badge. Success shows the real elapsed
      * time; failure/skip shows 跳过. No-op unless enhancement is on AND the status
-     * toggle is on.
-     */
-    private fun showEnhancementOutcome(success: Boolean, elapsedMillis: Long) {
-        val preferences = Injekt.get<ReaderPreferences>()
-        if (preferences.enhancementMode.get() == 0 || !preferences.showEnhancementStatus.get()) return
-        val tv = ensureEnhanceStatusView()
-        tv.text = if (success) {
-            String.format(java.util.Locale.US, "OK %.1fs", elapsedMillis / 1000f)
-        } else {
-            "跳过"
-        }
-        tv.visibility = View.VISIBLE
-    }
-
-    /**
-     * MihonSY: shows the enhancement outcome badge. Success shows the real elapsed
-     * time; failure/skip shows 跳过. No-op unless enhancement is on AND the status
      * toggle is on. Enhancement itself runs synchronously inside the Coil decoder,
      * so this is only called from the Coil success/error listeners.
      */
