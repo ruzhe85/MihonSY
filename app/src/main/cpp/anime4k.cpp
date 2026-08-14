@@ -175,6 +175,10 @@ int Anime4K::load(const std::vector<std::string> &shaders,
       full_fs += "#define " + b + "_texOff(off) texture(" + b +
                  "_tex, vTexCoord + off / " + b + "_size)\n";
       full_fs += "#define " + b + "_pos vTexCoord\n";
+      // MihonSY fix: mpv defines NAME_pt as the pixel-texel step (1 / size);
+      // Depth-to-Space and some conv layers use NAME_pt (e.g.
+      // 'conv2d_last_tf_pt') to compute sampling offsets.
+      full_fs += "#define " + b + "_pt (vec2(1.0) / " + b + "_size)\n";
     }
     // MihonSY fix: mpv-style shaders hardcode 'go_0(x,y) (MAIN_texOff(...))' and
     // 'MAIN' refers to the CURRENT pass input (= the first bind target), not
@@ -187,6 +191,7 @@ int Anime4K::load(const std::vector<std::string> &shaders,
         full_fs += "#define MAIN_tex(pos) " + first + "_tex(pos)\n";
         full_fs += "#define MAIN_texOff(off) " + first + "_texOff(off)\n";
         full_fs += "#define MAIN_pos " + first + "_pos\n";
+        full_fs += "#define MAIN_pt " + first + "_pt\n";
       }
     }
     full_fs += fragment_body;
@@ -250,8 +255,10 @@ int Anime4K::load(const std::vector<std::string> &shaders,
         // (from //!HOOK, e.g. MAIN)". Only this exact alias resolves to the hook
         // target. Any other BIND name (conv2d_tf, STATSMAX, ...) refers to a
         // texture created by an earlier pass's SAVE and must stay as-is.
+        // PREKERNEL is the pre-processing input stage: for our pipeline it is the
+        // original MAIN texture (De-Ring-Clamp hooks PREKERNEL).
         if (b == "HOOKED" && !hook_target.empty()) {
-          pass.bind_alias[b] = hook_target;
+          pass.bind_alias[b] = (hook_target == "PREKERNEL") ? "MAIN" : hook_target;
         }
         continue;
       }
