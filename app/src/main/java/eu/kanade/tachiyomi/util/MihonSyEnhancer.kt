@@ -166,16 +166,39 @@ object MihonSyEnhancer {
         val mode = preferences.enhancementMode.get()
         val result = when (mode) {
             1 -> {
+                // MihonSY: Anime4K uses a GLES context, which is bound to the thread
+                // that created it. Coil decodes on a thread pool, so running A4K on the
+                // calling thread would make eglMakeCurrent fail with EGL_BAD_ACCESS.
+                // Always run ALL A4K work (init + process) on the single-threaded
+                // executor and block the decode thread until it finishes.
                 val a4kMode = preferences.anime4kMode.get()
-                val argb = ensureArgb(input) ?: run {
-                    onComplete?.invoke(false, SystemClock.uptimeMillis() - start)
-                    return null
+                val latch = java.util.concurrent.CountDownLatch(1)
+                var a4kResult: Bitmap? = null
+                var a4kError: Exception? = null
+                executor.execute {
+                    try {
+                        val argb = ensureArgb(input)
+                        if (argb != null &&
+                            initAnime4K(Injekt.get<Application>(), a4kMode) &&
+                            anime4kSupportsSize(argb.width, argb.height)
+                        ) {
+                            a4kResult = nativeProcessAnime4K(argb).takeUnless { it === argb }
+                        }
+                    } catch (e: Exception) {
+                        a4kError = e
+                    } finally {
+                        latch.countDown()
+                    }
                 }
-                if (initAnime4K(Injekt.get<Application>(), a4kMode) && anime4kSupportsSize(argb.width, argb.height)) {
-                    nativeProcessAnime4K(argb).takeUnless { it === argb }
-                } else {
-                    null
+                try {
+                    latch.await()
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
                 }
+                if (a4kError != null) {
+                    logcat(LogPriority.WARN, a4kError) { "Anime4K enhancement failed" }
+                }
+                a4kResult
             }
 
             2 -> {

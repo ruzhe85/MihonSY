@@ -89,11 +89,7 @@ private fun ColumnScope.ImageEnhancementSettings(screenModel: ReaderSettingsScre
 
     val enhancementMode by screenModel.preferences.enhancementMode.collectAsState()
     SettingsChipRow(MR.strings.pref_enhancement_mode) {
-        // MihonSY: Anime4K (index 1) is temporarily hidden while Lanczos3 is being
-        // validated; the index mapping (0 Off / 1 Anime4K / 2 Lanczos3) is preserved
-        // so old stored values remain meaningful.
         ReaderPreferences.EnhancementModes.forEachIndexed { index, label ->
-            if (index == 1) return@forEachIndexed
             FilterChip(
                 selected = enhancementMode == index,
                 onClick = { screenModel.preferences.enhancementMode.set(index) },
@@ -103,8 +99,16 @@ private fun ColumnScope.ImageEnhancementSettings(screenModel: ReaderSettingsScre
     }
 
     if (enhancementMode == 1) {
-        // Anime4K (index 1) is hidden while Lanczos3 is validated; an old stored
-        // value of 1 shows no selected chip — the user just picks Lanczos3.
+        val anime4kMode by screenModel.preferences.anime4kMode.collectAsState()
+        SettingsChipRow(MR.strings.pref_anime4k_mode) {
+            ReaderPreferences.Anime4kModes.forEachIndexed { index, label ->
+                FilterChip(
+                    selected = anime4kMode == index,
+                    onClick = { screenModel.preferences.anime4kMode.set(index) },
+                    label = { Text(stringResource(label)) },
+                )
+            }
+        }
     } else if (enhancementMode == 2) {
         val lanczosScale by screenModel.preferences.lanczosScale.collectAsState()
         SettingsChipRow(MR.strings.pref_lanczos_scale) {
