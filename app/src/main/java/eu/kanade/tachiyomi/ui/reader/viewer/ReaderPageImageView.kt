@@ -265,6 +265,12 @@ open class ReaderPageImageView @JvmOverloads constructor(
         val preferences = Injekt.get<ReaderPreferences>()
         val mode = preferences.enhancementMode.get()
         if (mode == 0) return
+        // MihonSY: only enhance the page the user is actually looking at — pre-loaded
+        // neighbours queue behind the single-threaded enhancer and make it feel slow.
+        // Webtoon pages scroll continuously; requiring a fully-visible rect would
+        // skip enhancement the moment a page is partially off-screen.
+        val shouldEnhance = if (isWebtoon) isShown else isVisibleOnScreen()
+        if (!shouldEnhance) return
         val generation = ++enhanceGeneration
         val statusView = if (preferences.showEnhancementStatus.get()) ensureEnhanceStatusView() else null
         val startTime = android.os.SystemClock.uptimeMillis()
@@ -277,8 +283,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     inDither = false
                 }
                 val original = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return@submit null
-                // Cap memory for huge webtoon strips: sample down to a sane long edge.
-                val maxDim = 4096
+                // MihonSY: cap the long edge at 2048 — Lanczos3 at 2x on a 4096px
+                // image takes tens of seconds on a phone; 2048 (-> 4096 after 2x) is
+                // already beyond any phone screen and fast enough (~1-3s).
+                val maxDim = 2048
                 val sampled = if (original.width > maxDim || original.height > maxDim) {
                     val ratio = maxDim.toFloat() / maxOf(original.width, original.height)
                     val scaled = Bitmap.createScaledBitmap(
@@ -292,7 +300,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 } else {
                     original
                 }
-                MihonSyEnhancer.enhance(sampled, preferences)
+                val enhanced = MihonSyEnhancer.enhance(sampled, preferences)
+                // The source bitmap is no longer needed once enhancement ran.
+                if (enhanced !== sampled) sampled.recycle()
+                enhanced
             },
             onProgress = { elapsedMillis ->
                 if (generation == enhanceGeneration && statusView != null) {
@@ -302,7 +313,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
             },
             onResult = { enhanced ->
                 val elapsed = android.os.SystemClock.uptimeMillis() - startTime
-                if (generation != enhanceGeneration || enhanced.isRecycled || !isVisibleOnScreen()) {
+                // MihonSY: apply whenever the page still owns this image (generation
+                // unchanged) — the view may have scrolled off-screen, but keeping the
+                // enhanced bitmap means it is ready when the user scrolls back.
+                if (generation != enhanceGeneration || enhanced.isRecycled) {
                     enhanced.recycle()
                     return@submit
                 }
