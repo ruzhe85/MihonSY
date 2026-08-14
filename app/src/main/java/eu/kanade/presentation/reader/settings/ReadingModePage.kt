@@ -102,6 +102,13 @@ private fun ColumnScope.ImageEnhancementSettings(screenModel: ReaderSettingsScre
         }
     }
 
+    // MihonSY: enhancement status overlay toggle, available right here in the
+    // reader settings so the user does not have to dig into the app settings.
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_show_enhancement_status),
+        pref = screenModel.preferences.showEnhancementStatus,
+    )
+
     if (enhancementMode == 1) {
         // Anime4K (index 1) hidden — an old stored value of 1 shows no chip.
     } else if (enhancementMode == 2) {

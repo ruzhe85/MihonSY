@@ -500,10 +500,10 @@
     <string name="pref_webtoon_original_resolution">Original resolution</string>
     <string name="pref_image_enhancement_group">Image enhancement</string>
     <string name="pref_enhancement_mode">Enhancement algorithm</string>
-    <string name="pref_enhancement_mode_summary">Lanczos3 (CPU) enhancement. Not applied in webtoon modes or to vertical strip images; first image takes a few seconds.</string>
+    <string name="pref_enhancement_mode_summary">Lanczos3 enhancement, applies to all reading modes and image sizes; the first image takes a few seconds.</string>
     <string name="enhancement_off">Off</string>
-    <string name="enhancement_anime4k">Anime4K (GPU)</string>
-    <string name="enhancement_lanczos3">Lanczos3 (CPU)</string>
+    <string name="enhancement_anime4k">Anime4K</string>
+    <string name="enhancement_lanczos3">Lanczos3</string>
     <string name="pref_anime4k">Anime4K (GPU)</string>
     <string name="pref_anime4k_summary">Real-time GPU upscaling for line art; no heavy models</string>
     <string name="pref_anime4k_mode">Anime4K quality</string>
