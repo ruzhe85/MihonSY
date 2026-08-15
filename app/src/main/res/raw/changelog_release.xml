@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<changelog bulletedList="true">
+    <changelogversion versionName="1.0.5" changeDate="August 15,2026">
+        <changelogtext>[b]MihonSY 1.0.5 (6)[/b]</changelogtext>
+        <changelogtext>[b]修复[/b] 开启图像增强时，已下载的 CBZ 章节不再闪退，增强可正常处理</changelogtext>
+    </changelogversion>
+    <changelogversion versionName="1.0.4" changeDate="August 13,2026">
+        <changelogtext>[b]MihonSY 1.0.4 (5)[/b]</changelogtext>
+        <changelogtext>[b]优化[/b] 图像增强部分重做：所有阅读模式（翻页 / 条漫 / 长条图）下都能生效；关闭增强时恢复原始高清直出解码</changelogtext>
+        <changelogtext>[b]新增[/b] 增强状态显示器：图像增强设置中新增「显示增强状态」开关（默认关闭），开启后在图片左下方显示增强耗时（完成后显示 OK）</changelogtext>
+    </changelogversion>
+    <changelogversion versionName="1.0.3" changeDate="August 13,2026">
+        <changelogtext>[b]MihonSY 1.0.3 (4)[/b]</changelogtext>
+        <changelogtext>[b]调整[/b] 条漫点击滚动「全屏」档位改为滚动"屏幕高度 − 23dp 边距"，每次点击完整滚动一屏并露出一点下一页内容；「半屏」「3/4 屏」档位不变</changelogtext>
+        <changelogtext>[b]移除[/b] 1.0.2 的"滚动后自动吸附页面"功能（实测导致滚动距离偏离设置值）</changelogtext>
+    </changelogversion>
+    <changelogversion versionName="1.0.2" changeDate="August 13,2026">
+        <changelogtext>[b]MihonSY 1.0.2 (3)[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 条漫点击滚动自动对齐页面：滚动结束后吸附到最近的页面顶部（越过半页则前进到下一页），始终停在完整页面上</changelogtext>
+        <changelogtext>[b]调整[/b] 欢迎页不再显示"崩溃日志"与"数据分析"选项</changelogtext>
+    </changelogversion>
+    <changelogversion versionName="1.0.1" changeDate="August 13,2026">
+        <changelogtext>[b]MihonSY 1.0.1 (2)[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 条漫点击滚动距离：半屏 / 3/4 屏 / 全屏</changelogtext>
+        <changelogtext>[b]新增[/b] 点击滚动匀速动画，时长可调（0–1000ms，默认 250ms）</changelogtext>
+        <changelogtext>[b]新增[/b] 自动条漫判定检查前几页图片宽高比（高/宽 > 2.5）</changelogtext>
+        <changelogtext>[b]新增[/b] Komga 进度同步只标记实际读到的那一话（逐本 PATCH），其他章节不受影响</changelogtext>
+        <changelogtext>[b]新增[/b] 图像增强：Anime4K（GPU shader，Fast/High/Ultra）与 Lanczos3（CPU，1.5x/2x/3x），轻量无大模型</changelogtext>
+        <changelogtext>[b]新增[/b] 条漫模式「原始分辨率」显示（1:1 像素，不缩放）</changelogtext>
+        <changelogtext>[b]新增[/b] 下载兼容：SAF 改名不可用时自动回退"复制 + 删除临时文件"（卓易通/HarmonyOS，移植自 zsyou/mihon-harmony）</changelogtext>
+        <changelogtext>[b]修复[/b] 点击滚动更流畅：匀速线性动画，无卡顿</changelogtext>
+        <changelogtext>[b]修复[/b] 封面为横向图时自动条漫也能立即切换</changelogtext>
+    </changelogversion>
+</changelog>
