@@ -20,6 +20,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # MihonSY: cache Gradle dependencies — the dependency download is the bulk
+      # of the 12-18 min build; caching cuts rebuilds to roughly half.
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', '**/gradle.properties') }}
+          restore-keys: |
+            gradle-
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
