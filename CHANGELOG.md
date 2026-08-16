@@ -5,6 +5,17 @@
 
 [中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
 
+## v1.0.6 (MihonSY)
+
+### 新增
+
+- **图像增强新增两种算法**：Catmull-Rom 与 Spline36（与 Lanczos3 并列可选，均支持 1.5x / 2x / 2.5x / 3x 倍率）。Catmull-Rom 更锐利、Spline36 细节重建更充分，可按画面偏好选择。
+
+### 优化与修复
+
+- **全新应用图标**：换上新的蓝色调看板娘图标。
+- **启动页与更多页图标同步更新**：启动画面和「更多」页顶部的图标均换为 MihonSY 图标（原 TachiyomiSY 图标移除）。
+
 ## v1.0.5 (MihonSY)
 
 ### 优化与修复

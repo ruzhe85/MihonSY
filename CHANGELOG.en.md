@@ -6,6 +6,20 @@
 
 [中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
 
+## v1.0.6 (MihonSY)
+
+### New
+
+- **Two new enhancement algorithms**: Catmull-Rom and Spline36 (selectable
+  alongside Lanczos3, all supporting 1.5x / 2x / 2.5x / 3x). Catmull-Rom is
+  sharper, Spline36 reconstructs more detail — pick by preference.
+
+### Improvements & Fixes
+
+- **New app icon**: a blue-toned mascot icon.
+- **Splash & More-page icons updated**: the splash screen and the More-page
+  header now show the MihonSY icon (the legacy TachiyomiSY logo is gone).
+
 ## v1.0.5 (MihonSY)
 
 ### Improvements & Fixes
