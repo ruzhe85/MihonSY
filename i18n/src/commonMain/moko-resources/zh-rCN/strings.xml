@@ -349,6 +349,8 @@
     <string name="enhancement_off">关闭</string>
     <string name="enhancement_anime4k">Anime4K</string>
     <string name="enhancement_lanczos3">Lanczos3</string>
+    <string name="enhancement_catmull_rom">Catmull-Rom</string>
+    <string name="enhancement_spline36">Spline36</string>
     <string name="pref_anime4k">Anime4K（GPU）</string>
     <string name="pref_anime4k_summary">GPU 实时放大，适合线条类漫画，无重型模型</string>
     <string name="pref_anime4k_mode">Anime4K 档位</string>

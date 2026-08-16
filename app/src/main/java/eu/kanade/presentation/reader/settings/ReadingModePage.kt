@@ -104,7 +104,8 @@ private fun ColumnScope.ImageEnhancementSettings(screenModel: ReaderSettingsScre
 
     if (enhancementMode == 1) {
         // Anime4K (index 1) hidden — an old stored value of 1 shows no chip.
-    } else if (enhancementMode == 2) {
+    } else if (enhancementMode in 2..4) {
+        // Lanczos3 / Catmull-Rom / Spline36 — scale selection applies to all three.
         val lanczosScale by screenModel.preferences.lanczosScale.collectAsState()
         SettingsChipRow {
             ReaderPreferences.LanczosScaleOptions.forEach { (value, label) ->

@@ -13,6 +13,7 @@ namespace {
 
 constexpr int LANCZOS_A = 3;
 
+// Lanczos-3 kernel (a=3 windowed sinc).
 inline float lanczosKernel(float x) {
   if (x == 0.0f) return 1.0f;
   if (x <= -LANCZOS_A || x >= LANCZOS_A) return 0.0f;
@@ -20,15 +21,41 @@ inline float lanczosKernel(float x) {
   return (LANCZOS_A * std::sin(pix) * std::sin(pix / LANCZOS_A)) / (pix * pix);
 }
 
+// Catmull-Rom cubic spline (Mitchell-Netravali with b=0, c=0.5), support |x| < 2.
+inline float catmullRomKernel(float x) {
+  x = std::fabs(x);
+  if (x >= 2.0f) return 0.0f;
+  if (x < 1.0f) return 1.5f * x * x * x - 2.5f * x * x + 1.0f;
+  return -0.5f * x * x * x + 2.5f * x * x - 4.0f * x + 2.0f;
+}
+
+// Spline36 (AviSynth 6-tap spline), support |x| < 3. Coefficients from the
+// reference implementation: ((13/11)x - 453/209)x - 3/209)x + 1 and the
+// shifted (x-1), (x-2) pieces.
+inline float spline36Kernel(float x) {
+  x = std::fabs(x);
+  if (x >= 3.0f) return 0.0f;
+  if (x < 1.0f) return ((13.0f / 11.0f) * x - 453.0f / 209.0f) * x * x - (3.0f / 209.0f) * x + 1.0f;
+  if (x < 2.0f) {
+    const float u = x - 1.0f;
+    return ((-6.0f / 11.0f) * u - 270.0f / 209.0f) * u * u - (156.0f / 209.0f) * u;
+  }
+  const float v = x - 2.0f;
+  return ((1.0f / 11.0f) * v - 45.0f / 209.0f) * v * v + (26.0f / 209.0f) * v;
+}
+
+using KernelFn = float (*)(float);
+
 /**
- * Straight-alpha aware Lanczos-3 resampler over RGBA_8888 pixels.
+ * Straight-alpha aware separable resampler over RGBA_8888 pixels.
  *
  * Implemented as two separable 1D passes (horizontal then vertical) instead of
- * a direct 2D convolution: the Lanczos kernel factorizes k(x,y)=k(x)*k(y), so a
- * 2D 6x6 window collapses to 6+6 taps per output pixel — ~3x faster on CPU with
- * bit-identical results.
+ * a direct 2D convolution: the kernel factorizes k(x,y)=k(x)*k(y), so a 2D
+ * window collapses to 2*radius taps per output pixel — ~3x faster on CPU with
+ * bit-identical results. [kernel] selects Lanczos3 / Catmull-Rom / Spline36.
  */
-void resizeLanczos3(const unsigned char *src, int sw, int sh, unsigned char *dst, int dw, int dh) {
+void resizeGeneric(const unsigned char *src, int sw, int sh, unsigned char *dst, int dw,
+                   int dh, KernelFn kernel, int radius) {
   // Pass 1: horizontal scale into a temporary buffer (dw x sh).
   std::vector<unsigned char> tmp(static_cast<size_t>(dw) * sh * 4);
   {
@@ -38,12 +65,12 @@ void resizeLanczos3(const unsigned char *src, int sw, int sh, unsigned char *dst
       unsigned char *trow = tmp.data() + static_cast<size_t>(y) * dw * 4;
       for (int x = 0; x < dw; ++x) {
         const float cx = (x + 0.5f) * sx - 0.5f;
-        const int x0 = static_cast<int>(std::floor(cx - LANCZOS_A));
-        const int x1 = static_cast<int>(std::ceil(cx + LANCZOS_A));
+        const int x0 = static_cast<int>(std::floor(cx - radius));
+        const int x1 = static_cast<int>(std::ceil(cx + radius));
         float r = 0, g = 0, b = 0, alpha = 0;
         for (int i = x0; i <= x1; ++i) {
           const int sxx = std::max(0, std::min(sw - 1, i));
-          const float w = lanczosKernel(cx - i);
+          const float w = kernel(cx - i);
           const unsigned char *p = srow + static_cast<size_t>(sxx) * 4;
           const float pa = p[3] / 255.0f;
           r += p[0] * pa * w;
@@ -71,15 +98,15 @@ void resizeLanczos3(const unsigned char *src, int sw, int sh, unsigned char *dst
     const float sy = sh / static_cast<float>(dh);
     for (int y = 0; y < dh; ++y) {
       const float cy = (y + 0.5f) * sy - 0.5f;
-      const int y0 = static_cast<int>(std::floor(cy - LANCZOS_A));
-      const int y1 = static_cast<int>(std::ceil(cy + LANCZOS_A));
+      const int y0 = static_cast<int>(std::floor(cy - radius));
+      const int y1 = static_cast<int>(std::ceil(cy + radius));
       unsigned char *drow = dst + static_cast<size_t>(y) * dw * 4;
       for (int x = 0; x < dw; ++x) {
         float r = 0, g = 0, b = 0, alpha = 0;
         const unsigned char *trow0 = tmp.data() + static_cast<size_t>(x) * 4;
         for (int j = y0; j <= y1; ++j) {
           const int syy = std::max(0, std::min(sh - 1, j));
-          const float w = lanczosKernel(cy - j);
+          const float w = kernel(cy - j);
           const unsigned char *t = trow0 + static_cast<size_t>(syy) * dw * 4;
           const float pa = t[3] / 255.0f;
           r += t[0] * pa * w;
@@ -103,11 +130,39 @@ void resizeLanczos3(const unsigned char *src, int sw, int sh, unsigned char *dst
   }
 }
 
+// Kernel selector: 0 = Lanczos3, 1 = Catmull-Rom, 2 = Spline36.
+void resizeWithKernel(const unsigned char *src, int sw, int sh, unsigned char *dst, int dw,
+                      int dh, int kernel) {
+  switch (kernel) {
+    case 1:
+      resizeGeneric(src, sw, sh, dst, dw, dh, catmullRomKernel, 2);
+      break;
+    case 2:
+      resizeGeneric(src, sw, sh, dst, dw, dh, spline36Kernel, 3);
+      break;
+    default:
+      resizeGeneric(src, sw, sh, dst, dw, dh, lanczosKernel, LANCZOS_A);
+      break;
+  }
+}
+
 }  // namespace
+
+static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jint kernel);
 
 extern "C" JNIEXPORT jobject JNICALL
 Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeLanczosProcess(
     JNIEnv *env, jobject thiz, jobject bitmap, jfloat scale) {
+  return nativeResampleImpl(env, bitmap, scale, 0);
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeResample(
+    JNIEnv *env, jobject thiz, jobject bitmap, jfloat scale, jint kernel) {
+  return nativeResampleImpl(env, bitmap, scale, kernel);
+}
+
+static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jint kernel) {
   if (scale <= 1.0f) return bitmap;
 
   AndroidBitmapInfo info;
@@ -154,8 +209,8 @@ Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeLanczosProcess(
     return bitmap;
   }
 
-  resizeLanczos3(static_cast<const unsigned char *>(pixels), info.width, info.height,
-                 static_cast<unsigned char *>(outPixels), dw, dh);
+  resizeWithKernel(static_cast<const unsigned char *>(pixels), info.width, info.height,
+                   static_cast<unsigned char *>(outPixels), dw, dh, kernel);
 
   // MihonSY defensive check (BEFORE unlock — the pointer is invalid afterwards):
   // if the resampler produced an all-transparent or all-black image, fall back to
@@ -173,7 +228,7 @@ Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeLanczosProcess(
       if (px[k + 3] != 0) ++nonZeroAlpha;
     }
     if (nonZeroRgb == 0 || nonZeroAlpha == 0) {
-      LOGE("Lanczos3 output is blank (rgb=%zu alpha=%zu), returning original bitmap",
+      LOGE("Resample output is blank (rgb=%zu alpha=%zu), returning original bitmap",
            nonZeroRgb, nonZeroAlpha);
       jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
       jmethodID recycleMethod = env->GetMethodID(bitmapClass, "recycle", "()V");

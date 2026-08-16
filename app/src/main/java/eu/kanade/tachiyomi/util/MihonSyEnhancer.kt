@@ -14,9 +14,10 @@ import java.util.concurrent.Executors
 /**
  * Lightweight image enhancement for MihonSY.
  *
- * Only two algorithms are bundled, both are cheap enough for mobile:
+ * Only four algorithms are bundled, all cheap enough for mobile:
  *  - Anime4K: real-time GPU (GLES) shader upscaling, great for line art / webtoon style.
- *  - Lanczos3: classic CPU resampling, memory-friendly and fully deterministic.
+ *  - Lanczos3 / Catmull-Rom / Spline36: classic CPU resampling, memory-friendly and
+ *    fully deterministic.
  *
  * No heavyweight CNN models (waifu2x / Real-CUGAN / Real-ESRGAN) are included.
  */
@@ -47,6 +48,7 @@ object MihonSyEnhancer {
     private external fun nativeGetMaxTextureSize(): Int
     private external fun nativeProcessAnime4K(bitmap: Bitmap): Bitmap
     private external fun nativeLanczosProcess(bitmap: Bitmap, scale: Float): Bitmap
+    private external fun nativeResample(bitmap: Bitmap, scale: Float, kernel: Int): Bitmap
 
     // Initialisation ----------------------------------------------------------------
 
@@ -217,14 +219,20 @@ object MihonSyEnhancer {
                 a4kResult
             }
 
-            2 -> {
+            // MihonSY: CPU resamplers — Lanczos3 (2), Catmull-Rom (3), Spline36 (4).
+            // kernel id: 0 = Lanczos3, 1 = Catmull-Rom, 2 = Spline36 (native side).
+            in 2..4 -> {
                 val scale = preferences.lanczosScale.get() / 100f
                 val argb = ensureArgb(input) ?: run {
                     onComplete?.invoke(false, SystemClock.uptimeMillis() - start)
                     return null
                 }
                 if (scale > 1f) {
-                    nativeLanczosProcess(argb, scale).takeUnless { it === argb }
+                    when (mode) {
+                        3 -> nativeResample(argb, scale, 1)
+                        4 -> nativeResample(argb, scale, 2)
+                        else -> nativeLanczosProcess(argb, scale)
+                    }.takeUnless { it === argb }
                 } else {
                     null
                 }

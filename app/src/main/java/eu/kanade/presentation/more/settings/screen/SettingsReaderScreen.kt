@@ -330,7 +330,7 @@ object SettingsReaderScreen : SearchableSettings {
                     entries = ReaderPreferences.LanczosScaleOptions
                         .associate { it.first to stringResource(it.second) },
                     title = stringResource(MR.strings.pref_lanczos_scale),
-                    enabled = enhancementMode == 2,
+                    enabled = enhancementMode in 2..4,
                 ),
                 // MihonSY: independent toggle for the enhancement status overlay.
                 // Enhancing does NOT auto-show it; the user must enable this.

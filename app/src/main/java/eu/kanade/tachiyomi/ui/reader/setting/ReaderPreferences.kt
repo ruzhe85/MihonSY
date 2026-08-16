@@ -310,10 +310,13 @@ class ReaderPreferences(
         val WebtoonTapScrollFractions = floatArrayOf(0.5f, 0.75f, 1.0f)
 
         // MihonSY image enhancement -->
+        // index: 0 Off / 1 Anime4K (hidden) / 2 Lanczos3 / 3 Catmull-Rom / 4 Spline36
         val EnhancementModes = listOf(
             MR.strings.enhancement_off,
             MR.strings.enhancement_anime4k,
             MR.strings.enhancement_lanczos3,
+            MR.strings.enhancement_catmull_rom,
+            MR.strings.enhancement_spline36,
         )
 
         val Anime4kModes = listOf(
