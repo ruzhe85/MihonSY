@@ -1,0 +1,6 @@
+- name: 上传APK
+  uses: actions/upload-artifact@v4
+  with:
+    name: apk-build
+    path: app/build/outputs/apk/**/*.apk
+    retention-days: 1   # 只保存1天，大幅省存储
