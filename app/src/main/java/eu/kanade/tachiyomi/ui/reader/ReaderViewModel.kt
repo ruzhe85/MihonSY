@@ -650,9 +650,15 @@ class ReaderViewModel @JvmOverloads constructor(
      * [AUTO_WEBTOON_MIN_ASPECT_RATIO]) the manga is a webtoon and its reading mode is set
      * permanently. Only when all of them turn out normal-sized does the check give up.
      *
+     * Triggered from TWO places (MihonSY):
+     *  1. [onPageSelected] — fallback, fires on page turns.
+     *  2. [ReaderActivity.onPageLoaded] — a page's image finished decoding, so the
+     *     aspect-ratio check runs the moment a strip is Ready, without waiting for the
+     *     user to scroll to it.
+     *
      * Complements the tag/source based detection in [getMangaReadingMode].
      */
-    private fun maybeAutoWebtoonByAspectRatio(page: ReaderPage) {
+    internal fun maybeAutoWebtoonByAspectRatio(page: ReaderPage) {
         if (autoWebtoonAspectDone) return
         if (!readerPreferences.useAutoWebtoon.get()) return
         val manga = manga ?: return

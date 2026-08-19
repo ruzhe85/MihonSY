@@ -416,6 +416,9 @@ class PagerPageHolder(
     override fun onImageLoaded() {
         super.onImageLoaded()
         progressIndicator?.hide()
+        // MihonSY: page image is Ready — let the auto-webtoon check run immediately
+        // (its own guards make it a cheap no-op once done/decided).
+        viewer.activity.onPageLoaded(page)
     }
 
     /**

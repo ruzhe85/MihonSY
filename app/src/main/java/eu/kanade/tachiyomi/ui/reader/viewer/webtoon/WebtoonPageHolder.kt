@@ -93,6 +93,9 @@ class WebtoonPageHolder(
                 frame.layoutParams?.height = frame.imageSHeight
                 frame.requestLayout()
             }
+            // MihonSY: page image is Ready — let the auto-webtoon check run immediately
+            // (its own guards make it a cheap no-op once done/decided).
+            page?.let { viewer.activity.onPageLoaded(it) }
         }
         frame.onImageLoadError = { error -> setError(error) }
         frame.onScaleChanged = { viewer.activity.hideMenu() }

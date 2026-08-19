@@ -1069,6 +1069,17 @@ class ReaderActivity : BaseActivity() {
         // SY <--
     }
 
+    // MihonSY -->
+    /**
+     * Called from the page holders the moment a [page]'s image finishes decoding
+     * (page is Ready). Forwards to the auto-webtoon check so it runs immediately
+     * when a strip is ready, instead of waiting for the user to scroll to it.
+     */
+    fun onPageLoaded(page: ReaderPage) {
+        viewModel.maybeAutoWebtoonByAspectRatio(page)
+    }
+    // MihonSY <--
+
     /**
      * Called from the viewer whenever a [page] is long clicked. A bottom sheet with a list of
      * actions to perform is shown.
