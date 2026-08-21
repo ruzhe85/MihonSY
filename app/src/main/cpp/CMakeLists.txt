@@ -3,12 +3,14 @@ project(mihonsy-enhance)
 
 set(CMAKE_CXX_STANDARD 17)
 
-# Lightweight image enhancement: Anime4K (GPU shaders) + Lanczos3 (CPU resampling).
-# No heavy CNN / ncnn models are used.
+# Lightweight image enhancement: Lanczos3 / Catmull-Rom CPU resampling only.
+# Anime4K (GPU shaders) files are retained on disk but intentionally excluded from
+# the build (commented out below) — it is no longer used. No heavy CNN / ncnn models.
 set(ENHANCE_SOURCES
-    anime4k.cpp
     lanczos3.cpp
-    mihonsy_jni.cpp
+    # MihonSY: Anime4K disabled — excluded from the build so it never compiles.
+    # anime4k.cpp
+    # mihonsy_jni.cpp
 )
 
 add_library(mihonsy-enhance SHARED ${ENHANCE_SOURCES})
@@ -19,6 +21,7 @@ target_link_libraries(mihonsy-enhance
     android
     log
     jnigraphics
-    GLESv3
-    EGL
+    # MihonSY: GLESv3 / EGL only needed by Anime4K, now disabled.
+    # GLESv3
+    # EGL
 )

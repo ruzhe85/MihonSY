@@ -200,10 +200,13 @@ class ReaderPreferences(
     )
 
     // MihonSY image enhancement -->
-    /** 0 = Off, 1 = Anime4K, 2 = Lanczos3. Single selector so the two algorithms never conflict. */
+    /** 0 = Off, 1 = Anime4K (disabled), 2 = Lanczos3, 3 = Catmull-Rom, 4 = Spline36 (disabled).
+     *  Single selector so the two algorithms never conflict. Anime4K/Spline36 are retained
+     *  in the index map for backward-compatible stored values but excluded from the build. */
     val enhancementMode: Preference<Int> = preferenceStore.getInt("pref_enhancement_mode", 0)
 
-    val anime4kMode: Preference<Int> = preferenceStore.getInt("pref_anime4k_mode", 0) // 0 Fast, 1 High, 2 Ultra
+    // MihonSY: Anime4K disabled — preference retained for stored-value compatibility only.
+    // val anime4kMode: Preference<Int> = preferenceStore.getInt("pref_anime4k_mode", 0) // 0 Fast, 1 High, 2 Ultra
 
     val lanczosScale: Preference<Int> = preferenceStore.getInt("pref_lanczos_scale", 200) // 150/200/300 = 1.5x/2x/3x
 
@@ -310,20 +313,21 @@ class ReaderPreferences(
         val WebtoonTapScrollFractions = floatArrayOf(0.5f, 0.75f, 1.0f)
 
         // MihonSY image enhancement -->
-        // index: 0 Off / 1 Anime4K (hidden) / 2 Lanczos3 / 3 Catmull-Rom / 4 Spline36
+        // index: 0 Off / 1 Anime4K (disabled) / 2 Lanczos3 / 3 Catmull-Rom / 4 Spline36 (disabled)
         val EnhancementModes = listOf(
             MR.strings.enhancement_off,
-            MR.strings.enhancement_anime4k,
+            MR.strings.enhancement_anime4k, // retained for backward-compatible stored values; hidden in UI
             MR.strings.enhancement_lanczos3,
             MR.strings.enhancement_catmull_rom,
-            MR.strings.enhancement_spline36,
+            MR.strings.enhancement_spline36, // retained for backward-compatible stored values; hidden in UI
         )
 
-        val Anime4kModes = listOf(
-            MR.strings.anime4k_mode_fast,
-            MR.strings.anime4k_mode_high,
-            MR.strings.anime4k_mode_ultra,
-        )
+        // MihonSY: Anime4K disabled — quality list no longer referenced anywhere.
+        // val Anime4kModes = listOf(
+        //     MR.strings.anime4k_mode_fast,
+        //     MR.strings.anime4k_mode_high,
+        //     MR.strings.anime4k_mode_ultra,
+        // )
 
         val LanczosScaleOptions = listOf(
             150 to MR.strings.lanczos_scale_1_5x,

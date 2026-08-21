@@ -1,7 +1,8 @@
 package eu.kanade.tachiyomi.util
 
-import android.app.Application
-import android.content.Context
+// MihonSY: Anime4K disabled — Application/Context only used by the commented-out A4K code.
+// import android.app.Application
+// import android.content.Context
 import android.graphics.Bitmap
 import android.os.SystemClock
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
@@ -14,100 +15,98 @@ import java.util.concurrent.Executors
 /**
  * Lightweight image enhancement for MihonSY.
  *
- * Only four algorithms are bundled, all cheap enough for mobile:
- *  - Anime4K: real-time GPU (GLES) shader upscaling, great for line art / webtoon style.
- *  - Lanczos3 / Catmull-Rom / Spline36: classic CPU resampling, memory-friendly and
+ * CPU resampling algorithms are bundled, all cheap enough for mobile:
+ *  - Lanczos3 / Catmull-Rom: classic CPU resampling, memory-friendly and
  *    fully deterministic.
  *
  * No heavyweight CNN models (waifu2x / Real-CUGAN / Real-ESRGAN) are included.
+ *
+ * MihonSY: Anime4K (GPU shaders) was disabled — its native sources are no longer
+ * compiled into the build, so the Kotlin bindings below are commented out.
  */
 object MihonSyEnhancer {
 
-    private const val ANIME4K_ASSET_DIR = "anime4k"
+    // MihonSY: Anime4K disabled.
+    // private const val ANIME4K_ASSET_DIR = "anime4k"
 
     init {
         System.loadLibrary("mihonsy-enhance")
     }
 
-    /** Serialises enhancement work so the single GPU context / CPU is not contended. */
+    /** Serialises enhancement work so the single CPU is not contended. */
     private val executor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "MihonSyEnhancer").apply { priority = Thread.NORM_PRIORITY - 1 }
     }
 
-    @Volatile
-    var isAnime4kInitialized = false
-        private set
+    // MihonSY: Anime4K state removed.
+    // @Volatile
+    // var isAnime4kInitialized = false
+    //     private set
 
-    /** MihonSY: the Anime4K mode (0 Fast / 1 High / 2 Ultra) the native renderer was loaded with. */
-    @Volatile
-    private var anime4kInitializedMode = -1
+    // MihonSY: the Anime4K mode (0 Fast / 1 High / 2 Ultra) the native renderer was loaded with.
+    // @Volatile
+    // private var anime4kInitializedMode = -1
 
     // JNI bindings ------------------------------------------------------------------
 
-    private external fun nativeInitAnime4K(shaders: Array<String>, names: Array<String>): Boolean
-    private external fun nativeGetMaxTextureSize(): Int
-    private external fun nativeProcessAnime4K(bitmap: Bitmap): Bitmap
+    // MihonSY: Anime4K JNI bindings disabled (native side no longer compiled).
+    // private external fun nativeInitAnime4K(shaders: Array<String>, names: Array<String>): Boolean
+    // private external fun nativeGetMaxTextureSize(): Int
+    // private external fun nativeProcessAnime4K(bitmap: Bitmap): Bitmap
     private external fun nativeLanczosProcess(bitmap: Bitmap, scale: Float): Bitmap
     private external fun nativeResample(bitmap: Bitmap, scale: Float, kernel: Int): Bitmap
 
     // Initialisation ----------------------------------------------------------------
 
-    /**
-     * Loads the Anime4K shaders for [mode] (0 = Fast, 1 = High, 2 = Ultra) and initialises
-     * the native GLES renderer. Safe to call multiple times (idempotent).
-     */
-    fun initAnime4K(context: Context, mode: Int): Boolean {
-        // MihonSY fix: the boolean cache alone made mode switches ineffective — after
-        // initialising Fast, switching to Ultra returned true immediately and kept
-        // rendering with the old shaders (Restore 1x instead of Restore+Upscale 2x),
-        // so Ultra looked identical to Fast at 0.1s. Track the loaded mode and reload
-        // whenever it changes.
-        if (isAnime4kInitialized && anime4kInitializedMode == mode) return true
-
-        val shaders = mutableListOf<String>()
-        val names = mutableListOf<String>()
-
-        fun addShader(name: String) {
-            val content = context.assets.open("$ANIME4K_ASSET_DIR/$name")
-                .bufferedReader()
-                .use { it.readText() }
-            shaders.add(content)
-            names.add(name)
-        }
-
-        return try {
-            addShader("Anime4K_Clamp_Highlights.glsl")
-            when (mode) {
-                0 -> addShader("Anime4K_Restore_CNN_M.glsl") // Fast
-                1 -> addShader("Anime4K_Restore_CNN_VL.glsl") // High
-                else -> { // Ultra
-                    addShader("Anime4K_Restore_CNN_VL.glsl")
-                    addShader("Anime4K_Upscale_CNN_x2_VL.glsl")
-                }
-            }
-            isAnime4kInitialized = nativeInitAnime4K(shaders.toTypedArray(), names.toTypedArray())
-            if (isAnime4kInitialized) {
-                anime4kInitializedMode = mode
-            } else {
-                logcat(LogPriority.WARN) { "Anime4K native init failed" }
-            }
-            isAnime4kInitialized
-        } catch (e: Exception) {
-            logcat(LogPriority.WARN, e) { "Anime4K init failed" }
-            false
-        }
-    }
-
-    /** Anime4K renders through a full-image framebuffer, so it can only handle images that fit the GPU texture limit. */
-    fun anime4kSupportsSize(width: Int, height: Int, mode: Int = 0): Boolean {
-        val maxTexture = nativeGetMaxTextureSize()
-        if (maxTexture <= 0) return true
-        // MihonSY fix: Ultra (mode 2) scales the image 2x, so the OUTPUT texture
-        // must fit the limit — checking only the input let 2x outputs exceed the
-        // limit and render garbage/blank frames.
-        val scale = if (mode >= 2) 2 else 1
-        return width * scale <= maxTexture && height * scale <= maxTexture
-    }
+    // MihonSY: Anime4K disabled — init/size helpers removed with the native build.
+    // /**
+    //  * Loads the Anime4K shaders for [mode] (0 = Fast, 1 = High, 2 = Ultra) and initialises
+    //  * the native GLES renderer. Safe to call multiple times (idempotent).
+    //  */
+    // fun initAnime4K(context: Context, mode: Int): Boolean {
+    //     if (isAnime4kInitialized && anime4kInitializedMode == mode) return true
+    //
+    //     val shaders = mutableListOf<String>()
+    //     val names = mutableListOf<String>()
+    //
+    //     fun addShader(name: String) {
+    //         val content = context.assets.open("$ANIME4K_ASSET_DIR/$name")
+    //             .bufferedReader()
+    //             .use { it.readText() }
+    //         shaders.add(content)
+    //         names.add(name)
+    //     }
+    //
+    //     return try {
+    //         addShader("Anime4K_Clamp_Highlights.glsl")
+    //         when (mode) {
+    //             0 -> addShader("Anime4K_Restore_CNN_M.glsl") // Fast
+    //             1 -> addShader("Anime4K_Restore_CNN_VL.glsl") // High
+    //             else -> { // Ultra
+    //                 addShader("Anime4K_Restore_CNN_VL.glsl")
+    //                 addShader("Anime4K_Upscale_CNN_x2_VL.glsl")
+    //             }
+    //         }
+    //         isAnime4kInitialized = nativeInitAnime4K(shaders.toTypedArray(), names.toTypedArray())
+    //         if (isAnime4kInitialized) {
+    //             anime4kInitializedMode = mode
+    //         } else {
+    //             logcat(LogPriority.WARN) { "Anime4K native init failed" }
+    //         }
+    //         isAnime4kInitialized
+    //     } catch (e: Exception) {
+    //         logcat(LogPriority.WARN, e) { "Anime4K init failed" }
+    //         false
+    //     }
+    // }
+    //
+    // /** Anime4K renders through a full-image framebuffer, so it can only handle images that fit the GPU texture limit. */
+    // fun anime4kSupportsSize(width: Int, height: Int, mode: Int = 0): Boolean {
+    //     val maxTexture = nativeGetMaxTextureSize()
+    //     if (maxTexture <= 0) return true
+    //     val scale = if (mode >= 2) 2 else 1
+    //     return width * scale <= maxTexture && height * scale <= maxTexture
+    // }
 
     // Enhancement entry points -------------------------------------------------------
 
@@ -179,49 +178,39 @@ object MihonSyEnhancer {
             return null
         }
 
-        // Single selector: 0 = Off, 1 = Anime4K, 2 = Lanczos3. Only one algorithm runs,
-        // so there is never a question of which one takes priority.
+        // Single selector: 0 = Off, 2 = Lanczos3, 3 = Catmull-Rom.
+        // (MihonSY: Anime4K (1) and Spline36 (4) are disabled and excluded from the build.)
         val mode = preferences.enhancementMode.get()
         val result = when (mode) {
-            1 -> {
-                // MihonSY: Anime4K uses a GLES context, which is bound to the thread
-                // that created it. Coil decodes on a thread pool, so running A4K on the
-                // calling thread would make eglMakeCurrent fail with EGL_BAD_ACCESS.
-                // Always run ALL A4K work (init + process) on the single-threaded
-                // executor and block the decode thread until it finishes.
-                val a4kMode = preferences.anime4kMode.get()
-                val latch = java.util.concurrent.CountDownLatch(1)
-                var a4kResult: Bitmap? = null
-                var a4kError: Exception? = null
-                executor.execute {
-                    try {
-                        val argb = ensureArgb(input)
-                        if (argb != null &&
-                            initAnime4K(Injekt.get<Application>(), a4kMode) &&
-                            anime4kSupportsSize(argb.width, argb.height, a4kMode)
-                        ) {
-                            a4kResult = nativeProcessAnime4K(argb).takeUnless { it === argb }
-                        }
-                    } catch (e: Exception) {
-                        a4kError = e
-                    } finally {
-                        latch.countDown()
-                    }
-                }
-                try {
-                    latch.await()
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                }
-                if (a4kError != null) {
-                    logcat(LogPriority.WARN, a4kError) { "Anime4K enhancement failed" }
-                }
-                a4kResult
-            }
+            // MihonSY: Anime4K branch disabled — native side no longer compiled.
+            // 1 -> {
+            //     val a4kMode = preferences.anime4kMode.get()
+            //     val latch = java.util.concurrent.CountDownLatch(1)
+            //     var a4kResult: Bitmap? = null
+            //     var a4kError: Exception? = null
+            //     executor.execute {
+            //         try {
+            //             val argb = ensureArgb(input)
+            //             if (argb != null &&
+            //                 initAnime4K(Injekt.get<Application>(), a4kMode) &&
+            //                 anime4kSupportsSize(argb.width, argb.height, a4kMode)
+            //             ) {
+            //                 a4kResult = nativeProcessAnime4K(argb).takeUnless { it === argb }
+            //             }
+            //         } catch (e: Exception) {
+            //             a4kError = e
+            //         } finally {
+            //             latch.countDown()
+            //         }
+            //     }
+            //     try { latch.await() } catch (e: InterruptedException) { Thread.currentThread().interrupt() }
+            //     if (a4kError != null) { logcat(LogPriority.WARN, a4kError) { "Anime4K enhancement failed" } }
+            //     a4kResult
+            // }
 
-            // MihonSY: CPU resamplers — Lanczos3 (2), Catmull-Rom (3), Spline36 (4).
-            // kernel id: 0 = Lanczos3, 1 = Catmull-Rom, 2 = Spline36 (native side).
-            in 2..4 -> {
+            // MihonSY: CPU resamplers — Lanczos3 (2), Catmull-Rom (3).
+            // (Spline36 (4) disabled; kernel id: 0 = Lanczos3, 1 = Catmull-Rom native side.)
+            in 2..3 -> {
                 val scale = preferences.lanczosScale.get() / 100f
                 val argb = ensureArgb(input) ?: run {
                     onComplete?.invoke(false, SystemClock.uptimeMillis() - start)
@@ -230,7 +219,8 @@ object MihonSyEnhancer {
                 if (scale > 1f) {
                     when (mode) {
                         3 -> nativeResample(argb, scale, 1)
-                        4 -> nativeResample(argb, scale, 2)
+                        // MihonSY: Spline36 (4) disabled.
+                        // 4 -> nativeResample(argb, scale, 2)
                         else -> nativeLanczosProcess(argb, scale)
                     }.takeUnless { it === argb }
                 } else {

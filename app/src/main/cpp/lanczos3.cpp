@@ -33,20 +33,22 @@ inline float catmullRomKernel(float x) {
   return -0.5f * x * x * x + 2.5f * x * x - 4.0f * x + 2.0f;
 }
 
-inline float spline36Kernel(float x) {
-  x = std::fabs(x);
-  if (x >= 3.0f) return 0.0f;
-  if (x < 1.0f) return ((13.0f / 11.0f) * x - 453.0f / 209.0f) * x * x -
-                       (3.0f / 209.0f) * x + 1.0f;
-  if (x < 2.0f) {
-    const float u = x - 1.0f;
-    return ((-6.0f / 11.0f) * u - 270.0f / 209.0f) * u * u -
-           (156.0f / 209.0f) * u;
-  }
-  const float v = x - 2.0f;
-  return ((1.0f / 11.0f) * v - 45.0f / 209.0f) * v * v +
-         (26.0f / 209.0f) * v;
-}
+// MihonSY: Spline36 disabled — kept for reference but no longer compiled into a
+// code path. Comments out the kernel and its resizeWithKernel case below.
+// inline float spline36Kernel(float x) {
+//   x = std::fabs(x);
+//   if (x >= 3.0f) return 0.0f;
+//   if (x < 1.0f) return ((13.0f / 11.0f) * x - 453.0f / 209.0f) * x * x -
+//                        (3.0f / 209.0f) * x + 1.0f;
+//   if (x < 2.0f) {
+//     const float u = x - 1.0f;
+//     return ((-6.0f / 11.0f) * u - 270.0f / 209.0f) * u * u -
+//            (156.0f / 209.0f) * u;
+//   }
+//   const float v = x - 2.0f;
+//   return ((1.0f / 11.0f) * v - 45.0f / 209.0f) * v * v +
+//          (26.0f / 209.0f) * v;
+// }
 
 using KernelFn = float (*)(float);
 
@@ -346,11 +348,12 @@ void resizeWithKernel(const unsigned char *src, int sw, int sh, unsigned char *d
       resizeGeneric(src, sw, sh, dst, dw, dh, catmullRomKernel, 2, opaque);
       break;
     }
-    case 2: {
-      const bool opaque = isFullyOpaque(src, sw, sh);
-      resizeGeneric(src, sw, sh, dst, dw, dh, spline36Kernel, 3, opaque);
-      break;
-    }
+    // MihonSY: Spline36 (kernel id 2) disabled — spline36Kernel is commented out above.
+    // case 2: {
+    //   const bool opaque = isFullyOpaque(src, sw, sh);
+    //   resizeGeneric(src, sw, sh, dst, dw, dh, spline36Kernel, 3, opaque);
+    //   break;
+    // }
     default: {
       const bool opaque = isFullyOpaque(src, sw, sh);
       resizeGeneric(src, sw, sh, dst, dw, dh, lanczosKernel, LANCZOS_A, opaque);

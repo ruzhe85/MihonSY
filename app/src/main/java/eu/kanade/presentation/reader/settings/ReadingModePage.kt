@@ -91,9 +91,10 @@ private fun ColumnScope.ImageEnhancementSettings(screenModel: ReaderSettingsScre
     // MihonSY: no label — the "图像增强" heading + explanation Text above already
     // serve as the section title; the chip row sits directly below.
     SettingsChipRow {
-        // Anime4K (index 1) hidden — Lanczos3 measured better in practice.
+        // MihonSY: Anime4K (index 1) and Spline36 (index 4) are disabled — hidden
+        // in the UI but kept in the index map for backward-compatible stored values.
         ReaderPreferences.EnhancementModes.forEachIndexed { index, label ->
-            if (index == 1) return@forEachIndexed
+            if (index == 1 || index == 4) return@forEachIndexed
             FilterChip(
                 selected = enhancementMode == index,
                 onClick = { screenModel.preferences.enhancementMode.set(index) },
@@ -102,10 +103,10 @@ private fun ColumnScope.ImageEnhancementSettings(screenModel: ReaderSettingsScre
         }
     }
 
-    if (enhancementMode == 1) {
-        // Anime4K (index 1) hidden — an old stored value of 1 shows no chip.
-    } else if (enhancementMode in 2..4) {
-        // Lanczos3 / Catmull-Rom / Spline36 — scale selection applies to all three.
+    if (enhancementMode == 1 || enhancementMode == 4) {
+        // Anime4K / Spline36 hidden — an old stored value shows no extra chip.
+    } else if (enhancementMode in 2..3) {
+        // Lanczos3 / Catmull-Rom — scale selection applies to both.
         val lanczosScale by screenModel.preferences.lanczosScale.collectAsState()
         SettingsChipRow {
             ReaderPreferences.LanczosScaleOptions.forEach { (value, label) ->

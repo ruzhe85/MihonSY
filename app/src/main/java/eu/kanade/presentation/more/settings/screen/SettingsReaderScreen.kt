@@ -317,14 +317,15 @@ object SettingsReaderScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_enhancement_mode),
                     subtitle = stringResource(MR.strings.pref_enhancement_mode_summary),
                 ),
-                Preference.PreferenceItem.ListPreference(
-                    preference = readerPreferences.anime4kMode,
-                    entries = ReaderPreferences.Anime4kModes
-                        .mapIndexed { index, it -> index to stringResource(it) }
-                        .toMap(),
-                    title = stringResource(MR.strings.pref_anime4k_mode),
-                    enabled = enhancementMode == 1,
-                ),
+                // MihonSY: Anime4K disabled — quality selector removed from settings.
+                // Preference.PreferenceItem.ListPreference(
+                //     preference = readerPreferences.anime4kMode,
+                //     entries = ReaderPreferences.Anime4kModes
+                //         .mapIndexed { index, it -> index to stringResource(it) }
+                //         .toMap(),
+                //     title = stringResource(MR.strings.pref_anime4k_mode),
+                //     enabled = enhancementMode == 1,
+                // ),
                 Preference.PreferenceItem.ListPreference(
                     preference = readerPreferences.lanczosScale,
                     entries = ReaderPreferences.LanczosScaleOptions
