@@ -3,6 +3,8 @@ package eu.kanade.tachiyomi.data.coil
 import android.app.Application
 import android.graphics.Bitmap
 import android.os.Build
+import android.os.SystemClock
+import android.util.Log
 import coil3.ImageLoader
 import coil3.asImage
 import coil3.decode.DecodeResult
@@ -92,6 +94,15 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
             scale = options.scale,
         )
 
+        // SY_DEBUG: entry-point diagnostics — fields aligned with komihov2's KOMIHO_ENHANCE_DBG
+        // so the two logs can be compared field-by-field. (Do NOT ship; remove after diagnosis.)
+        Log.d(
+            "MIHONSY_ENHANCE_DBG",
+            "src=${srcWidth}x${srcHeight} dst=${dstWidth}x${dstHeight} target=${targetW}x${targetH} " +
+                "inSample=$sampleSize tall=$isTallStrip enhanced=${options.enhanced} " +
+                "scale=${options.scale} mode=${Injekt.get<ReaderPreferences>().enhancementMode.get()}",
+        )
+
         var bitmap = decoder.decode(sampleSize = sampleSize)
         decoder.recycle()
 
@@ -105,7 +116,19 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
             try {
                 val preferences = Injekt.get<ReaderPreferences>()
                 if (preferences.enhancementMode.get() != 0) {
+                    val inW = bitmap.width
+                    val inH = bitmap.height
+                    val t0 = SystemClock.uptimeMillis()
                     val enhanced = MihonSyEnhancer.enhance(bitmap, preferences)
+                    val elapsed = SystemClock.uptimeMillis() - t0
+                    // SY_DEBUG: elapsed + real dimensions, aligned with komihov2's
+                    // "enhance done in Xms inW=.. outW=..". (Do NOT ship; remove after diagnosis.)
+                    val outW = enhanced?.width ?: inW
+                    val outH = enhanced?.height ?: inH
+                    Log.d(
+                        "MIHONSY_ENHANCE_DBG",
+                        "enhance done in ${elapsed}ms inW=${inW}x${inH} outW=${outW}x${outH}",
+                    )
                     if (enhanced != null && enhanced !== bitmap && !enhanced.isRecycled) {
                         bitmap.recycle()
                         bitmap = enhanced
