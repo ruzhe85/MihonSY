@@ -5,6 +5,13 @@
 
 [中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
 
+## v1.0.7 (MihonSY)
+
+### 优化与变更
+
+- **重构图像增强，毫秒完成，黑屏再见**。
+- **移除效果不佳的 Spline36 算法**。
+
 ## v1.0.6 (MihonSY)
 
 ### 新增

@@ -6,6 +6,13 @@
 
 [中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
 
+## v1.0.7 (MihonSY)
+
+### Improvements & Changes
+
+- **Image enhancement reworked — done in milliseconds, no more black screen.**
+- **Removed the Spline36 algorithm (poor results).**
+
 ## v1.0.6 (MihonSY)
 
 ### New
