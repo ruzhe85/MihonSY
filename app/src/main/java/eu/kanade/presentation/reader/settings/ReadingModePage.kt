@@ -233,18 +233,8 @@ private fun ColumnScope.WebtoonViewerSettings(screenModel: ReaderSettingsScreenM
     val pageTransitionsWebtoon by screenModel.preferences.pageTransitionsWebtoon.collectAsState()
     val pageTransitionsWebtoonV2 by screenModel.preferences.pageTransitionsWebtoonV2.collectAsState()
 
+    // Komiho: 匀速动画的时长滑条，状态在此取出，控件紧挨「匀速动画」开关摆放（见下方 SY 区块）。
     val webtoonTapScrollDuration by screenModel.preferences.webtoonTapScrollDuration.collectAsState()
-    // v2 的时长按滚动距离自动算，固定时长滑条对它无效 —— 开启 v2 时隐藏，避免改了没效果。
-    if (!pageTransitionsWebtoonV2) {
-        SliderItem(
-            value = webtoonTapScrollDuration,
-            valueRange = ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MIN..ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MAX,
-            label = stringResource(MR.strings.pref_webtoon_tap_scroll_duration),
-            valueString = "${webtoonTapScrollDuration}ms",
-            onChange = { screenModel.preferences.webtoonTapScrollDuration.set(it) },
-            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        )
-    }
 
     CheckboxItem(
         label = stringResource(MR.strings.pref_webtoon_original_resolution),
@@ -285,6 +275,19 @@ private fun ColumnScope.WebtoonViewerSettings(screenModel: ReaderSettingsScreenM
             if (next) screenModel.preferences.pageTransitionsWebtoonV2.set(false)
         },
     )
+
+    // Komiho: 匀速动画的时长滑条，紧挨其开关下方，且仅在该开关开启时显示
+    // —— 两个开关都不开时点按是瞬时跳转，时长无意义。
+    if (pageTransitionsWebtoon) {
+        SliderItem(
+            value = webtoonTapScrollDuration,
+            valueRange = ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MIN..ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MAX,
+            label = stringResource(MR.strings.pref_webtoon_tap_scroll_duration),
+            valueString = "${webtoonTapScrollDuration}ms",
+            onChange = { screenModel.preferences.webtoonTapScrollDuration.set(it) },
+            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        )
+    }
 
     CheckboxItem(
         label = stringResource(SYMR.strings.pref_page_transitions_v2),
