@@ -6,6 +6,28 @@
 
 [中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
 
+## v1.1.0 (MihonSY)
+
+### New
+
+- **AI upscaling**: image enhancement now includes AI upscaling (GPU / NPU).
+  Base implementation ported from
+  [mihon_img_upscale](https://github.com/HaoweiLi97/mihon_img_upscale).
+- **Reader preload settings**: page-based and webtoon modes can now set how many
+  pages / screens to preload.
+- **Webtoon mode**: added an ease-out animation.
+
+### Improvements & Fixes
+
+- **Webtoon tap handling**: taps now trigger instantly — snappier and more
+  responsive.
+- **CBZ reading optimized**: downloaded chapters are now read on demand instead
+  of mapping the whole archive into memory, and the global read lock is gone —
+  smoother when enhancement and page loading run concurrently, lower memory
+  usage.
+- **Enhanced badge**: the enhancement status indicator now shows the backend
+  actually used and its timing per page.
+
 ## v1.0.7 (MihonSY)
 
 ### Improvements & Changes

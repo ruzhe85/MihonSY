@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <changelog bulletedList="true">
+    <changelogversion versionName="1.1.0" changeDate="September 23,2026">
+        <changelogtext>[b]MihonSY 1.1.0 (9)[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] AI 超分：图像增强加入 AI 超分（GPU / NPU），基础代码移植自 mihon_img_upscale</changelogtext>
+        <changelogtext>[b]新增[/b] 阅读器预载设置：页漫与条漫现在可以设置预载页面 / 屏幕数量</changelogtext>
+        <changelogtext>[b]新增[/b] 条漫模式：增加了缓出动画</changelogtext>
+        <changelogtext>[b]优化[/b] 条漫点击判断：点击现在会瞬时触发，更跟手流畅</changelogtext>
+        <changelogtext>[b]优化[/b] CBZ 章节读取优化：已下载章节改为按需定位读取，不再整本映射进内存；移除全局读取锁，图像增强与读图并发时更顺畅、内存占用更低</changelogtext>
+        <changelogtext>[b]优化[/b] 增强状态角标：增强状态按页显示实际生效的引擎与耗时</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.0.7" changeDate="August 22,2026">
         <changelogtext>[b]MihonSY 1.0.7 (8)[/b]</changelogtext>
         <changelogtext>[b]优化[/b] 重构图像增强，毫秒完成，黑屏再见</changelogtext>
@@ -13,10 +22,5 @@
         <changelogtext>[b]MihonSY 1.0.4 (5)[/b]</changelogtext>
         <changelogtext>[b]优化[/b] 图像增强部分重做：所有阅读模式（翻页 / 条漫 / 长条图）下都能生效；关闭增强时恢复原始高清直出解码</changelogtext>
         <changelogtext>[b]新增[/b] 增强状态显示器：图像增强设置中新增「显示增强状态」开关（默认关闭），开启后在图片左下方显示增强耗时（完成后显示 OK）</changelogtext>
-    </changelogversion>
-    <changelogversion versionName="1.0.3" changeDate="August 13,2026">
-        <changelogtext>[b]MihonSY 1.0.3 (4)[/b]</changelogtext>
-        <changelogtext>[b]调整[/b] 条漫点击滚动「全屏」档位改为滚动"屏幕高度 − 23dp 边距"，每次点击完整滚动一屏并露出一点下一页内容；「半屏」「3/4 屏」档位不变</changelogtext>
-        <changelogtext>[b]移除[/b] 1.0.2 的"滚动后自动吸附页面"功能（实测导致滚动距离偏离设置值）</changelogtext>
     </changelogversion>
 </changelog>
