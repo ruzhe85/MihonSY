@@ -26,7 +26,12 @@ data class Release(
         }
 
         // SY -->
-        return assets.find { it.contains("TachiyomiSY$apkVariant-") } ?: assets[0]
+        // MihonSY: assets are named "mihonsy-{version}-{abi}.apk", not upstream's
+        // "TachiyomiSY-{abi}-*.apk" — match on the ABI suffix and fall back to the
+        // first APK asset (the universal build) if nothing matches.
+        return assets.firstOrNull { it.endsWith("$apkVariant.apk") }
+            ?: assets.firstOrNull { it.endsWith(".apk") }
+            ?: assets[0]
         // SY <--
     }
 

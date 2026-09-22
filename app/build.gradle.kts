@@ -36,7 +36,7 @@ android {
         buildConfigField("String", "COMMIT_COUNT", "\"${getLatestCommitCount()}\"")
         buildConfigField("String", "COMMIT_SHA", "\"${getLatestCommitSha()}\"")
         buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLatestCommitTime = false)}\"")
-        buildConfigField("boolean", "INCLUDE_UPDATER", "false")
+        buildConfigField("boolean", "INCLUDE_UPDATER", "true")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -77,7 +77,7 @@ android {
             setProguardFiles(listOf(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"))
 
             buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLatestCommitTime = true)}\"")
-            buildConfigField("boolean", "INCLUDE_UPDATER", "false")
+            buildConfigField("boolean", "INCLUDE_UPDATER", "true")
         }
         create("foss") {
             initWith(getByName("release"))
@@ -86,7 +86,7 @@ android {
 
             matchingFallbacks.add("release")
 
-            buildConfigField("boolean", "INCLUDE_UPDATER", "false")
+            buildConfigField("boolean", "INCLUDE_UPDATER", "true")
         }
         create("benchmark") {
             initWith(getByName("release"))
@@ -96,7 +96,7 @@ android {
             versionNameSuffix = "-benchmark"
             applicationIdSuffix = ".benchmark"
 
-            buildConfigField("boolean", "INCLUDE_UPDATER", "false")
+            buildConfigField("boolean", "INCLUDE_UPDATER", "true")
         }
     }
 
