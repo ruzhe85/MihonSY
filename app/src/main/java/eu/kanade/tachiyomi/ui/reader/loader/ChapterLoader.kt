@@ -129,7 +129,7 @@ class ChapterLoader(
                         when (format) {
                             is Format.Directory -> DirectoryPageLoader(format.file)
                             is Format.Archive -> ArchivePageLoader(format.file.archiveReader(context))
-                            is Format.Epub -> EpubPageLoader(format.file.archiveReader(context))
+                            is Format.Epub -> EpubPageLoader(format.file.archiveReader(context), context)
                         }
                     }
                     else -> error(context.stringResource(MR.strings.loader_not_implemented_error))
@@ -147,7 +147,7 @@ class ChapterLoader(
                 when (format) {
                     is Format.Directory -> DirectoryPageLoader(format.file)
                     is Format.Archive -> ArchivePageLoader(format.file.archiveReader(context))
-                    is Format.Epub -> EpubPageLoader(format.file.archiveReader(context))
+                    is Format.Epub -> EpubPageLoader(format.file.archiveReader(context), context)
                 }
             }
             source is HttpSource -> HttpPageLoader(chapter, source)

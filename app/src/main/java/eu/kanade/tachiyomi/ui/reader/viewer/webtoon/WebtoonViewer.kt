@@ -3,17 +3,20 @@ package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 import android.graphics.PointF
 import android.animation.ValueAnimator
 import android.os.Build
+import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.animation.Interpolator
 import android.view.animation.LinearInterpolator
 import androidx.core.animation.doOnEnd
 import androidx.core.app.ActivityCompat
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.WebtoonLayoutManager
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
@@ -92,6 +95,17 @@ class WebtoonViewer(
     }
 
     /**
+     * Komiho: apply the webtoon prefetch depth to the layout manager's extra
+     * layout space. extraLayoutSpace = one tap-scroll distance multiplied by the
+     * user's prefetch depth (1 = original ~1-screen behaviour, up to 3 screens).
+     * Larger depth pre-binds more pages so NPU enhancement finishes before they
+     * scroll into view, eliminating the black flash on arrival.
+     */
+    private fun applyWebtoonPrefetch() {
+        layoutManager.extraLayoutSpace = scrollDistance * config.webtoonPrefetchDepth
+    }
+
+    /**
      * MihonSY: animator driving the tap-scroll. A ValueAnimator that steps the
      * recycler by a fixed per-frame delta gives a perfectly constant-speed scroll
      * (like ComicScreen) and avoids the janky ViewFlinger/OverScroller path of
@@ -99,10 +113,16 @@ class WebtoonViewer(
      */
     private var scrollAnimator: ValueAnimator? = null
 
+    // Komiho: 即时翻页的双击回滚——第一击翻页前记录第一可见项位置，第二击按下
+    // （onDoubleTap → recycler.doubleTapUndo）时恢复到该位置再放大，观感即
+    // 「直接放大」而不是先滚一屏。MENU 区点击不记录（见 tapListener）。
+    private var flipRollback: (() -> Unit)? = null
+    private var flipRollbackAt = 0L
+
     /**
      * Layout manager of the recycler view.
      */
-    private val layoutManager = WebtoonLayoutManager(activity, scrollDistance)
+    private val layoutManager = WebtoonLayoutManager(activity, scrollDistance * config.webtoonPrefetchDepth)
 
     /**
      * Adapter of the recycler view.
@@ -165,9 +185,27 @@ class WebtoonViewer(
             )
             when (config.navigator.getAction(pos)) {
                 NavigationRegion.MENU -> activity.toggleMenu()
-                NavigationRegion.NEXT, NavigationRegion.RIGHT -> scrollDown()
-                NavigationRegion.PREV, NavigationRegion.LEFT -> scrollUp()
+                NavigationRegion.NEXT, NavigationRegion.RIGHT -> {
+                    markFlipForRollback()
+                    scrollDown()
+                }
+                NavigationRegion.PREV, NavigationRegion.LEFT -> {
+                    markFlipForRollback()
+                    scrollUp()
+                }
             }
+        }
+        // Komiho: 双击缩放时撤销第一击的即时翻页——取消翻页动画并把列表瞬间
+        // 恢复到翻页前位置，随后 ACTION_UP 的 onDoubleTapConfirmed 正常放大。
+        recycler.doubleTapUndo = f@{
+            val rollback = flipRollback
+            flipRollback = null
+            // 只回滚双击窗口内刚发生的翻页；陈旧快照（间隔过久、三击连按）直接丢弃
+            if (rollback == null || SystemClock.uptimeMillis() - flipRollbackAt > DOUBLE_TAP_ROLLBACK_WINDOW_MS) {
+                return@f
+            }
+            scrollAnimator?.cancel()
+            rollback()
         }
         recycler.longTapListener = f@{ event ->
             if (activity.viewModel.state.value.menuVisible || config.longTapEnabled) {
@@ -208,7 +246,12 @@ class WebtoonViewer(
         // MihonSY: keep tap-scroll distance and animation speed in sync with settings
         config.tapScrollChangedListener = {
             scrollDistance = computeTapScrollDistance()
-            layoutManager.extraLayoutSpace = scrollDistance
+            applyWebtoonPrefetch()
+        }
+
+        // Komiho: prefetch depth changed in settings -> recompute extra layout space now
+        config.prefetchChangedListener = {
+            applyWebtoonPrefetch()
         }
 
         frame.layoutParams = ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT)
@@ -222,7 +265,7 @@ class WebtoonViewer(
             val newDistance = computeTapScrollDistance()
             if (newDistance != scrollDistance) {
                 scrollDistance = newDistance
-                layoutManager.extraLayoutSpace = newDistance
+                applyWebtoonPrefetch()
             }
         }
     }
@@ -352,8 +395,9 @@ class WebtoonViewer(
      *
      * @param totalDistance signed scroll distance in pixels (negative = scroll up)
      * @param durationMillis animation duration; <= 0 means jump instantly
+     * @param easeOut true = 翻页动画 v2：三次方减速曲线（起步快、尾段短）
      */
-    private fun animateScrollBy(totalDistance: Int, durationMillis: Int) {
+    private fun animateScrollBy(totalDistance: Int, durationMillis: Int, easeOut: Boolean = false) {
         // Cancel any running animation first so rapid taps never overlap.
         scrollAnimator?.cancel()
         if (durationMillis <= 0 || totalDistance == 0) {
@@ -363,12 +407,12 @@ class WebtoonViewer(
 
         val animator = ValueAnimator.ofInt(0, totalDistance).apply {
             this.duration = durationMillis.toLong()
-            interpolator = LinearInterpolator()
+            interpolator = if (easeOut) EASE_OUT_CUBIC else LinearInterpolator()
 
             addUpdateListener {
                 val animated = it.animatedValue as Int
-                // Scroll by the difference since the last frame: this yields a
-                // constant per-frame delta thanks to the linear interpolator.
+                // Scroll by the difference since the last frame: v1（线性）得到恒定
+                // 每帧位移；v2 由插值器给出五次方减速的每帧位移（先快后慢）。
                 val delta = animated - lastAnimatedValue
                 lastAnimatedValue = animated
                 if (delta != 0) {
@@ -391,11 +435,47 @@ class WebtoonViewer(
     }
 
     /**
+     * Komiho 翻页动画 v2：时长按滚动距离算——
+     * duration = (|距离| / 可视高度 + 1) × 速度档位（50/100/150/200ms），封顶 2000ms。
+     * 以默认 100ms 档为例：整屏（屏高 − 23dp peek）约 197ms、3/4 屏约 175ms、
+     * 半屏约 150ms。距离越长越慢，档位越小越快。
+     */
+    private fun computeEaseOutDuration(totalDistance: Int): Int {
+        val heightPx = if (recycler.height > 0) {
+            recycler.height
+        } else {
+            activity.resources.displayMetrics.heightPixels
+        }.coerceAtLeast(1)
+        val screens = kotlin.math.abs(totalDistance).toFloat() / heightPx
+        return ((screens + 1f) * config.pageTransitionsV2SpeedMs)
+            .toLong()
+            .coerceAtMost(EASE_OUT_DURATION_MAX_MS)
+            .toInt()
+    }
+
+    /**
+     * Komiho: 翻页前记录第一可见项位置及偏移，供双击缩放时回滚（见 doubleTapUndo）。
+     */
+    private fun markFlipForRollback() {
+        val position = layoutManager.findFirstVisibleItemPosition()
+        if (position < 0) return
+        val offset = layoutManager.findViewByPosition(position)?.top ?: 0
+        flipRollback = {
+            recycler.stopScroll()
+            layoutManager.scrollToPositionWithOffset(position, offset)
+        }
+        flipRollbackAt = SystemClock.uptimeMillis()
+    }
+
+    /**
      * Scrolls up by [scrollDistance].
      */
     private fun scrollUp() {
-        if (config.usePageTransitions && config.tapScrollDurationMillis > 0) {
-            animateScrollBy(-scrollDistance, config.tapScrollDurationMillis)
+        // Komiho: v1（匀速，固定时长）/ v2（五次方减速，时长按距离算）互斥，v2 优先。
+        val useV2 = config.usePageTransitionsV2
+        if (useV2 || config.usePageTransitions) {
+            val duration = if (useV2) computeEaseOutDuration(-scrollDistance) else config.tapScrollDurationMillis
+            animateScrollBy(-scrollDistance, duration, easeOut = useV2)
         } else {
             recycler.scrollBy(0, -scrollDistance)
         }
@@ -423,7 +503,8 @@ class WebtoonViewer(
                 val position = adapter.items.indexOf(currentPage)
                 val nextItem = adapter.items.getOrNull(position + 1)
                 if (nextItem is ReaderPage) {
-                    if (config.usePageTransitions) {
+                    // v2 同样走平滑滚动（这条路径是整页对齐，曲线由系统 smooth scroll 决定）
+                    if (config.usePageTransitions || config.usePageTransitionsV2) {
                         recycler.smoothScrollToPosition(position + 1)
                     } else {
                         recycler.scrollToPosition(position + 1)
@@ -437,8 +518,10 @@ class WebtoonViewer(
 
     private fun scrollDownBy() {
         // SY <--
-        if (config.usePageTransitions && config.tapScrollDurationMillis > 0) {
-            animateScrollBy(scrollDistance, config.tapScrollDurationMillis)
+        val useV2 = config.usePageTransitionsV2
+        if (useV2 || config.usePageTransitions) {
+            val duration = if (useV2) computeEaseOutDuration(scrollDistance) else config.tapScrollDurationMillis
+            animateScrollBy(scrollDistance, duration, easeOut = useV2)
         } else {
             recycler.scrollBy(0, scrollDistance)
         }
@@ -495,12 +578,17 @@ class WebtoonViewer(
      * Used when an image configuration is changed.
      */
     private fun refreshAdapter() {
-        val position = layoutManager.findLastEndVisibleItemPosition()
-        adapter.refresh()
-        adapter.notifyItemRangeChanged(
-            max(0, position - 3),
-            min(position + 3, adapter.itemCount - 1),
-        )
+        // 强制重建适配器（与 pager 的 pager.adapter = adapter 同款）：销毁并重建所有可见
+        // WebtoonPageHolder，重新走加载链并按最新增强设置重解码，保证切换增强实时生效。
+        // 重设 adapter 会清空滚动位置，故先记下首可见项与像素偏移，重建后再还原，避免跳页。
+        val lm = layoutManager as? LinearLayoutManager
+        val firstPos = lm?.findFirstVisibleItemPosition() ?: 0
+        val firstView = if (firstPos >= 0) lm?.findViewByPosition(firstPos) else null
+        val offset = firstView?.let { it.top - recycler.paddingTop } ?: 0
+        recycler.adapter = adapter
+        if (firstPos >= 0) {
+            lm?.scrollToPositionWithOffset(firstPos, offset)
+        }
     }
 }
 
@@ -511,3 +599,21 @@ private val RECYCLER_VIEW_CACHE_SIZE = if (Build.VERSION.SDK_INT >= Build.VERSIO
 // preset, mirroring ComicScreen's set_menu_pagekey_offset default (23dp). A sliver of
 // the next page stays visible so each tap feels like one full screen changed.
 private const val TAP_SCROLL_PEEK_MARGIN_DP = 23f
+
+// Komiho 翻页动画 v2 的曲线：三次方减速 (t-1)^3 + 1（等价于 1-(1-t)^3）。
+// ComicScreen / RecyclerView 默认用的是五次方（(t-1)^5+1），但五次方在 50% 时间就
+// 走完 97% 路程，后半程几乎看不见移动却在耗时间，主观很拖。三次方 50% 时间走完
+// 87.5%，尾巴短得多，点起来更脆快，同时保留"快起慢停"的减速手感。
+private val EASE_OUT_CUBIC = Interpolator { t ->
+    val f = t - 1
+    f * f * f + 1f
+}
+
+// v2 时长上限：无论距离多长都不超过 2000ms。
+// 每屏基准时长由「翻页动画 v2 速度」设置项决定（50/100/150/200），默认 100。
+private const val EASE_OUT_DURATION_MAX_MS = 2000L
+
+// Komiho: 双击回滚窗口——GestureDetector 的双击判定窗口是 DOUBLE_TAP_TIMEOUT
+// （300ms），双击的第二击按下必然落在此窗口内；取 350ms 留余量，超过即视为
+// 陈旧快照丢弃（如间隔较久的后续双击，不再回滚第一次的翻页）。
+private const val DOUBLE_TAP_ROLLBACK_WINDOW_MS = 350L

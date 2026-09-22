@@ -16,6 +16,7 @@ import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.widget.TextView
 import android.widget.FrameLayout
+import eu.kanade.tachiyomi.R
 import androidx.annotation.AttrRes
 import androidx.annotation.CallSuper
 import androidx.annotation.StyleRes
@@ -40,10 +41,13 @@ import com.github.chrisbanes.photoview.PhotoView
 import eu.kanade.tachiyomi.data.coil.cropBorders
 import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.data.coil.enhanced
+import eu.kanade.tachiyomi.data.coil.pageIndex
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonSubsamplingImageView
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.util.EnhanceTimings
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.view.isVisibleOnScreen
+import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import okio.BufferedSource
 import tachiyomi.core.common.util.system.ImageUtil
 import uy.kohesive.injekt.Injekt
@@ -90,6 +94,12 @@ open class ReaderPageImageView @JvmOverloads constructor(
      * For automatic background. Will be set as background color when [onImageLoaded] is called.
      */
     var pageBackground: Drawable? = null
+
+    /**
+     * Komiho 诊断：当前页序号（-1 = 未知），由 holder 在 setImage 前写入。
+     * 只用于增强日志区分请求来源（`prewarm#N` / `holder#N`），不参与任何渲染逻辑。
+     */
+    var pageIndex: Int = -1
 
     @CallSuper
     open fun onImageLoaded() {
@@ -232,22 +242,56 @@ open class ReaderPageImageView @JvmOverloads constructor(
     private fun dpToPx(dp: Float): Int = (dp * resources.displayMetrics.density).toInt()
 
     /**
-     * MihonSY: shows the enhancement outcome badge. Success shows the real elapsed
-     * time; failure/skip shows 跳过. No-op unless enhancement is on AND the status
-     * toggle is on. Enhancement itself runs synchronously inside the Coil decoder,
-     * so this is only called from the Coil success/error listeners.
+     * MihonSY: shows the enhancement outcome badge. Success shows which engine actually ran
+     * plus the real elapsed time; failure/skip shows 跳过. No-op unless enhancement is on
+     * AND the status toggle is on. Enhancement itself runs synchronously inside the Coil
+     * decoder, so this is only called from the Coil success/error listeners — plus
+     * PagerPageHolder for the pre-decoded bitmap path (SY: Page 优化，耗时来自预处理阶段).
+     *
+     * Komiho (2026-09-17): the success label reports the **engine that really produced the
+     * image** — `NPU OK` / `GPU OK` / `CPU OK` — read from [Waifu2x.engineFor] rather than
+     * from the selected model. A silent NPU→Vulkan fallback used to render identically to a
+     * genuine NPU run, which made the cross-HTP experiment unreadable from the screen.
+     *
+     * Komiho (2026-09-19): it is looked up **by page index**. Reading the single global slot
+     * meant a concurrent page's fallback could mislabel this page (`CPU OK` on a page that ran
+     * on the NPU); see [Waifu2x.engineFor].
      */
-    private fun showEnhancementOutcome(success: Boolean, elapsedMillis: Long) {
+    internal fun showEnhancementOutcome(success: Boolean, elapsedMillis: Long) {
         val preferences = Injekt.get<ReaderPreferences>()
         if (preferences.enhancementMode.get() == 0 || !preferences.showEnhancementStatus.get()) return
         val tv = ensureEnhanceStatusView()
         tv.text = if (success) {
-            String.format(java.util.Locale.US, "OK %.1fs", elapsedMillis / 1000f)
+            String.format(
+                java.util.Locale.US,
+                "%s %.1fs",
+                engineLabel(pageIndex),
+                elapsedMillis / 1000f,
+            )
         } else {
-            "跳过"
+            context.getString(R.string.reader_enhancement_skipped)
         }
         tv.visibility = View.VISIBLE
     }
+
+    /**
+     * Komiho: engine tag for the badge. CPU 档（Lanczos3 / Catmull-Rom）本身就是 CPU，直接标
+     * `CPU OK`；AI 档要看原生侧真正跑的是哪台引擎 —— 见 [Waifu2x.engineFor]。
+     *
+     * 2026-09-19：按**页号**取引擎，而不是读全局 `lastEngine`。增强是并发跑的（预取 + 当前页），
+     * 全局槽会被别的页覆盖 —— 曾导致「明明跑的是 NPU，角标却显示 CPU OK」。
+     */
+    private fun engineLabel(pageIndex: Int): String =
+        when (Injekt.get<ReaderPreferences>().enhancementMode.get()) {
+            // CPU resampler modes (2 = Lanczos3, 3 = Catmull-Rom) never touch the native engines.
+            2, 3 -> "CPU OK"
+            else -> when (Waifu2x.engineFor(pageIndex)) {
+                Waifu2x.EngineKind.QNN_HTP -> "NPU OK"
+                Waifu2x.EngineKind.NCNN_VULKAN -> "GPU OK"
+                // NONE = 引擎没出结果，本页由 CPU 重采样兜底（或首个引擎结果尚未登记）。
+                Waifu2x.EngineKind.NONE -> "CPU OK"
+            }
+        }
     // MihonSY <--
 
     /**
@@ -399,14 +443,34 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .diskCachePolicy(CachePolicy.DISABLED)
                     .enhanced(true)
                     .customDecoder(true)
+                    // Komiho 诊断：带上页号（prewarm 保持默认 false → 日志里显示 holder#N）。
+                    .pageIndex(this@ReaderPageImageView.pageIndex)
                     .target(
                         onSuccess = { result ->
                             val image = result as BitmapImage
                             setImage(ImageSource.bitmap(image.bitmap))
                             isVisible = true
+                            // Komiho: webtoon 条目是 WRAP_CONTENT，NPU 增强是同步解码，
+                            // 常在 holder 还离屏（高度已量到 0）时就跑完。若此刻不把视图高度
+                            // 定下来，增强图会落进 0 高度 SSIV，要等下次 RV 布局（滚进可视区）
+                            // 才撑开 —— 表现就是「滚到才显示」。这里按 bitmap 宽高比预置真实
+                            // 高度并立即 requestLayout，让增强图一算完就显示。
+                            if (this@ReaderPageImageView.isWebtoon) {
+                                val bmp = image.bitmap
+                                if (bmp.width > 0) {
+                                    val viewWidth = this@ReaderPageImageView.width.takeIf { it > 0 }
+                                        ?: this@ReaderPageImageView.context.resources.displayMetrics.widthPixels
+                                    val computedHeight = (bmp.height * viewWidth / bmp.width.toFloat()).toInt()
+                                    this@ReaderPageImageView.layoutParams?.height = computedHeight
+                                    this@ReaderPageImageView.requestLayout()
+                                }
+                            }
                             showEnhancementOutcome(
                                 success = true,
-                                elapsedMillis = android.os.SystemClock.uptimeMillis() - startTime,
+                                // Komiho: 优先用解码器登记的实际计算耗时（解码 + 增强，已剔除等锁）；
+                                // 取不到才回退 Coil 外层墙钟（含排队会虚高）。
+                                elapsedMillis = EnhanceTimings.take(pageIndex)
+                                    ?: (android.os.SystemClock.uptimeMillis() - startTime),
                             )
                         },
                     )
@@ -533,7 +597,7 @@ private const val MAX_ZOOM_SCALE = 5F
  * crashes on those, so they must skip enhancement and use the standard path.
  * [BufferedSource.peek] does not consume the stream.
  */
-private fun isStandardImageStream(source: BufferedSource): Boolean {
+internal fun isStandardImageStream(source: BufferedSource): Boolean {
     return try {
         source.peek().use { peek ->
             val head = peek.readByteArray(16)

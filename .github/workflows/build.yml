@@ -63,18 +63,8 @@ jobs:
       - name: Grant gradlew execute permission
         run: chmod +x gradlew
 
-      - name: Build release APK
-        env:
-          MIHONSY_STORE_PASSWORD: ${{ secrets.MIHONSY_KEYSTORE_PASSWORD }}
-          MIHONSY_KEY_PASSWORD: ${{ secrets.MIHONSY_KEYSTORE_PASSWORD }}
-        run: ./gradlew assembleRelease -Pdisable-code-shrink --no-daemon --stacktrace
-
-      - name: Verify APK signature
-        run: |
-          ls -la app/build/outputs/apk/release/
-          $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs app/build/outputs/apk/release/app-arm64-v8a-release.apk | head -5
-
-      # MihonSY: resolve publish mode.
+      # MihonSY: resolve publish mode —— 必须在构建之前定，因为两种模式的 ABI 集合不同
+      # （ci 只要 arm64，正式版要 arm64 + 合并包）。
       # - push: HEAD commit message containing "[release]" (or 正式版) → formal,
       #   everything else → ci (test build, fixed tag "ci").
       # - workflow_dispatch: use the "mode" input.
@@ -95,6 +85,27 @@ jobs:
           fi
           echo "mode=$MODE"
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+
+      - name: Build release APK
+        env:
+          MIHONSY_STORE_PASSWORD: ${{ secrets.MIHONSY_KEYSTORE_PASSWORD }}
+          MIHONSY_KEY_PASSWORD: ${{ secrets.MIHONSY_KEYSTORE_PASSWORD }}
+        run: |
+          # MihonSY: ABI 按发布模式收敛 —— AI 引擎（ncnn/Vulkan + QNN/HTP）只有 arm64 实现，
+          # 见 app/build.gradle.kts 的 splits 块。
+          #   ci     → 只出 arm64 单包（构建 + 上传都最快）
+          #   formal → arm64 + 合并包，供不挑 ABI 的用户直接装
+          EXTRA=""
+          if [ "${{ steps.mode.outputs.mode }}" = "formal" ]; then
+            EXTRA="-PmihonsyUniversal=true"
+          fi
+          echo "ABI flags: -PmihonsyAbi=arm64-v8a $EXTRA"
+          ./gradlew assembleRelease -Pdisable-code-shrink -PmihonsyAbi=arm64-v8a $EXTRA --no-daemon --stacktrace
+
+      - name: Verify APK signature
+        run: |
+          ls -la app/build/outputs/apk/release/
+          $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs app/build/outputs/apk/release/app-arm64-v8a-release.apk | head -5
 
       - name: Upload APKs (artifact)
         uses: actions/upload-artifact@v4

@@ -75,6 +75,14 @@ class PagerConfig(
 
     var centerMarginType = CenterMarginType.NONE
 
+    /**
+     * Komiho：预载页数（ViewPager 离屏缓冲 = 前后各保留 N 页）。
+     * 见 [ReaderPreferences.pagerOffscreenLimit]；运行时改也会即时生效（见 init 里的 register）。
+     */
+    var offscreenPageLimit = readerPreferences.pagerOffscreenLimit.get()
+        .coerceIn(OffscreenPages.MIN, OffscreenPages.MAX)
+        private set
+
     // SY <--
 
     init {
@@ -95,6 +103,19 @@ class PagerConfig(
 
         readerPreferences.cropBorders
             .register({ imageCropBorders = it }, { imagePropertyChangedListener?.invoke() })
+
+        // Komiho (2026-09-19): 增强设置同样属于「图像配置」，变更必须立刻重渲染 —— 否则
+        // preparedCache 与 holder 的「同一对页已渲染」守卫都还认旧设置，用户得退出重进或
+        // 一直划动才看到效果。这几个偏好没有对应的 config 属性，写回 lambda 是空操作，
+        // 只为触发 refreshAdapter()。
+        readerPreferences.enhancementMode
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.lanczosScale
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.aiModelId
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.aiTileSize
+            .register({ }, { imagePropertyChangedListener?.invoke() })
 
         readerPreferences.navigateToPan
             .register({ navigateToPan = it })
@@ -171,6 +192,18 @@ class PagerConfig(
 
         readerPreferences.invertDoublePages
             .register({ invertDoublePages = it && dualPageSplit == false }, { imagePropertyChangedListener?.invoke() })
+
+        // Komiho：预载页数（离屏缓冲）。改设置**即时生效** —— ViewPager 允许动态改，会触发一次
+        // populate：前后各 N 页的 holder 随之重建（多出来的会被创建并各自跑一次预处理）。
+        // 与其它 register 一样，注册时的首个值也会走 onChanged ⇒ 构造期就把 pager 设好。
+        readerPreferences.pagerOffscreenLimit
+            .register(
+                { offscreenPageLimit = it.coerceIn(OffscreenPages.MIN, OffscreenPages.MAX) },
+                {
+                    offscreenPageLimit = it.coerceIn(OffscreenPages.MIN, OffscreenPages.MAX)
+                    viewer.pager.offscreenPageLimit = offscreenPageLimit
+                },
+            )
         // SY <--
     }
 
@@ -227,6 +260,17 @@ class PagerConfig(
         const val SINGLE_PAGE = 0
         const val DOUBLE_PAGES = 1
         const val AUTOMATIC = 2
+    }
+
+    /**
+     * Komiho：预载页数（前后各 N 页）的取值范围。[DEFAULT] = 1 —— 最省内存、也是长期默认。
+     * 上限 3：再往上每档要多撑 2 页已解码的增强位图（双页一跨页 ≈46MB），且 GPU 单引擎串行，
+     * 多出来的前瞻只会排队。
+     */
+    object OffscreenPages {
+        const val DEFAULT = 1
+        const val MIN = 1
+        const val MAX = 3
     }
 
     fun themeToColor(theme: Int) {

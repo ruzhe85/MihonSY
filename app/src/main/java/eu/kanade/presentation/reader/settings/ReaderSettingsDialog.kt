@@ -27,6 +27,7 @@ fun ReaderSettingsDialog(
 ) {
     val tabTitles = listOf(
         stringResource(MR.strings.pref_category_reading_mode),
+        stringResource(MR.strings.pref_image_enhancement_group),
         stringResource(MR.strings.pref_category_general),
         stringResource(MR.strings.custom_filter),
     )
@@ -45,7 +46,7 @@ fun ReaderSettingsDialog(
             val window = (LocalView.current.parent as? DialogWindowProvider)?.window
 
             LaunchedEffect(pagerState.currentPage) {
-                if (pagerState.currentPage == 2) {
+                if (pagerState.currentPage == 3) {
                     window?.setDimAmount(0f)
                     onHideMenus()
                 } else {
@@ -61,8 +62,9 @@ fun ReaderSettingsDialog(
             ) {
                 when (page) {
                     0 -> ReadingModePage(screenModel)
-                    1 -> GeneralPage(screenModel)
-                    2 -> ColorFilterPage(screenModel)
+                    1 -> ImageEnhancementPage(screenModel)
+                    2 -> GeneralPage(screenModel)
+                    3 -> ColorFilterPage(screenModel)
                 }
             }
         }

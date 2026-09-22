@@ -1,6 +1,6 @@
 package eu.kanade.tachiyomi.util.storage
 
-import mihon.core.common.archive.ArchiveReader
+import mihon.core.common.archive.ArchiveHandle
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.parser.Parser
@@ -10,8 +10,12 @@ import java.io.InputStream
 
 /**
  * Wrapper over ZipFile to load files in epub format.
+ *
+ * Komiho: 参数类型是窄接口 [ArchiveHandle] 而非具体 ArchiveReader ——
+ * 本地来源传 ArchiveReader，WebDAV / SMB 远程归档传 RemoteZipReader / CachingArchiveHandle。
+ * 本类只用到 getInputStream，两条路径共用同一实现。
  */
-class EpubFile(private val reader: ArchiveReader) : Closeable by reader {
+class EpubFile(private val reader: ArchiveHandle) : Closeable by reader {
 
     /**
      * Path separator used by this epub.

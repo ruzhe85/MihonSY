@@ -128,6 +128,12 @@ object CbzCrypto {
         return encrypt(password.toByteArray(), encryptionCipherCbz)
     }
 
+    // SY --> Komiho: 阅读器内输入密码后写入全局 cbz 密码
+    fun setPassword(password: String) {
+        securityPreferences.cbzPassword.set(encryptCbz(password))
+    }
+    // SY <--
+
     fun getDecryptedPasswordCbz(): ByteArray {
         val encryptedPassword = securityPreferences.cbzPassword.get()
         if (encryptedPassword.isBlank()) error("This archive is encrypted please set a password")

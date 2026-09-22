@@ -13,6 +13,7 @@ import androidx.viewpager.widget.ViewPager
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderItem
@@ -20,10 +21,14 @@ import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
+import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.sync.withLock
+import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.injectLazy
+import kotlin.math.abs
 import kotlin.math.min
 
 /**
@@ -46,6 +51,27 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Configuration used by the pager, like allow taps, scale mode on images, page transitions...
      */
     val config = PagerConfig(this, scope)
+
+    // SY（A+B，Page 流畅度优化）：预处理结果缓存 + 相邻页预热。
+    // 借鉴 webtoon「解码好了等你滑」：翻页选定后，后台提前把相邻页的
+    // stream 物化/处理/增强预解码做完，holder 实例化时直接命中缓存。
+    val preparedCache = PagerPreparedCache()
+
+    /** 预热串行锁：避免前后两页同时跑 Lanczos 预解码打满 CPU（教训同 offscreen 调高）。 */
+    private val prewarmMutex = kotlinx.coroutines.sync.Mutex()
+
+    /**
+     * Komiho P1：预热「意图代数」。每次翻页自增；排队等锁的预热任务若发现代数已变，
+     * 说明用户又翻了页、目标已过期，直接放弃（避免白跑一次 1–3 秒的 GPU 增强）。
+     */
+    private val prewarmGeneration = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * Komiho P1：正在执行预热的页位置（-1 = 空闲）。翻页后若它离当前页太远，
+     * 说明 GPU 正在为一个已经没人要的页面做推理 → 主动 abort（C++ 在 tile 边界生效，很快）。
+     */
+    @Volatile
+    private var runningPrewarmPosition = -1
 
     /**
      * Adapter of the pager.
@@ -102,7 +128,14 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         pager.isVisible = false // Don't layout the pager yet
         pager.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         pager.isFocusable = false
-        pager.offscreenPageLimit = 1
+        // SY: 离屏缓冲 = 1（前后各 1 页）。流畅度由「并发解码密度」决定而非 Mutex：
+        // offscreen 越高，ViewPager 同时撑起的页面越多，5000×2400 整页解码+Lanczos 增强
+        // 并发打满 CPU/GC 导致掉帧。降回 1 恢复最早顺滑感；独立的 ByteArray 内存流已
+        // 根治大跳页「解码失败」错误与活 archive 流崩溃，不会随 offscreen 变化复发。
+        // 代价：极快连翻可能偶现黑屏（同最早，但无 Mutex 拖慢会比最早轻）。条页模式不变。
+        // Komiho：现在这个值由「阅读设置 → 预载页数」控制（1/2/3，默认 1），见 PagerConfig；
+        // 抬高仍是上面那笔账：每档多 2 页已解码的增强位图 + 每页一次推测性 GPU 推理。
+        pager.offscreenPageLimit = config.offscreenPageLimit
         pager.id = R.id.reader_pager
         pager.adapter = adapter
         pager.addOnPageChangeListener(pagerListener)
@@ -143,6 +176,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         }
 
         config.reloadChapterListener = {
+            preparedCache.clear() // SY: 章节重载（如加密包换密码）后旧预处理结果一律作废
             activity.reloadChapters(it)
         }
 
@@ -180,6 +214,37 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         pager.children
             .filterIsInstance<PagerPageHolder>()
             .firstOrNull { it.item.first == page || it.item.second == page }
+
+    /**
+     * [item] 是否为当前显示项（Komiho P3 判「可见页」用；双页时 item = page to extraPage）。
+     */
+    fun isCurrentItem(item: Any): Boolean = adapter.joinedItems.getOrNull(pager.currentItem) == item
+
+    /**
+     * Komiho P3：可见页优先。
+     *
+     * 记下「最近一份开始跑的重活是第几页」，并在**可见页**开始跑时，若上一份是别的页，
+     * 调 [Waifu2x.abortProcessing] 把它打断 —— 原生在 tile 边界返回（几十 ms），把 GPU 让给当前页。
+     *
+     * 为什么需要：GPU 只有一个引擎，且原生 `g_lock` 覆盖**整次推理**（双页一次 ≈2.5s）。
+     * GPU 上没有优先级，谁先进 `nativeProcess` 谁先跑 ⇒ 快速连翻或单↔双页切换时，
+     * 新可见页会被上一页/邻居的推理拖着排队（实测 5 次推理 wait 累积到 9.7s、total 12.1s，
+     * 可见页排在第 3）。
+     *
+     * 安全性：[Waifu2x.process] 每次进入都会先 `nativeClearAbortProcessing()`，所以「打断」
+     * 只对**当前正在跑的那一次**推理生效；对排队中的、以及后续任务都是空操作。
+     */
+    fun onPrepareStart(pageIndex: Int, visible: Boolean) {
+        val previous = lastPreparePage
+        lastPreparePage = pageIndex
+        if (!visible || previous < 0 || previous == pageIndex) return
+        prewarmLog("preempt page=$previous by-page=$pageIndex")
+        Waifu2x.abortProcessing()
+    }
+
+    /** 最近一份开始跑的重活是第几页（-1 = 还没跑过）。见 [onPrepareStart]。 */
+    @Volatile
+    private var lastPreparePage = -1
 
     /**
      * Called when a new page (either a [ReaderPage] or [ChapterTransition]) is marked as active
@@ -252,6 +317,101 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         if (inPreloadRange && allowPreload && page.chapter == adapter.currentChapter) {
             logcat { "Request preload next chapter because we're at page ${page.number} of ${pages.size}" }
             adapter.nextTransition?.to?.let(activity::requestPreloadChapter)
+        }
+
+        // SY（A）：相邻页预热（前+后各一页），解码好等用户翻
+        prewarmAdjacentPages(forward)
+    }
+
+    /**
+     * 预热当前页相邻页（offscreen=1 之外的"第 2 页"由此获得与 webtoon 同级的提前量）。
+     * 双页合并配置（pair.second != null）会命中副作用分支，预热无意义，跳过。
+     */
+    // SY（OOM 降峰）：增强开启时预热解码含全流程，峰值更高——只预热 1 页。
+    // Komiho P1：该页的**方向跟随阅读方向**（原先固定「下一页」，导致回翻永远无预热）；
+    // 另加「意图代数 + 运行位置」两个状态：翻页后排队中的过期预热直接放弃、
+    // GPU 上正在为已跑远的目标做的推理主动 abort，避免新目标被旧任务拖住。
+    private val readerPrefs: ReaderPreferences by injectLazy()
+
+    private fun prewarmAdjacentPages(forward: Boolean) {
+        val enhancementOn = readerPrefs.enhancementMode.get() != 0
+        val generation = prewarmGeneration.incrementAndGet()
+
+        if (enhancementOn) {
+            val running = runningPrewarmPosition
+            if (running >= 0 && abs(running - pager.currentItem) > 1) {
+                Waifu2x.abortProcessing()
+            }
+        }
+
+        val positions = if (enhancementOn) {
+            listOf(if (forward) pager.currentItem + 1 else pager.currentItem - 1)
+        } else {
+            listOf(pager.currentItem + 1, pager.currentItem - 1)
+        }
+        for (position in positions) {
+            val pair = adapter.joinedItems.getOrNull(position)
+            if (pair == null) {
+                prewarmLog("skip pos=$position reason=no-item")
+                continue
+            }
+            if (pair.second != null) {
+                prewarmLog("skip pos=$position reason=dual-page-pair")
+                continue // 双页合并模式：纯管线放弃，预热无收益
+            }
+            val next = pair.first as? ReaderPage
+            if (next == null) {
+                prewarmLog("skip pos=$position reason=not-ReaderPage(${pair.first?.javaClass?.simpleName})")
+                continue
+            }
+            if (next is InsertPage) {
+                prewarmLog("skip pos=$position reason=InsertPage")
+                continue // 插入页没有自己的流，预热无意义
+            }
+            val key = preparedCache.key(next, pair.second as? ReaderPage)
+            if (preparedCache.get(key) != null) {
+                prewarmLog("skip pos=$position page=${next.index} reason=cache-hit")
+                continue
+            }
+            prewarmLog("launch pos=$position page=${next.index} gen=$generation")
+            scope.launchIO {
+                prewarmMutex.withLock {
+                    // Komiho P1：等锁期间用户可能又翻了页 —— 目标过期就放弃，否则会白跑
+                    // 一次昂贵的增强（GPU 1–3 秒），把真正需要的页面继续往后推。
+                    if (generation != prewarmGeneration.get()) {
+                        prewarmLog(
+                            "abort page=${next.index} reason=stale-gen " +
+                                "gen=$generation now=${prewarmGeneration.get()}",
+                        )
+                        return@withLock
+                    }
+                    // 拿到锁后复查：可能已被相邻预热或 holder 计算填入
+                    if (preparedCache.get(key) != null) {
+                        prewarmLog("abort page=${next.index} reason=cache-filled-while-waiting")
+                        return@withLock
+                    }
+                    runningPrewarmPosition = position
+                    // Komiho P3：把预热也登记进「谁在跑」，这样可见页 holder 开始跑时能把它打断
+                    // （否则新可见页会排在一条已无人要的预热推理后面，实测可拖到 +2.5s）。
+                    onPrepareStart(pageIndex = next.index, visible = false)
+                    try {
+                        val prepared = PagerPagePreparer.preparePure(
+                            viewer = this@PagerViewer,
+                            page = next,
+                            extraPage = pair.second as? ReaderPage,
+                            viewHeight = pager.height,
+                        )
+                        prewarmLog(
+                            "done page=${next.index} ok=${prepared != null} " +
+                                "enhanceMs=${prepared?.enhanceElapsedMillis} " +
+                                "layoutApplied=${prepared?.layoutApplied}",
+                        )
+                        prepared?.let { preparedCache.put(key, it) }
+                    } finally {
+                        runningPrewarmPosition = -1
+                    }
+                }
+            }
         }
     }
 
@@ -395,6 +555,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      */
     private fun refreshAdapter() {
         val currentItem = pager.currentItem
+        preparedCache.clear() // SY: 图像配置变更（分割/裁剪/背景等）后旧结果全部失效
         adapter.refresh()
         pager.adapter = adapter
         pager.setCurrentItem(currentItem, false)
@@ -490,3 +651,10 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     fun getShiftedPage(): ReaderPage? = adapter.pageToShift
     // SY <--
 }
+
+/**
+ * Komiho 诊断（临时，排查完可删）：记录预载路径的每一次决策，用来回答
+ * 「为什么预载从来没有产出过增强结果」。release 下 logcat() 的 DEBUG 会被
+ * XLog 的 WARN 级别吞掉，所以这里直接用 android.util.Log。
+ */
+private fun prewarmLog(msg: String) = android.util.Log.d("Waifu2xPrewarm", msg)

@@ -56,6 +56,16 @@ class WebtoonConfig(
 
     var tapScrollChangedListener: (() -> Unit)? = null
 
+    // Komiho: webtoon 预取深度（extra layout space 倍数）。1 = 当前行为，上限 3。
+    var webtoonPrefetchDepth: Int = readerPreferences.webtoonPrefetchDepth.get()
+        .coerceIn(
+            ReaderPreferences.WEBTOON_PREFETCH_DEPTH_MIN,
+            ReaderPreferences.WEBTOON_PREFETCH_DEPTH_MAX,
+        )
+        private set
+
+    var prefetchChangedListener: (() -> Unit)? = null
+
     var originalSize = false
         private set
     // MihonSY <--
@@ -65,6 +75,14 @@ class WebtoonConfig(
     // SY -->
     var usePageTransitions = false
 
+    // Komiho: 条页点击滚屏 v2（ComicScreen 手感）。与 usePageTransitions 互斥，
+    // 由设置 UI 保证；两个都开时以 v2 为准（见 WebtoonViewer.animateScrollBy）。
+    var usePageTransitionsV2 = false
+
+    // v2 速度档位 = 每屏基准时长（ms，越小越快）
+    var pageTransitionsV2SpeedMs: Int = readerPreferences.pageTransitionsV2Speed.get()
+        private set
+
     var continuousCropBorders = false
         private set
 
@@ -72,6 +90,18 @@ class WebtoonConfig(
     init {
         readerPreferences.cropBordersWebtoon
             .register({ imageCropBorders = it }, { imagePropertyChangedListener?.invoke() })
+
+        // Komiho (2026-09-19): 增强设置同样属于「图像配置」，变更必须立刻重渲染 —— 否则
+        // 已绑定的 holder 仍显示旧设置的位图，用户得退出重进或一直划动才看到效果。
+        // 这几个偏好没有对应的 config 属性，写回 lambda 是空操作，只为触发 refreshAdapter()。
+        readerPreferences.enhancementMode
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.lanczosScale
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.aiModelId
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.aiTileSize
+            .register({ }, { imagePropertyChangedListener?.invoke() })
 
         readerPreferences.webtoonSidePadding
             .register({ sidePadding = it }, { imagePropertyChangedListener?.invoke() })
@@ -128,6 +158,19 @@ class WebtoonConfig(
 
         readerPreferences.pageTransitionsWebtoon
             .register({ usePageTransitions = it }, { imagePropertyChangedListener?.invoke() })
+
+        // Komiho: v2 动画开关（切到 v2 不需要重排页面，但仍走同一回调保持一致）
+        readerPreferences.pageTransitionsWebtoonV2
+            .register({ usePageTransitionsV2 = it }, { imagePropertyChangedListener?.invoke() })
+
+        readerPreferences.pageTransitionsV2Speed
+            .register(
+                { speed ->
+                    pageTransitionsV2SpeedMs = ReaderPreferences.PageTransitionsV2Speeds
+                        .firstOrNull { it == speed }
+                        ?: ReaderPreferences.PAGE_TRANSITIONS_V2_SPEED_DEFAULT
+                },
+            )
         // SY <--
 
         // MihonSY -->
@@ -148,6 +191,18 @@ class WebtoonConfig(
             )
         readerPreferences.webtoonOriginalSize
             .register({ originalSize = it }, { imagePropertyChangedListener?.invoke() })
+
+        // Komiho: 预取深度变化 → 通知 viewer 重算 extra layout space
+        readerPreferences.webtoonPrefetchDepth
+            .register(
+                {
+                    webtoonPrefetchDepth = it.coerceIn(
+                        ReaderPreferences.WEBTOON_PREFETCH_DEPTH_MIN,
+                        ReaderPreferences.WEBTOON_PREFETCH_DEPTH_MAX,
+                    )
+                },
+                { prefetchChangedListener?.invoke() },
+            )
         // MihonSY <--
     }
 

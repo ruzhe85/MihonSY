@@ -50,7 +50,9 @@ jobs:
         run: ./gradlew spotlessCheck
 
       - name: Build app
-        run: ./gradlew assembleRelease
+        # MihonSY: AI 引擎（ncnn/Vulkan + QNN/HTP）只有 arm64 实现，
+        # 故正式发版出 arm64 + 合并包（见 app/build.gradle.kts 的 splits 块）。
+        run: ./gradlew assembleRelease -PmihonsyAbi=arm64-v8a -PmihonsyUniversal=true
 
       - name: Run unit tests
         run: ./gradlew test
@@ -70,11 +72,21 @@ jobs:
         run: |
           set -e
 
-          mv app/build/outputs/apk/release/app-universal-release-unsigned-signed.apk TachiyomiSY.apk
-          mv app/build/outputs/apk/release/app-arm64-v8a-release-unsigned-signed.apk TachiyomiSY-arm64-v8a.apk
-          mv app/build/outputs/apk/release/app-armeabi-v7a-release-unsigned-signed.apk TachiyomiSY-armeabi-v7a.apk
-          mv app/build/outputs/apk/release/app-x86-release-unsigned-signed.apk TachiyomiSY-x86.apk
-          mv app/build/outputs/apk/release/app-x86_64-release-unsigned-signed.apk TachiyomiSY-x86_64.apk
+          # MihonSY: 按实际产物改名，不再硬编码 4 个 ABI
+          # （AI 引擎只有 arm64，见 app/build.gradle.kts 的 splits 块）。
+          for apk in app/build/outputs/apk/release/app-*-release-unsigned-signed.apk; do
+            base=$(basename "$apk")
+            abi=$(echo "$base" | sed -E 's/^app-(.+)-release-unsigned-signed\.apk$/\1/')
+            [ "$abi" = "$base" ] && abi=universal
+            if [ "$abi" = "universal" ]; then
+              out="TachiyomiSY.apk"
+            else
+              out="TachiyomiSY-${abi}.apk"
+            fi
+            mv "$apk" "$out"
+            echo "→ $out"
+          done
+          ls -la
 
       - name: Create release
         uses: softprops/action-gh-release@v3

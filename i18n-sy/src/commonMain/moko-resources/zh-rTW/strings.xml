@@ -678,4 +678,9 @@
     <string name="final_chapter">終章</string>
     <string name="pref_include_chapter_url_hash">包含章節網址雜湊值</string>
     <string name="pref_include_chapter_url_hash_desc">將章節網址的 MD5 雜湊值前六個字元附加至章節檔案或資料夾名。</string>
+
+    <!-- MihonSY: 阅读器 / AI 超分同步自 Komiho -->
+    <string name="pref_page_transitions_linear">Constant-speed animation</string>
+    <string name="pref_page_transitions_v2">Ease-out animation</string>
+    <string name="pref_page_transitions_v2_speed">Ease-out animation speed</string>
 </resources>

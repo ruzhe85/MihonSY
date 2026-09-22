@@ -108,6 +108,11 @@
     <string name="pref_custom_brightness">自定义亮度</string>
     <string name="pref_custom_color_filter">色彩滤镜</string>
     <string name="pref_keep_screen_on">保持屏幕常亮</string>
+    <string name="reader_bookmarks_title">书签</string>
+    <string name="reader_bookmark_add_current">在当前页加书签（第 %1$d 页）</string>
+    <string name="reader_bookmark_remove">删除书签</string>
+    <string name="reader_bookmark_page">第 %1$d 页</string>
+    <string name="reader_enhancement_skipped">跳过</string>
     <string name="pref_reader_navigation">翻页</string>
     <string name="pref_read_with_volume_keys">音量键翻页</string>
     <string name="pref_read_with_volume_keys_inverted">反转音量键</string>
@@ -946,4 +951,29 @@
     <string name="extensionStoresScreen.deleteStore.title">移除插件商店</string>
     <string name="extensionStoresScreen.deleteStore.body">是否移除插件商店 \"%1$s\" (%2$s)？</string>
     <string name="pref_webtoon_vertical_navigator_on_left">将垂直导航栏放在左侧</string>
+
+    <!-- MihonSY: 阅读器 / AI 超分同步自 Komiho -->
+    <string name="ai_model_anime_video">AnimeVideo</string>
+    <string name="ai_model_omni_mini">Omni-Mini</string>
+    <string name="ai_model_omni_turbo">Omni-Turbo</string>
+    <string name="ai_model_plugin_hint">模型包下载</string>
+    <string name="ai_tile_size_128">128</string>
+    <string name="ai_tile_size_192">192</string>
+    <string name="ai_tile_size_256">256</string>
+    <string name="ai_tile_size_96">96</string>
+    <string name="archive_password_prompt">该压缩包已加密，请输入密码打开。</string>
+    <string name="enhancement_ai_upscale">AI 超分</string>
+    <string name="enhancement_group_cpu">CPU</string>
+    <string name="enhancement_group_gpu">GPU</string>
+    <string name="enhancement_group_npu">NPU</string>
+    <string name="enhancement_scale">倍率</string>
+    <string name="loader_epub_no_images_error">该 EPUB 没有图片页，请改用 Komga 服务器阅读。</string>
+    <string name="password_incorrect">密码错误</string>
+    <string name="password_label">密码</string>
+    <string name="pref_ai_tile_size">分块大小</string>
+    <string name="pref_pager_offscreen_limit">预载页数</string>
+    <string name="pref_webtoon_prefetch_depth">预取深度</string>
+    <string name="webtoon_prefetch_1">1 屏</string>
+    <string name="webtoon_prefetch_2">2 屏</string>
+    <string name="webtoon_prefetch_3">3 屏</string>
 </resources>

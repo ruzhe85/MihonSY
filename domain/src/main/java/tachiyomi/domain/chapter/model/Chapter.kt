@@ -9,6 +9,9 @@ data class Chapter(
     val read: Boolean,
     val bookmark: Boolean,
     val lastPageRead: Long,
+    // SY --> Komiho: 按页书签 —— 章节级 bookmark 命中时记录的页号（0 表示未记录）。
+    val bookmarkPage: Long = 0L,
+    // SY <--
     val dateFetch: Long,
     val sourceOrder: Long,
     val url: String,
@@ -40,6 +43,7 @@ data class Chapter(
             read = false,
             bookmark = false,
             lastPageRead = 0,
+            bookmarkPage = 0,
             dateFetch = 0,
             sourceOrder = 0,
             url = "",

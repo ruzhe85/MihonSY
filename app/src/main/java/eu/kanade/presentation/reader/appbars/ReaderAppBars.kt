@@ -50,8 +50,12 @@ fun ReaderAppBars(
     chapterTitle: String?,
     navigateUp: () -> Unit,
     onClickTopAppBar: () -> Unit,
-    // bookmarked: Boolean,
-    // onToggleBookmarked: () -> Unit,
+    bookmarked: Boolean,
+    onToggleBookmarked: () -> Unit,
+    // SY --> Komiho: 长按书签按钮打开书签列表
+    onOpenBookmarks: () -> Unit,
+    // SY <--
+    // SY: 顶栏 Actions 尚未恢复，这三项目前不被消费（保留形参以免改动 ReaderActivity 调用点）
     onOpenInWebView: (() -> Unit)?,
     onOpenInBrowser: (() -> Unit)?,
     onShare: (() -> Unit)?,
@@ -107,9 +111,7 @@ fun ReaderAppBars(
             enter = slideInVertically(readerBarsSlideAnimationSpec) { -it } + fadeIn(readerBarsFadeAnimationSpec),
             exit = slideOutVertically(readerBarsSlideAnimationSpec) { -it } + fadeOut(readerBarsFadeAnimationSpec),
         ) {
-            // SY -->
             Column {
-                // SY <--
                 ReaderTopBar(
                     modifier = Modifier
                         .background(backgroundColor)
@@ -117,15 +119,10 @@ fun ReaderAppBars(
                     mangaTitle = mangaTitle,
                     chapterTitle = chapterTitle,
                     navigateUp = navigateUp,
-                    /* SY -->
                     bookmarked = bookmarked,
                     onToggleBookmarked = onToggleBookmarked,
-                    onOpenInWebView = onOpenInWebView,
-                    onOpenInBrowser = onOpenInBrowser,
-                    onShare = onShare,
-                    SY <-- */
+                    onOpenBookmarks = onOpenBookmarks,
                 )
-                // SY -->
                 ExhUtils(
                     isVisible = isExhToolsVisible,
                     onSetExhUtilsVisibility = onSetExhUtilsVisibility,

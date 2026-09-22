@@ -8,6 +8,9 @@ data class ChapterUpdate(
     val read: Boolean? = null,
     val bookmark: Boolean? = null,
     val lastPageRead: Long? = null,
+    // SY --> Komiho: 按页书签 —— 与 chapters.bookmark_page 对应
+    val bookmarkPage: Long? = null,
+    // SY <--
     val dateFetch: Long? = null,
     val sourceOrder: Long? = null,
     val url: String? = null,
@@ -26,6 +29,7 @@ fun Chapter.toChapterUpdate(): ChapterUpdate {
         read,
         bookmark,
         lastPageRead,
+        bookmarkPage,
         dateFetch,
         sourceOrder,
         url,

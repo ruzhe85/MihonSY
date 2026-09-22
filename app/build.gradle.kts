@@ -111,14 +111,41 @@ android {
     splits {
         abi {
             isEnable = true
-            isUniversalApk = true
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            // MihonSY (2026-09-22): AI 引擎只有 arm64-v8a 实现 —— ncnn 静态库只编了 arm64，
+            // QNN 运行库（jniLibs）也只有 arm64，x86/x86_64 只服务模拟器、不带任何 AI 后端，
+            // armeabi-v7a 同理。故默认只出 arm64 一个 ABI。
+            //
+            //   -PmihonsyAbi=arm64-v8a        收敛到单 ABI（CI 日常包）
+            //   -PmihonsyUniversal=true       额外要一份合并包（正式发版：arm64 + universal）
+            //
+            // ⚠️ 下面所有赋值都在 reset() 之后，是 include / isUniversalApk 的唯一来源；
+            // 不要把 isUniversalApk 提到 reset() 之前，会被 reset 清掉。
+            val wantUniversal = (project.findProperty("mihonsyUniversal") as String?) == "true"
+            val requestedAbis = (project.findProperty("mihonsyAbi") as String?)
+                ?.split(',')
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+            if (requestedAbis.isNullOrEmpty()) {
+                include("arm64-v8a")
+                isUniversalApk = wantUniversal
+            } else {
+                include(*requestedAbis.toTypedArray())
+                isUniversalApk = requestedAbis.size > 1 || wantUniversal
+            }
         }
     }
 
     packaging {
         jniLibs {
+            // MihonSY (2026-09-22): 高通 DSP 是通过 ADSP_LIBRARY_PATH 按**路径**自己加载
+            // libQnnHtpV<arch>Skel.so 的，不能从 APK 内直接 mmap 出来的库 dlopen。
+            // AGP 默认的 extractNativeLibs=false 会让 nativeLibraryDir 全空，于是
+            //   Failed to load skel, error: 4000 / Transport layer setup failed: 14001
+            // 打开此项与 Komiho 侧保持一致（其参考实现 app.mihon 1.3.9 也是 true）。
+            // 代价是机器上要展开这些库；APK 下载体积影响很小（.so 压缩率高）。
+            useLegacyPackaging = true
             keepDebugSymbols += listOf(
                 "libandroidx.graphics.path",
                 "libarchive-jni",

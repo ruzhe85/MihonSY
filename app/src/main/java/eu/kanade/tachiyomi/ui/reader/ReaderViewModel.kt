@@ -37,6 +37,8 @@ import eu.kanade.tachiyomi.ui.reader.loader.ChapterLoader
 import eu.kanade.tachiyomi.ui.reader.loader.DownloadPageLoader
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
+import eu.kanade.tachiyomi.util.storage.CbzCrypto
+import mihon.core.common.archive.ArchivePasswordException
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
@@ -89,8 +91,10 @@ import tachiyomi.decoder.ImageDecoder
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetMergedChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.UpdateChapter
+import tachiyomi.domain.chapter.model.BookmarkItem
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.model.ChapterUpdate
+import tachiyomi.domain.chapter.repository.BookmarkRepository
 import tachiyomi.domain.chapter.service.getChapterSort
 import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.domain.history.interactor.GetNextChapters
@@ -110,6 +114,7 @@ import java.time.Instant
 import java.util.Collections
 import java.util.Date
 import java.util.HashSet
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Presenter used by the activity to perform background operations.
@@ -142,11 +147,18 @@ class ReaderViewModel @JvmOverloads constructor(
     private val getMergedReferencesById: GetMergedReferencesById = Injekt.get(),
     private val getMergedChaptersByMangaId: GetMergedChaptersByMangaId = Injekt.get(),
     private val setReadStatus: SetReadStatus = Injekt.get(),
+    // SY -->
+    private val bookmarkRepository: BookmarkRepository = Injekt.get(),
     // SY <--
 ) : ViewModel() {
 
     private val mutableState = MutableStateFlow(State())
     val state = mutableState.asStateFlow()
+
+    // SY --> Komiho: 加密本密码输入：暂存待重载章节与起始页
+    private var archivePasswordChapter: ReaderChapter? = null
+    private var archivePasswordPage: Int? = null
+    // SY <--
 
     private val eventChannel = Channel<Event>()
     val eventFlow = eventChannel.receiveAsFlow()
@@ -425,6 +437,12 @@ class ReaderViewModel @JvmOverloads constructor(
                 if (e is CancellationException) {
                     throw e
                 }
+                // SY --> 加密本缺密码：暂存待重载章节，交上层弹密码框（不当致命错误）
+                if (e is ArchivePasswordException) {
+                    archivePasswordChapter = chapterList.firstOrNull { chapterId == it.chapter.id }
+                    archivePasswordPage = page
+                }
+                // SY <--
                 Result.failure(e)
             }
         }
@@ -474,7 +492,7 @@ class ReaderViewModel @JvmOverloads constructor(
                 chapterToDownload = cancelQueuedDownloads(newChapters.currChapter)
                 it.copy(
                     viewerChapters = newChapters,
-                    bookmarked = newChapters.currChapter.chapter.bookmark,
+                    currentPageBookmarked = false,
                 )
             }
         }
@@ -609,6 +627,15 @@ class ReaderViewModel @JvmOverloads constructor(
             updateChapterProgress(selectedChapter, page/* SY --> */, hasExtraPage/* SY <-- */)
         }
 
+        // SY --> Komiho: 翻页后刷新「当前页是否已加书签」图标状态。
+        viewModelScope.launchNonCancellable {
+            selectedChapter.chapter.id?.let { cid ->
+                val marked = bookmarkRepository.isPageBookmarked(cid, page.index)
+                mutableState.update { it.copy(currentPageBookmarked = marked) }
+            }
+        }
+        // SY <--
+
         if (selectedChapter != getCurrentChapter()) {
             logcat { "Setting ${selectedChapter.chapter.url} as active" }
             loadNewChapter(selectedChapter)
@@ -626,6 +653,14 @@ class ReaderViewModel @JvmOverloads constructor(
     /** Set once the aspect-ratio check has finished (either switched or gave up). */
     @Volatile
     private var autoWebtoonAspectDone = false
+
+    /**
+     * MihonSY: 比例检测命中的章节 URL——自动条漫只对「这一章」内存生效，
+     * 绝不写入 manga.readingMode（持久记忆只由用户手动切换模式更新）。
+     * 换章后失效，新章重新检测，同系列混排条漫/页漫可按章独立判断。
+     */
+    @Volatile
+    private var autoWebtoonEffectiveChapter: String? = null
 
     /** Chapter URL the current check session belongs to; reset on chapter change. */
     private var autoWebtoonCheckChapter: String? = null
@@ -647,8 +682,9 @@ class ReaderViewModel @JvmOverloads constructor(
      * page (normal manga ratio ~1.5) before the long strips start. Instead of inspecting only
      * the first page, we inspect the first [AUTO_WEBTOON_PAGES_TO_CHECK] pages as the reader
      * passes through them: if ANY of them is a tall strip (ratio above
-     * [AUTO_WEBTOON_MIN_ASPECT_RATIO]) the manga is a webtoon and its reading mode is set
-     * permanently. Only when all of them turn out normal-sized does the check give up.
+     * [AUTO_WEBTOON_MIN_ASPECT_RATIO]) the chapter is a webtoon and the reader switches to
+     * webtoon mode for this chapter only (in-memory; the saved manga mode is never touched).
+     * Only when all of them turn out normal-sized does the check give up.
      *
      * Triggered from TWO places (MihonSY):
      *  1. [onPageSelected] — fallback, fires on page turns.
@@ -662,8 +698,12 @@ class ReaderViewModel @JvmOverloads constructor(
         if (autoWebtoonAspectDone) return
         if (!readerPreferences.useAutoWebtoon.get()) return
         val manga = manga ?: return
-        // Only when the manga has no explicit reading mode (still DEFAULT)
+        // Only when the manga has no explicit reading mode (still DEFAULT).
+        // MihonSY: 非 DEFAULT 只剩用户手动记忆——手动选择优先，自动检测永不覆盖。
         if (ReadingMode.fromPreference(manga.readingMode.toInt()) != ReadingMode.DEFAULT) return
+        // MihonSY: 只检测当前激活章节——预加载章的就绪页面不触发，
+        // 避免读到上一章时被下一章的预载结果提前重建 viewer。
+        if (page.chapter != getCurrentChapter()) return
         // Skip if tag/source based detection already resolved to webtoon
         if (getMangaReadingMode() == ReadingMode.WEBTOON.flagValue) return
 
@@ -677,6 +717,19 @@ class ReaderViewModel @JvmOverloads constructor(
             autoWebtoonCheckChapter = chapterUrl
             // Fresh window: allow a few delayed re-checks for still-loading pages.
             autoWebtoonRetriesLeft = AUTO_WEBTOON_RETRIES
+            // MihonSY: 检测窗口按章独立——新章重开窗口（旧实现 done 后永不复位，
+            // 同一会话里第一章放弃检测后，后续条漫章节永远不再判断）。
+            autoWebtoonAspectDone = false
+            // MihonSY: 上一章的自动条漫只对上一章生效——进入新章时若解析出的
+            // 模式不同（如条漫章 → 页漫章），立即按新章模式重建 viewer。
+            val previousMode = getMangaReadingMode()
+            if (autoWebtoonEffectiveChapter != null && autoWebtoonEffectiveChapter != chapterUrl) {
+                autoWebtoonEffectiveChapter = null
+                if (getMangaReadingMode() != previousMode) {
+                    logcat { "MihonSY auto-webtoon: leaving auto-webtoon chapter, rebuilding viewer for new chapter" }
+                    recreateViewerForAutoMode()
+                }
+            }
         }
 
         // Check EVERY early page that is already ready, not just the current one.
@@ -697,9 +750,8 @@ class ReaderViewModel @JvmOverloads constructor(
                 val ratio = measurePageAspectRatio(candidate) ?: continue
                 logcat { "MihonSY auto-webtoon aspect check page ${candidate.number}: ratio=$ratio" }
                 if (ratio > AUTO_WEBTOON_MIN_ASPECT_RATIO) {
-                    autoWebtoonAspectDone = true
                     logcat { "MihonSY auto-webtoon: page ${candidate.number} is a tall strip, switching to webtoon mode" }
-                    setMangaReadingMode(ReadingMode.WEBTOON)
+                    applyAutoWebtoonForCurrentChapter(chapterUrl)
                     return@launchIO
                 }
                 synchronized(autoWebtoonCheckedIndices) { autoWebtoonCheckedIndices.add(candidate.index) }
@@ -724,6 +776,34 @@ class ReaderViewModel @JvmOverloads constructor(
                 }
             }
         }
+    }
+
+    /**
+     * MihonSY: 比例检测命中后调用——把当前章标记为「自动条漫」并按需重建 viewer。
+     * 只改内存状态（[autoWebtoonEffectiveChapter]），不写 manga.readingMode：
+     * 持久模式记忆仅由用户手动切换（[setMangaReadingMode]）更新，自动判断永不污染。
+     */
+    private fun applyAutoWebtoonForCurrentChapter(chapterUrl: String) {
+        autoWebtoonAspectDone = true
+        val previousMode = getMangaReadingMode()
+        autoWebtoonEffectiveChapter = chapterUrl
+        // 已经是条漫（如全局默认/标签推断）则只需记账，无需重建
+        if (getMangaReadingMode() == previousMode) return
+        logcat { "MihonSY auto-webtoon: chapter $chapterUrl switches to webtoon (in-memory, not saved)" }
+        recreateViewerForAutoMode()
+    }
+
+    /**
+     * MihonSY: 不落库地按 [getMangaReadingMode] 重建 viewer（自动模式切换专用）。
+     * 与 [setMangaReadingMode] 相同的位置保存逻辑，但不写数据库、不发 ReloadViewerChapters
+     * （状态未变，直接发 RecreateViewer 让 ReaderActivity 重建并重喂章节）。
+     */
+    private fun recreateViewerForAutoMode() {
+        val currChapters = state.value.viewerChapters ?: return
+        val currChapter = currChapters.currChapter
+        currChapter.requestedPage = currChapter.chapter.last_page_read
+        // Channel 默认 RENDEZVOUS，trySend 在无接收者时会丢——用 send 保证送达
+        viewModelScope.launchIO { eventChannel.send(Event.RecreateViewer) }
     }
 
     /**
@@ -993,26 +1073,59 @@ class ReaderViewModel @JvmOverloads constructor(
     /**
      * Bookmarks the currently active chapter.
      */
-    fun toggleChapterBookmark() {
+    // SY --> Komiho: 按页书签 —— 一本书（章节）可加多个，顶栏按钮在当前页加/取消。
+    /** 在当前页切换书签：已标则取消，未标则新增。 */
+    fun toggleBookmarkAtCurrentPage() {
         val chapter = getCurrentChapter()?.chapter ?: return
-        val bookmarked = !chapter.bookmark
-        chapter.bookmark = bookmarked
-
+        val chapterId = chapter.id ?: return
+        val page = (state.value.currentPage - 1).coerceAtLeast(0)
         viewModelScope.launchNonCancellable {
-            updateChapter.await(
-                ChapterUpdate(
-                    id = chapter.id!!,
-                    bookmark = bookmarked,
-                ),
-            )
-        }
-
-        mutableState.update {
-            it.copy(
-                bookmarked = bookmarked,
-            )
+            val marked = bookmarkRepository.isPageBookmarked(chapterId, page)
+            if (marked) {
+                bookmarkRepository.removeBookmarkAtPage(chapterId, page)
+            } else {
+                bookmarkRepository.addBookmark(chapterId, page)
+            }
+            mutableState.update { it.copy(currentPageBookmarked = !marked) }
         }
     }
+
+    /** 在当前页新增书签（用于列表对话框的「加书签」按钮，已存在则忽略）。 */
+    fun addBookmarkAtCurrentPage() {
+        val chapter = getCurrentChapter()?.chapter ?: return
+        val chapterId = chapter.id ?: return
+        val page = (state.value.currentPage - 1).coerceAtLeast(0)
+        viewModelScope.launchNonCancellable {
+            bookmarkRepository.addBookmark(chapterId, page)
+            mutableState.update { it.copy(currentPageBookmarked = true) }
+        }
+    }
+
+    /** 删除指定书签（列表对话框）。 */
+    fun removeBookmark(id: Long) {
+        viewModelScope.launchNonCancellable {
+            bookmarkRepository.removeBookmark(id)
+            getCurrentChapter()?.chapter?.id?.let { cid ->
+                val marked = bookmarkRepository.isPageBookmarked(
+                    cid,
+                    (state.value.currentPage - 1).coerceAtLeast(0),
+                )
+                mutableState.update { it.copy(currentPageBookmarked = marked) }
+            }
+        }
+    }
+
+    /** 打开本书签列表对话框。 */
+    fun openBookmarksDialog() {
+        mutableState.update { it.copy(dialog = Dialog.Bookmarks) }
+    }
+
+    /** 取当前章节下的所有按页书签，供列表对话框展示。 */
+    suspend fun getBookmarksForCurrentChapter(): List<BookmarkItem> {
+        val chapterId = getCurrentChapter()?.chapter?.id ?: return emptyList()
+        return bookmarkRepository.getBookmarksByChapter(chapterId)
+    }
+    // SY <--
 
     // SY -->
     fun toggleBookmark(chapterId: Long, bookmarked: Boolean) {
@@ -1023,6 +1136,7 @@ class ReaderViewModel @JvmOverloads constructor(
                 ChapterUpdate(
                     id = chapterId,
                     bookmark = bookmarked,
+                    bookmarkPage = if (bookmarked) chapter.last_page_read.toLong() else 0L,
                 ),
             )
         }
@@ -1038,6 +1152,14 @@ class ReaderViewModel @JvmOverloads constructor(
         val readingMode = ReadingMode.fromPreference(manga.readingMode.toInt())
         // SY -->
         return when {
+            // MihonSY: 比例检测命中的当前章——内存级 effective 模式优先于标签/全局推断，
+            // 仅当该章仍是激活章时生效（换章后自然失效，由新章重新检测）。
+            resolveDefault && readingMode == ReadingMode.DEFAULT &&
+                readerPreferences.useAutoWebtoon.get() &&
+                autoWebtoonEffectiveChapter != null &&
+                autoWebtoonEffectiveChapter == state.value.viewerChapters?.currChapter?.chapter?.url -> {
+                ReadingMode.WEBTOON.flagValue
+            }
             resolveDefault && readingMode == ReadingMode.DEFAULT && readerPreferences.useAutoWebtoon.get() -> {
                 manga.defaultReaderType(manga.mangaType(sourceName = sourceManager.get(manga.source)?.name))
                     ?: default
@@ -1208,6 +1330,32 @@ class ReaderViewModel @JvmOverloads constructor(
     fun closeDialog() {
         mutableState.update { it.copy(dialog = null) }
     }
+
+    // SY --> Komiho: 加密本密码输入
+    fun openArchivePasswordDialog() {
+        mutableState.update { it.copy(dialog = Dialog.ArchivePassword()) }
+    }
+
+    fun submitArchivePassword(password: String) {
+        CbzCrypto.setPassword(password)
+        // SY --> Komiho: 渲染期页面错误弹的密码框没有经过 init 暂存，兜底当前章
+        val chapter = archivePasswordChapter ?: getCurrentChapter() ?: return
+        // SY <--
+        mutableState.update { it.copy(dialog = null) }
+        viewModelScope.launchIO {
+            try {
+                loadChapter(loader!!, chapter, archivePasswordPage)
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                if (e is ArchivePasswordException) {
+                    mutableState.update { it.copy(dialog = Dialog.ArchivePassword(wrongPassword = e.wrongPassword)) }
+                    return@launchIO
+                }
+                logcat(LogPriority.ERROR, e)
+            }
+        }
+    }
+    // SY <--
 
     fun setBrightnessOverlayValue(value: Int) {
         mutableState.update { it.copy(brightnessOverlayValue = value) }
@@ -1523,7 +1671,7 @@ class ReaderViewModel @JvmOverloads constructor(
     data class State(
         val manga: Manga? = null,
         val viewerChapters: ViewerChapters? = null,
-        val bookmarked: Boolean = false,
+        val currentPageBookmarked: Boolean = false,
         val isLoadingAdjacentChapter: Boolean = false,
         val currentPage: Int = -1,
 
@@ -1565,12 +1713,20 @@ class ReaderViewModel @JvmOverloads constructor(
 
         // SY -->
         data object ChapterList : Dialog
+        // SY --> Komiho: 阅读器内按页书签列表对话框
+        data object Bookmarks : Dialog
         // SY <--
 
         data class PageActions(
             val page: ReaderPage/* SY --> */,
             val extraPage: ReaderPage? = null, /* SY <-- */
         ) : Dialog
+
+        // SY --> Komiho: 加密归档密码输入对话框
+        data class ArchivePassword(
+            val wrongPassword: Boolean = false,
+        ) : Dialog
+        // SY <--
 
         // SY -->
         data object AutoScrollHelp : Dialog
@@ -1581,6 +1737,8 @@ class ReaderViewModel @JvmOverloads constructor(
 
     sealed interface Event {
         data object ReloadViewerChapters : Event
+        // MihonSY: 自动模式切换（内存生效，不落库）后按当前解析模式重建 viewer
+        data object RecreateViewer : Event
         data object PageChanged : Event
         data class SetOrientation(val orientation: Int) : Event
         data class SetCoverResult(val result: SetAsCoverResult) : Event

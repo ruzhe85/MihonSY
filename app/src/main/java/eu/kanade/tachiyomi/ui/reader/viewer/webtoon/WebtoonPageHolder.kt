@@ -6,6 +6,7 @@ import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.FrameLayout
+import mihon.core.common.archive.ArchivePasswordException
 import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updateMargins
@@ -209,6 +210,8 @@ class WebtoonPageHolder(
                 Pair(source, isAnimated)
             }
             withUIContext {
+                // Komiho 诊断：条漫页号（条漫不走 PagerPreparedCache，来源只会是 holder）。
+                frame.pageIndex = page?.index ?: -1
                 frame.setImage(
                     source,
                     isAnimated,
@@ -296,11 +299,20 @@ class WebtoonPageHolder(
      * Initializes a button to retry pages.
      */
     private fun initErrorLayout(error: Throwable?): ReaderErrorBinding {
+        // SY --> Komiho: 渲染期密码异常（WebDAV 加密包构造期漏网/密码被换）→ 直接弹密码框，
+        // 输对后 submitArchivePassword 会整章重载，错误占位随之消失
+        if (error is ArchivePasswordException) {
+            viewer.activity.viewModel.openArchivePasswordDialog()
+        }
         if (errorLayout == null) {
             errorLayout = ReaderErrorBinding.inflate(LayoutInflater.from(context), frame, true)
             errorLayout?.root?.layoutParams = FrameLayout.LayoutParams(MATCH_PARENT, (parentHeight * 0.8).toInt())
             errorLayout?.actionRetry?.setOnClickListener {
-                page?.let { it.chapter.pageLoader?.retryPage(it) }
+                if (error is ArchivePasswordException) {
+                    viewer.activity.viewModel.openArchivePasswordDialog()
+                } else {
+                    page?.let { it.chapter.pageLoader?.retryPage(it) }
+                }
             }
         }
 

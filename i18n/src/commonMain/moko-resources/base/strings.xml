@@ -425,6 +425,11 @@
     <string name="pref_skip_read_chapters">Skip chapters marked read</string>
     <string name="pref_skip_filtered_chapters">Skip filtered chapters</string>
     <string name="pref_skip_dupe_chapters">Skip duplicate chapters</string>
+    <string name="reader_bookmarks_title">Bookmarks</string>
+    <string name="reader_bookmark_add_current">Add bookmark on current page (page %1$d)</string>
+    <string name="reader_bookmark_remove">Remove bookmark</string>
+    <string name="reader_bookmark_page">Page %1$d</string>
+    <string name="reader_enhancement_skipped">Skipped</string>
     <string name="pref_reader_navigation">Navigation</string>
     <string name="pref_read_with_volume_keys">Volume keys</string>
     <string name="pref_read_with_volume_keys_inverted">Invert volume keys</string>
@@ -1077,4 +1082,29 @@
     <string name="migrationListScreen.migrateDialog.cancelLabel">Cancel</string>
     <string name="migrationListScreen.progressDialog.cancelLabel">Cancel</string>
     <string name="migrationListScreen.matchWithoutChapterToast">No chapters found, this entry cannot be used for migration</string>
+
+    <!-- MihonSY: 阅读器 / AI 超分同步自 Komiho -->
+    <string name="ai_model_anime_video">AnimeVideo</string>
+    <string name="ai_model_omni_mini">Omni-Mini</string>
+    <string name="ai_model_omni_turbo">Omni-Turbo</string>
+    <string name="ai_model_plugin_hint">Model package download</string>
+    <string name="ai_tile_size_128">128</string>
+    <string name="ai_tile_size_192">192</string>
+    <string name="ai_tile_size_256">256</string>
+    <string name="ai_tile_size_96">96</string>
+    <string name="archive_password_prompt">This archive is encrypted. Enter the password to open it.</string>
+    <string name="enhancement_ai_upscale">AI upscale</string>
+    <string name="enhancement_group_cpu">CPU</string>
+    <string name="enhancement_group_gpu">GPU</string>
+    <string name="enhancement_group_npu">NPU</string>
+    <string name="enhancement_scale">Scale</string>
+    <string name="loader_epub_no_images_error">This EPUB has no image pages. Please open it via your Komga server.</string>
+    <string name="password_incorrect">Incorrect password</string>
+    <string name="password_label">Password</string>
+    <string name="pref_ai_tile_size">Tile size</string>
+    <string name="pref_pager_offscreen_limit">Preload pages</string>
+    <string name="pref_webtoon_prefetch_depth">Prefetch depth</string>
+    <string name="webtoon_prefetch_1">1 screen</string>
+    <string name="webtoon_prefetch_2">2 screens</string>
+    <string name="webtoon_prefetch_3">3 screens</string>
 </resources>

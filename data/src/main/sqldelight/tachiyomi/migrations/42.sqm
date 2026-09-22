@@ -1,0 +1,10 @@
+CREATE TABLE bookmarks(
+    _id INTEGER NOT NULL PRIMARY KEY,
+    chapter_id INTEGER NOT NULL,
+    page INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(chapter_id) REFERENCES chapters(_id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX bookmarks_chapter_id_index ON bookmarks(chapter_id);

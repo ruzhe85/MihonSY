@@ -1,7 +1,6 @@
 package eu.kanade.presentation.reader.settings
 
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -9,14 +8,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import eu.kanade.domain.manga.model.readerOrientation
 import eu.kanade.domain.manga.model.readingMode
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
+import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerConfig
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonViewer
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.sy.SYMR
@@ -55,10 +53,6 @@ internal fun ColumnScope.ReadingModePage(screenModel: ReaderSettingsScreenModel)
         }
     }
 
-    // MihonSY: image enhancement applies to EVERY reading mode, so it sits at the top level
-    // of the in-reader settings (not inside the webtoon/pager sections).
-    ImageEnhancementSettings(screenModel)
-
     val viewer by screenModel.viewerFlow.collectAsState()
     if (viewer is WebtoonViewer) {
         WebtoonViewerSettings(screenModel)
@@ -70,63 +64,6 @@ internal fun ColumnScope.ReadingModePage(screenModel: ReaderSettingsScreenModel)
     }
 }
 
-// MihonSY -->
-/**
- * In-reader image enhancement settings. Placed at the top level of the reading-mode page
- * (outside the webtoon/pager sections) on purpose: enhancement is global and applies to
- * every reading mode. A single selector (Off / Anime4K / Lanczos3) avoids the ambiguity of
- * two toggles where one silently overrides the other.
- */
-@Composable
-private fun ColumnScope.ImageEnhancementSettings(screenModel: ReaderSettingsScreenModel) {
-    HeadingItem(MR.strings.pref_image_enhancement_group)
-    Text(
-        text = stringResource(MR.strings.pref_enhancement_mode_summary),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 16.dp),
-    )
-
-    val enhancementMode by screenModel.preferences.enhancementMode.collectAsState()
-    // MihonSY: no label — the "图像增强" heading + explanation Text above already
-    // serve as the section title; the chip row sits directly below.
-    SettingsChipRow {
-        // MihonSY: Anime4K (index 1) and Spline36 (index 4) are disabled — hidden
-        // in the UI but kept in the index map for backward-compatible stored values.
-        ReaderPreferences.EnhancementModes.forEachIndexed { index, label ->
-            if (index == 1 || index == 4) return@forEachIndexed
-            FilterChip(
-                selected = enhancementMode == index,
-                onClick = { screenModel.preferences.enhancementMode.set(index) },
-                label = { Text(stringResource(label)) },
-            )
-        }
-    }
-
-    if (enhancementMode == 1 || enhancementMode == 4) {
-        // Anime4K / Spline36 hidden — an old stored value shows no extra chip.
-    } else if (enhancementMode in 2..3) {
-        // Lanczos3 / Catmull-Rom — scale selection applies to both.
-        val lanczosScale by screenModel.preferences.lanczosScale.collectAsState()
-        SettingsChipRow {
-            ReaderPreferences.LanczosScaleOptions.forEach { (value, label) ->
-                FilterChip(
-                    selected = lanczosScale == value,
-                    onClick = { screenModel.preferences.lanczosScale.set(value) },
-                    label = { Text(stringResource(label)) },
-                )
-            }
-        }
-    }
-
-    // MihonSY: enhancement status overlay toggle, available right here in the
-    // reader settings so the user does not have to dig into the app settings.
-    CheckboxItem(
-        label = stringResource(MR.strings.pref_show_enhancement_status),
-        pref = screenModel.preferences.showEnhancementStatus,
-    )
-}
-// MihonSY <--
 
 @Composable
 private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenModel) {
@@ -171,6 +108,18 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
                 selected = pageLayout == index,
                 onClick = { screenModel.preferences.pageLayout.set(index) },
                 label = { Text(stringResource(it)) },
+            )
+        }
+    }
+
+    // Komiho：预载页数（前后各几页）。档位只写值，含义由行标题承担。
+    val offscreenLimit by screenModel.preferences.pagerOffscreenLimit.collectAsState()
+    SettingsChipRow(MR.strings.pref_pager_offscreen_limit) {
+        (PagerConfig.OffscreenPages.MIN..PagerConfig.OffscreenPages.MAX).forEach { pages ->
+            FilterChip(
+                selected = offscreenLimit == pages,
+                onClick = { screenModel.preferences.pagerOffscreenLimit.set(pages) },
+                label = { Text(pages.toString()) },
             )
         }
     }
@@ -268,15 +217,34 @@ private fun ColumnScope.WebtoonViewerSettings(screenModel: ReaderSettingsScreenM
         }
     }
 
+    // Komiho: webtoon 预取深度（1=当前行为，2/3=加大预取提前解码，缓解 NPU 增强黑屏）
+    val webtoonPrefetchDepth by screenModel.preferences.webtoonPrefetchDepth.collectAsState()
+    SettingsChipRow(MR.strings.pref_webtoon_prefetch_depth) {
+        ReaderPreferences.WebtoonPrefetchDepth.mapIndexed { index, it ->
+            FilterChip(
+                selected = webtoonPrefetchDepth == index + 1,
+                onClick = { screenModel.preferences.webtoonPrefetchDepth.set(index + 1) },
+                label = { Text(stringResource(it)) },
+            )
+        }
+    }
+
+    // Komiho: 两代翻页动画互斥，先取状态，供时长滑条显隐与两个开关互关使用。
+    val pageTransitionsWebtoon by screenModel.preferences.pageTransitionsWebtoon.collectAsState()
+    val pageTransitionsWebtoonV2 by screenModel.preferences.pageTransitionsWebtoonV2.collectAsState()
+
     val webtoonTapScrollDuration by screenModel.preferences.webtoonTapScrollDuration.collectAsState()
-    SliderItem(
-        value = webtoonTapScrollDuration,
-        valueRange = ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MIN..ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MAX,
-        label = stringResource(MR.strings.pref_webtoon_tap_scroll_duration),
-        valueString = "${webtoonTapScrollDuration}ms",
-        onChange = { screenModel.preferences.webtoonTapScrollDuration.set(it) },
-        pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-    )
+    // v2 的时长按滚动距离自动算，固定时长滑条对它无效 —— 开启 v2 时隐藏，避免改了没效果。
+    if (!pageTransitionsWebtoonV2) {
+        SliderItem(
+            value = webtoonTapScrollDuration,
+            valueRange = ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MIN..ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MAX,
+            label = stringResource(MR.strings.pref_webtoon_tap_scroll_duration),
+            valueString = "${webtoonTapScrollDuration}ms",
+            onChange = { screenModel.preferences.webtoonTapScrollDuration.set(it) },
+            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        )
+    }
 
     CheckboxItem(
         label = stringResource(MR.strings.pref_webtoon_original_resolution),
@@ -307,10 +275,40 @@ private fun ColumnScope.WebtoonViewerSettings(screenModel: ReaderSettingsScreenM
         pref = screenModel.preferences.smoothAutoScroll,
     )
 
+    // Komiho: v1 / v2 互斥 —— 勾一个自动取消另一个（v1 匀速固定时长，v2 三次方缓出 + 时长按距离算）。
     CheckboxItem(
-        label = stringResource(MR.strings.pref_page_transitions),
-        pref = screenModel.preferences.pageTransitionsWebtoon,
+        label = stringResource(SYMR.strings.pref_page_transitions_linear),
+        checked = pageTransitionsWebtoon,
+        onClick = {
+            val next = !pageTransitionsWebtoon
+            screenModel.preferences.pageTransitionsWebtoon.set(next)
+            if (next) screenModel.preferences.pageTransitionsWebtoonV2.set(false)
+        },
     )
+
+    CheckboxItem(
+        label = stringResource(SYMR.strings.pref_page_transitions_v2),
+        checked = pageTransitionsWebtoonV2,
+        onClick = {
+            val next = !pageTransitionsWebtoonV2
+            screenModel.preferences.pageTransitionsWebtoonV2.set(next)
+            if (next) screenModel.preferences.pageTransitionsWebtoon.set(false)
+        },
+    )
+
+    // v2 速度档位（每屏基准时长，越小越快）——只在 v2 开启时显示
+    if (pageTransitionsWebtoonV2) {
+        val pageTransitionsV2Speed by screenModel.preferences.pageTransitionsV2Speed.collectAsState()
+        SettingsChipRow(SYMR.strings.pref_page_transitions_v2_speed) {
+            ReaderPreferences.PageTransitionsV2Speeds.map { speed ->
+                FilterChip(
+                    selected = pageTransitionsV2Speed == speed,
+                    onClick = { screenModel.preferences.pageTransitionsV2Speed.set(speed) },
+                    label = { Text("${speed}ms") },
+                )
+            }
+        }
+    }
     // SY <--
 
     val dualPageSplitWebtoon by screenModel.preferences.dualPageSplitWebtoon.collectAsState()

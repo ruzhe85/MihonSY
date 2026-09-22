@@ -738,4 +738,9 @@
 
     <!-- Humanize time -->
     <string name="humanize_fallback">moments ago</string>
+
+    <!-- MihonSY: 阅读器 / AI 超分同步自 Komiho -->
+    <string name="pref_page_transitions_linear">Constant-speed animation</string>
+    <string name="pref_page_transitions_v2">Ease-out animation</string>
+    <string name="pref_page_transitions_v2_speed">Ease-out animation speed</string>
 </resources>

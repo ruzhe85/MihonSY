@@ -4,6 +4,8 @@ import android.os.Build
 import androidx.compose.ui.graphics.BlendMode
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerConfig
+import eu.kanade.tachiyomi.util.waifu2x.AiUpscaleModel
+import eu.kanade.tachiyomi.util.waifu2x.UpscaleModelRegistry
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.preference.getEnum
@@ -21,6 +23,20 @@ class ReaderPreferences(
     val pageTransitionsPager: Preference<Boolean> = preferenceStore.getBoolean("pref_enable_transitions_pager_key", true)
 
     val pageTransitionsWebtoon: Preference<Boolean> = preferenceStore.getBoolean("pref_enable_transitions_webtoon_key", true)
+
+    // Komiho: 条页点击滚屏的第二套动画（ComicScreen 手感：五次方减速 + 时长按距离算）。
+    // 与 pageTransitionsWebtoon 互斥（UI 层保证两个开关互关）；默认关闭，保持 v1 行为不变。
+    val pageTransitionsWebtoonV2: Preference<Boolean> = preferenceStore.getBoolean(
+        "pref_enable_transitions_webtoon_v2_key",
+        false,
+    )
+
+    // Komiho: v2 的速度档位 = 每屏基准时长（ms，越小越快）。
+    // ComicScreen 反编译得出的基准 300 实测明显偏拖，故做成四档可调。
+    val pageTransitionsV2Speed: Preference<Int> = preferenceStore.getInt(
+        "pref_page_transitions_v2_speed",
+        PAGE_TRANSITIONS_V2_SPEED_DEFAULT,
+    )
     // SY <--
 
     val flashOnPageChange: Preference<Boolean> = preferenceStore.getBoolean("pref_reader_flash", false)
@@ -199,9 +215,17 @@ class ReaderPreferences(
         false,
     )
 
+    // Komiho: webtoon 预取深度（extra layout space 倍数）。1 = 当前行为（约 1 屏），
+    // 2/3 = 加大预取、提前解码后续页面，缓解 NPU 增强时的黑屏间隙。默认 1（原版）。
+    val webtoonPrefetchDepth: Preference<Int> = preferenceStore.getInt(
+        "webtoon_prefetch_depth",
+        WEBTOON_PREFETCH_DEPTH_DEFAULT,
+    )
+
     // MihonSY image enhancement -->
-    /** 0 = Off, 1 = Anime4K (disabled), 2 = Lanczos3, 3 = Catmull-Rom, 4 = Spline36 (disabled).
-     *  Single selector so the two algorithms never conflict. Anime4K/Spline36 are retained
+    /** 0 = Off, 1 = Anime4K (disabled), 2 = Lanczos3, 3 = Catmull-Rom, 4 = Spline36 (disabled),
+     *  5 = AI upscale (Komiho: ncnn + Vulkan, fixed 2x model).
+     *  Single selector so the algorithms never conflict. Anime4K/Spline36 are retained
      *  in the index map for backward-compatible stored values but excluded from the build. */
     val enhancementMode: Preference<Int> = preferenceStore.getInt("pref_enhancement_mode", 0)
 
@@ -210,8 +234,55 @@ class ReaderPreferences(
 
     val lanczosScale: Preference<Int> = preferenceStore.getInt("pref_lanczos_scale", 200) // 150/200/300 = 1.5x/2x/3x
 
+    /**
+     * Komiho: tile edge (px) for the AI upscaler — forwarded to the native `tilesize`
+     * (`waifu2x.cpp:150`, default 128) via `nativeUpdatePerformanceConfig`.
+     *
+     * Only affects AI upscale (mode 5). Larger tiles cut the number of tile
+     * dispatches (and the per-tile fixed overhead) at the cost of a higher peak
+     * GPU working set — each tile allocates `(tilesize + 2*prepadding)` input and
+     * `tilesize * scale` output, so the working set scales with the square of this value.
+     * The engine ships with `prepadding = 18`, annotated as safe up to tile size 256.
+     */
+    val aiTileSize: Preference<Int> = preferenceStore.getInt("pref_ai_tile_size", 128)
+
+    /**
+     * Komiho: which AI model the upscaler runs (a built-in [AiUpscaleModel] or a model
+     * delivered by an installed plugin APK, see [UpscaleModelRegistry]).
+     *
+     * Stored as the model's stable string id, not an index — adding or reordering catalogue
+     * entries must never remap an existing install's choice. Unknown ids (dropped model,
+     * uninstalled plugin) fall back to [AiUpscaleModel.Default].
+     */
+    val aiModelId: Preference<String> = preferenceStore.getString(
+        "pref_ai_model_id",
+        AiUpscaleModel.Default.id,
+    )
+
     /** Independent toggle: show the bottom-left enhancement status overlay (elapsed seconds / OK). */
     val showEnhancementStatus: Preference<Boolean> = preferenceStore.getBoolean("pref_show_enhancement_status", false)
+
+    /**
+     * Komiho (2026-09-19): fingerprint of every preference that changes the **rendered result**
+     * of enhancement.
+     *
+     * Cached artefacts — the pager's prepared pages and its "this pair is already rendered"
+     * guard — used to be validated against [enhancementMode] alone. So switching the AI model,
+     * the resampler scale, the AI tile size or border cropping kept the old bitmap on screen
+     * until the LRU evicted it (users had to leave the chapter or keep scrolling to see the new
+     * setting). Comparing this key instead makes a change take effect on the next page render.
+     *
+     * Only settings that change the **pixels** belong here: [showEnhancementStatus] and the
+     * prefetch-depth knobs must NOT be added, otherwise toggling them would throw away work.
+     */
+    fun enhancementCacheKey(): String = buildString {
+        append(enhancementMode.get())
+        append('|').append(lanczosScale.get())
+        append('|').append(aiModelId.get())
+        append('|').append(aiTileSize.get())
+        append('|').append(cropBorders.get())
+        append('|').append(cropBordersWebtoon.get())
+    }
     // MihonSY image enhancement <--
     // MihonSY <--
 
@@ -254,6 +325,16 @@ class ReaderPreferences(
     val readerBottomButtons: Preference<Set<String>> = preferenceStore.getStringSet("reader_bottom_buttons", ReaderBottomButton.BUTTONS_DEFAULTS)
 
     val pageLayout: Preference<Int> = preferenceStore.getInt("page_layout", PagerConfig.PageLayout.AUTOMATIC)
+
+    /**
+     * Komiho：分页阅读的「预载页数」= ViewPager 离屏缓冲（当前页**前后各保留几页**）。
+     *
+     * 默认 [PagerConfig.OffscreenPages.DEFAULT]（1，保守、最省内存）。调大能让连翻 / 跳页更"即出"，
+     * 代价是每档约多 2 页**已解码的增强位图**（双页一跨页增强后 4016×2880 ≈ 46MB），以及每页
+     * 一次**推测性**的 GPU 推理（引擎只有一个、串行）。稳态阅读（每页停留 > 渲染耗时）看不出差别。
+     */
+    val pagerOffscreenLimit: Preference<Int> =
+        preferenceStore.getInt("pref_pager_offscreen_limit", PagerConfig.OffscreenPages.DEFAULT)
 
     val invertDoublePages: Preference<Boolean> = preferenceStore.getBoolean("invert_double_pages", false)
 
@@ -312,14 +393,32 @@ class ReaderPreferences(
 
         val WebtoonTapScrollFractions = floatArrayOf(0.5f, 0.75f, 1.0f)
 
+        // Komiho: webtoon 预取深度档位（倍数）。1 = 当前原版行为，上限 3。
+        const val WEBTOON_PREFETCH_DEPTH_MIN = 1
+        const val WEBTOON_PREFETCH_DEPTH_MAX = 3
+        const val WEBTOON_PREFETCH_DEPTH_DEFAULT = 1
+        val WebtoonPrefetchDepth = listOf(
+            MR.strings.webtoon_prefetch_1,
+            MR.strings.webtoon_prefetch_2,
+            MR.strings.webtoon_prefetch_3,
+        )
+
+        // Komiho 翻页动画 v2 的速度档位：每屏基准时长（ms），越小越快。
+        // 实际时长 = (|距离| / 可视高度 + 1) × 该值，因此同一档位下距离越长越慢。
+        val PageTransitionsV2Speeds = listOf(50, 100, 150, 200)
+        const val PAGE_TRANSITIONS_V2_SPEED_DEFAULT = 100
+
         // MihonSY image enhancement -->
         // index: 0 Off / 1 Anime4K (disabled) / 2 Lanczos3 / 3 Catmull-Rom / 4 Spline36 (disabled)
+        //        / 5 AI upscale (Komiho: ncnn + Vulkan, fixed 2x model)
         val EnhancementModes = listOf(
             MR.strings.enhancement_off,
             MR.strings.enhancement_anime4k, // retained for backward-compatible stored values; hidden in UI
             MR.strings.enhancement_lanczos3,
             MR.strings.enhancement_catmull_rom,
             MR.strings.enhancement_spline36, // retained for backward-compatible stored values; hidden in UI
+            // Komiho: GPU AI upscale. Scale is baked into the model (2x), so no scale picker.
+            MR.strings.enhancement_ai_upscale,
         )
 
         // MihonSY: Anime4K disabled — quality list no longer referenced anywhere.
@@ -334,6 +433,27 @@ class ReaderPreferences(
             200 to MR.strings.lanczos_scale_2x,
             250 to MR.strings.lanczos_scale_2_5x,
             300 to MR.strings.lanczos_scale_3x,
+        )
+
+        /**
+         * Komiho: AI tile edge options. 128 is the native default (`waifu2x.cpp:150`);
+         * 256 is the largest value the bundled `prepadding = 18` is documented safe for.
+         */
+        val AiTileSizeOptions = listOf(
+            96 to MR.strings.ai_tile_size_96,
+            128 to MR.strings.ai_tile_size_128,
+            192 to MR.strings.ai_tile_size_192,
+            256 to MR.strings.ai_tile_size_256,
+        )
+
+        /**
+         * Komiho: CPU-side modes as an explicit (flag → label) table for the grouped picker.
+         * Flags match the values stored in [enhancementMode]; [EnhancementModes] stays as the
+         * full index map so old stored values keep resolving.
+         */
+        val CpuEnhancementModes = listOf(
+            2 to MR.strings.enhancement_lanczos3,
+            3 to MR.strings.enhancement_catmull_rom,
         )
         // MihonSY image enhancement <--
         // MihonSY <--

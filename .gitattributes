@@ -7,6 +7,16 @@
 # Gradle wrapper
 *.jar binary
 
+# MihonSY: native / ML artifacts must never be line-ending converted.
+# "*.a" archives start with the ASCII magic "!<arch>" so Git's text
+# auto-detection treats them as text and CRLF->LF conversion corrupts
+# the archive (verified: libncnn.a lost 94 bytes).
+*.a binary
+*.so binary
+*.o binary
+*.bin binary
+*.param binary
+
 # Images
 *.webp binary
 *.png binary

@@ -1,0 +1,55 @@
+CREATE TABLE bookmarks(
+    _id INTEGER NOT NULL PRIMARY KEY,
+    chapter_id INTEGER NOT NULL,
+    page INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(chapter_id) REFERENCES chapters(_id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX bookmarks_chapter_id_index ON bookmarks(chapter_id);
+
+insert:
+INSERT INTO bookmarks(chapter_id, page, created_at)
+VALUES (:chapterId, :page, :createdAt);
+
+getByChapter:
+SELECT *
+FROM bookmarks
+WHERE chapter_id = :chapterId
+ORDER BY page ASC;
+
+deleteById:
+DELETE FROM bookmarks WHERE _id = :id;
+
+deleteByChapterAndPage:
+DELETE FROM bookmarks WHERE chapter_id = :chapterId AND page = :page;
+
+countByChapterAndPage:
+SELECT COUNT(*)
+FROM bookmarks
+WHERE chapter_id = :chapterId AND page = :page;
+
+-- SY --> Komiho: 书签 tab（按页书签，一本书可有多条）。联 chapters/mangas 取书名/章节/封面，
+-- LEFT JOIN history 取章节最后阅读时间（书签行展示用）。
+bookmarksBySource:
+SELECT
+    B._id AS id,
+    B.chapter_id AS chapterId,
+    B.page AS page,
+    B.created_at AS createdAt,
+    C.manga_id AS mangaId,
+    C.name AS chapterName,
+    C.chapter_number AS chapterNumber,
+    C.url AS chapterUrl,
+    M.title AS mangaTitle,
+    M.url AS mangaUrl,
+    M.thumbnail_url AS thumbnailUrl,
+    H.last_read AS lastRead
+FROM bookmarks B
+JOIN chapters C ON B.chapter_id = C._id
+JOIN mangas M ON C.manga_id = M._id
+LEFT JOIN history H ON B.chapter_id = H.chapter_id
+WHERE M.source = :sourceId
+ORDER BY M.title ASC, C.chapter_number ASC, B.page ASC;
+-- SY <--

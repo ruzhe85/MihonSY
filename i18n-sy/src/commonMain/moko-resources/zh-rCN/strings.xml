@@ -678,4 +678,9 @@
     <string name="base_url">基础url</string>
     <string name="pref_include_chapter_url_hash">包含章节URL哈希值</string>
     <string name="pref_include_chapter_url_hash_desc">将章节URL的MD5哈希值的前六个字符添加到章节文件或文件夹名中。</string>
+
+    <!-- MihonSY: 阅读器 / AI 超分同步自 Komiho -->
+    <string name="pref_page_transitions_linear">匀速动画</string>
+    <string name="pref_page_transitions_v2">缓出动画</string>
+    <string name="pref_page_transitions_v2_speed">缓出动画速度</string>
 </resources>

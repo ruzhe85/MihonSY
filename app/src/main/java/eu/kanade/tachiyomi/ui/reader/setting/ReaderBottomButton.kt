@@ -22,7 +22,6 @@ enum class ReaderBottomButton(val value: String, val stringRes: StringResource) 
     companion object {
         val BUTTONS_DEFAULTS = setOf(
             ViewChapters,
-            WebView,
             CropBordersPager,
             CropBordersContinuesVertical,
             PageLayout,

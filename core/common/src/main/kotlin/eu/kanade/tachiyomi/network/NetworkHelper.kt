@@ -31,7 +31,9 @@ open /* SY <-- */ class NetworkHelper(
             .cache(
                 Cache(
                     directory = File(context.cacheDir, "network_cache"),
-                    maxSize = 5L * 1024 * 1024, // 5 MiB
+                    // SY: raised to 50 MiB so Komga cover thumbnails survive the
+                    // HTTP cache long enough for etag/304 revalidation to kick in.
+                    maxSize = 50L * 1024 * 1024, // 50 MiB
                 ),
             )
             .addInterceptor(UncaughtExceptionInterceptor())
