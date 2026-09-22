@@ -55,6 +55,7 @@
         android:name=".App"
         android:allowBackup="false"
         android:enableOnBackInvokedCallback="true"
+        android:extractNativeLibs="true"
         android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -66,6 +67,20 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Tachiyomi">
+
+        <!-- SY (2026-09-22): Qualcomm cDSP fastrpc 客户端库。
+             ★ 这是 NPU（QNN/HTP）能不能起来的**唯一**关键声明：
+             libcdsprpc.so 是 vendor 公共库，Android 12+ 要求 App 在 manifest 里显式声明，
+             才会进 App 链接器命名空间的 uses_libraries。缺这一行时 libQnnHtp.so 的
+             fastrpc 用户层完全初始化不出来，DSP 侧永远装不上 Skel，表现为
+                 loadRemoteSymbols failed with err 4000
+                 Failed to load skel, error: 4000
+                 Transport layer setup failed: 14001
+             而库、代码、ADSP_LIBRARY_PATH 全部正确也无效（回落 Vulkan）。
+             required=false ⇒ 非高通机型不受影响。 -->
+        <uses-native-library
+            android:name="libcdsprpc.so"
+            android:required="false" />
 
         <activity
             android:name=".ui.main.MainActivity"
