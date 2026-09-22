@@ -36,7 +36,9 @@ directionalViewPager = "1.0.0"
 diskLruCache = "2.0.2"
 firebase-bom = "34.15.0"
 firebase-crashlytics = "3.0.7"
-flexibleAdapter = "c8013533"
+# jitpack 上原 c8013533 的构建状态为 Error（artifact 已 404，无法下载）；
+# 3268efe4 构建状态为 ok，且 IFlexible / FlexibleAdapter 等 API 与其逐字相同。
+flexibleAdapter = "3268efe4"
 google-services = "4.5.0"
 image-decoder = "e03b81e18a"
 injekt = "ee267b2e27"
