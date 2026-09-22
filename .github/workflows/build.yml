@@ -43,6 +43,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # 该 action 的默认 packages 是 "tools platform-tools"，但 "tools" 包已被
+          # Google 从 sdkmanager 仓库移除（新版 cmdline-tools 找不到它会直接退出码 1）。
+          # 显式覆盖，只保留 platform-tools。
+          packages: platform-tools
 
       - name: Install SDK components (platform 36 + build-tools + NDK + CMake)
         run: |
