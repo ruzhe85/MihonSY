@@ -8,9 +8,8 @@ import kotlin.math.min
 /**
  * 基于本地真实文件的随机读取实现。
  *
- * 主要用途（Phase 2）：验证 `libarchive callback + SeekCallback` 架构在真机上对任意 ZIP
- * 随机读取的正确性（SEEK_SET / SEEK_CUR / SEEK_END 三种 whence）。
- * 验证通过后，WebDAV / SMB 复用同一个 [ArchiveReader]，无需改动 Reader / PageLoader。
+ * 本地真实文件（已下载章节、本地源、本地 EPUB）走这条路径：libarchive 经
+ * `SeekCallback`（SEEK_SET / SEEK_CUR / SEEK_END）按需定位读，不整本 mmap。
  *
  * 实现用 [java.nio.channels.FileChannel] 的**定位读** `read(buf, position)`：每次读都显式带
  * 文件偏移、不依赖通道的共享游标，因此多个页面并发预取（大跳页时）各自读各自的位置互不干扰，

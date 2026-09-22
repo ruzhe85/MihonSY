@@ -5,7 +5,7 @@ import java.io.Closeable
 /**
  * 任意偏移随机读取的字节源抽象。
  *
- * Local / WebDAV / SMB 各自实现这一接口，[ArchiveReader] 只依赖它，
+ * [LocalRandomAccessSource] 实现这一接口，[ArchiveReader] 只依赖它，
  * 不关心底层协议。Reader / PageLoader / 缓存全部不感知数据来源。
  *
  * 约定：

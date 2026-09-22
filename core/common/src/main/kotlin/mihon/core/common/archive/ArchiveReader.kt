@@ -12,7 +12,7 @@ import java.io.Closeable
 import java.io.File
 import java.io.InputStream
 
-// SY --> Phase3: 实现 ArchiveHandle 窄接口，与 RemoteZipReader（远程 ZIP 直读路径）共用 ArchivePageLoader
+// SY --> Phase3: 实现 ArchiveHandle 窄接口，供 ArchivePageLoader 使用
 class ArchiveReader : ArchiveHandle {
 
     val size: Long
@@ -27,7 +27,7 @@ class ArchiveReader : ArchiveHandle {
         checkEncryptionStatus()
     }
 
-    // 回调式构造器（Local / WebDAV / SMB 走这条，真正随机访问，不整本 mmap）
+    // 回调式构造器（本地真实文件走这条，按需定位读，不整本 mmap）
     constructor(source: RandomAccessSource) {
         this.source = source
         size = source.size
@@ -115,8 +115,8 @@ class ArchiveReader : ArchiveHandle {
 
 fun UniFile.archiveReader(context: Context): ArchiveReader {
     val path = filePath
-    // SY --> Phase2: 真实文件（uri.scheme == "file"）走 LocalRandomAccessSource 回调路径，
-    // 真机验证 libarchive seek 架构；content uri（SAF / 系统文件选择器）一律走原 mmap 路径。
+    // SY --> Phase2: 真实文件（uri.scheme == "file"）走 LocalRandomAccessSource 按需定位读，
+    // content uri（SAF / 系统文件选择器）一律走原 mmap 路径。
     // 关键：SAF 在 scoped storage 下只能经 content resolver 访问，filePath 虽能解码出真实路径，
     // 但直接 RandomAccessFile(File) 打开会 EACCES；不可仅凭 filePath 非空就走回调路径。
     if (uri?.scheme == "file" && !path.isNullOrEmpty()) {

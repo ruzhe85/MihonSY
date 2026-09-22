@@ -10,7 +10,7 @@ import kotlin.concurrent.Volatile
 import kotlin.math.min
 import mihon.core.common.archive.ArchiveEntry as MihonArchiveEntry
 
-// 私有主构造：mode 0 = mmap 内存块（本地 SAF / content uri），1 = RandomAccessSource 回调（Local/WebDAV/SMB 真随机访问）
+// 私有主构造：mode 0 = mmap 内存块（本地 SAF / content uri），1 = RandomAccessSource 回调（本地真实文件按需定位读）
 // SY -->
 class ArchiveInputStream private constructor(
     private val mode: Int,
@@ -59,7 +59,7 @@ class ArchiveInputStream private constructor(
     // 内存映射（本地 mmap）构造器
     constructor(buffer: Long, size: Long, encrypted: Boolean) : this(0, buffer, size, null, encrypted)
 
-    // 回调式（RandomAccessSource）构造器：Local / WebDAV / SMB 共用，真正随机访问，不整本 mmap
+    // 回调式（RandomAccessSource）构造器：本地真实文件走这条，按需定位读，不整本 mmap
     // SY -->
     constructor(source: RandomAccessSource, encrypted: Boolean) : this(1, 0, 0, source, encrypted)
     // SY <--
@@ -148,7 +148,7 @@ class ArchiveInputStream private constructor(
     }
 
     private companion object {
-        // 256KB 预读块：WebDAV 阶段复用同一缓冲即可把大量小读取合并为较少的大 Range 请求
+        // 256KB 预读块：把大量小读取合并为较少的定位读，减少 libarchive seek 次数
         const val READ_CHUNK = 256 * 1024
         const val SEEK_SET = 0
         const val SEEK_CUR = 1

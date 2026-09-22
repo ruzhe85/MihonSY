@@ -11,8 +11,7 @@ import tachiyomi.i18n.MR
 /**
  * Loader used to load a chapter from a .epub file.
  *
- * Komiho: 本地 / WebDAV / SMB 的 EPUB 都走这里（参数为窄接口 [ArchiveHandle]，
- * 本地是 ArchiveReader，远程是 RemoteZipReader / CachingArchiveHandle）。
+ * Komiho: 本地 EPUB 走这里（参数为窄接口 [ArchiveHandle]，实现方为 [ArchiveReader]）。
  * 阅读方式是「抽取图片页」—— [EpubFile] 只解析 OPF/spine 里的 `<img>`/`<image xlink:href>`，
  * 因此纯文字书（小说）会得到 0 页，这是设计限制，不是文件损坏；
  * 这里给出明确提示，避免上层用通用的「No pages found」含糊带过。

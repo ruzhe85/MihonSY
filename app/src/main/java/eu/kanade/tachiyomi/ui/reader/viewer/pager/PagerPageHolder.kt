@@ -664,7 +664,7 @@ class PagerPageHolder(
     }
 
     private fun showErrorLayout(error: Throwable?): ReaderErrorBinding {
-        // SY --> Komiho: 渲染期密码异常（WebDAV 加密包构造期漏网/密码被换）→ 直接弹密码框，
+        // SY --> Komiho: 渲染期密码异常（加密包构造期漏网/密码被换）→ 直接弹密码框，
         // 输对后 submitArchivePassword 会整章重载，错误占位随之消失
         if (error is ArchivePasswordException) {
             viewer.activity.viewModel.openArchivePasswordDialog()

@@ -48,7 +48,7 @@ object ImageUtil {
 
         // SY: 大小写归一 + jpeg 别名 —— ImageType.JPEG.extension 只有 "jpg"，此前
         // ".jpeg"（以及一切大写扩展名如 ".JPG"）会被判成非图片，导致封面提取把条目
-        // 过滤光（SMB/本地浏览封面、SMB/WebDAV 历史封面全受影响；阅读器不走此过滤
+        // 过滤光（本地来源封面受影响；阅读器不走此过滤
         // 所以能正常阅读）。
         val extension = name.substringAfterLast('.').lowercase(Locale.ROOT)
             .let { if (it == "jpeg") "jpg" else it }

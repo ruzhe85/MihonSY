@@ -4,8 +4,7 @@ import java.io.Closeable
 import java.io.InputStream
 
 // SY --> Komiho Phase3: 从 ArchivePageLoader 对 ArchiveReader 的实际依赖面提取的窄接口。
-// ArchiveReader（libarchive 路径）与 RemoteZipReader（远程 ZIP 中央目录直读路径）同实现，
-// ArchivePageLoader 只依赖接口，两条路径共用同一套页面构建 / 解码 / 加密弹窗逻辑。
+// ArchivePageLoader 只依赖接口，页面构建 / 解码 / 加密弹窗逻辑与具体归档实现解耦。
 interface ArchiveHandle : Closeable {
     /** 每实例唯一（ArchivePageLoader 建临时目录用）。 */
     val archiveHashCode: Int

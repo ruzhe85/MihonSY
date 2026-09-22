@@ -11,9 +11,8 @@ import java.io.InputStream
 /**
  * Wrapper over ZipFile to load files in epub format.
  *
- * Komiho: 参数类型是窄接口 [ArchiveHandle] 而非具体 ArchiveReader ——
- * 本地来源传 ArchiveReader，WebDAV / SMB 远程归档传 RemoteZipReader / CachingArchiveHandle。
- * 本类只用到 getInputStream，两条路径共用同一实现。
+ * Komiho: 参数类型是窄接口 [ArchiveHandle] 而非具体 ArchiveReader，
+ * 本类只用到 getInputStream，与具体归档实现解耦。
  */
 class EpubFile(private val reader: ArchiveHandle) : Closeable by reader {
 
