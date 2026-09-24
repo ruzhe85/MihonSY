@@ -176,6 +176,10 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                         sourceTag = sourceTag,
                         // Komiho: 页号透传给增强器 —— 角标按页登记引擎，别让并发页互相覆盖。
                         pageIndex = options.pageIndex,
+                        // Komiho: 把「适应屏幕」的目标尺寸传进去，AI 2x 后由软件层 Lanczos3 缩回，
+                        // 避免 SSIV 双线性把网点糊掉。
+                        targetWidth = targetW,
+                        targetHeight = targetH,
                     )
                     if (enhanceOk) {
                         EnhanceTimings.put(

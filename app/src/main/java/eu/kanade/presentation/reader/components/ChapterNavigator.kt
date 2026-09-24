@@ -77,14 +77,22 @@ fun ChapterNavigator(
 ) {
     val haptic = LocalHapticFeedback.current
 
+    // Komiho (2026-09-23): guard the slider state against a not-yet-loaded page count.
+    // With totalPages < 1 `valueRange` becomes reversed (1f..0f), and SliderState's value
+    // setter coerces into it — Float.coerceIn throws when min > max, so the assignment below
+    // used to crash on every recomposition (the Slider itself is already gated on
+    // totalPages > 1, but the assignment was not). Clamping is a no-op for totalPages >= 2,
+    // i.e. every case where the navigator actually renders.
     val state = remember(totalPages) {
         SliderState(
             value = currentPage.toFloat(),
-            steps = totalPages - 2,
-            valueRange = 1f..totalPages.toFloat(),
+            steps = (totalPages - 2).coerceAtLeast(0),
+            valueRange = 1f..totalPages.coerceAtLeast(1).toFloat(),
         )
     }
-    state.value = currentPage.toFloat()
+    if (totalPages > 1) {
+        state.value = currentPage.toFloat()
+    }
     state.onValueChange = { onPageIndexChange(it.roundToInt() - 1) }
     state.onValueChangeFinished = onPageIndexChangeFinished
 

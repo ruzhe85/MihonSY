@@ -465,12 +465,20 @@ open class ReaderPageImageView @JvmOverloads constructor(
                                     this@ReaderPageImageView.requestLayout()
                                 }
                             }
+                            // Komiho: 尺寸门 / HARDWARE / 输入已回收这些「什么都没做」的情况由增强器
+                            // 登记成 skip。角标必须显示 skip —— 否则会落回 engineLabel 的默认值
+                            // `CPU OK`，看着像 CPU 做过增强（实测 1600×10064 这类大图就是如此）。
+                            val skipped = EnhanceTimings.takeSkipped(pageIndex)
                             showEnhancementOutcome(
-                                success = true,
+                                success = !skipped,
                                 // Komiho: 优先用解码器登记的实际计算耗时（解码 + 增强，已剔除等锁）；
                                 // 取不到才回退 Coil 外层墙钟（含排队会虚高）。
-                                elapsedMillis = EnhanceTimings.take(pageIndex)
-                                    ?: (android.os.SystemClock.uptimeMillis() - startTime),
+                                elapsedMillis = if (skipped) {
+                                    0L
+                                } else {
+                                    EnhanceTimings.take(pageIndex)
+                                        ?: (android.os.SystemClock.uptimeMillis() - startTime)
+                                },
                             )
                         },
                     )

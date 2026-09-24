@@ -112,7 +112,7 @@
     <string name="reader_bookmark_add_current">在当前页加书签（第 %1$d 页）</string>
     <string name="reader_bookmark_remove">删除书签</string>
     <string name="reader_bookmark_page">第 %1$d 页</string>
-    <string name="reader_enhancement_skipped">跳过</string>
+    <string name="reader_enhancement_skipped">SKIP</string>
     <string name="pref_reader_navigation">翻页</string>
     <string name="pref_read_with_volume_keys">音量键翻页</string>
     <string name="pref_read_with_volume_keys_inverted">反转音量键</string>

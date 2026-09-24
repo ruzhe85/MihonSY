@@ -13,6 +13,7 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
+import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
@@ -38,6 +39,12 @@ object MihonSyEnhancer {
      * 好让「正常的条漫」不受任何影响，只拦 CPU 倍率档那种极端尺寸。
      */
     private const val MAX_ENHANCE_OUTPUT_PIXELS = 32_000_000L
+
+    /**
+     * 倍率。AI 档（mode 5）由模型固定为 2x；CPU 档（2/3）用 [ReaderPreferences.lanczosScale]。
+     * 只用于 [exceedsOutputCap] 的预判，实际缩放仍由各自分支决定。
+     */
+    private const val AI_UPSCALE_FACTOR = 2f
 
     init {
         System.loadLibrary("mihonsy-enhance")
@@ -164,7 +171,9 @@ object MihonSyEnhancer {
 
     /**
      * Synchronously enhances [input] according to the current reader preferences.
-     * Returns the enhanced bitmap, or null when no enhancement applies / fails.
+     * Returns the enhanced bitmap, or null when no enhancement applies / fails — including the
+     * case where the source is already so large that the scaled result would not survive
+     * [capOutputSize], in which case enhancement is skipped outright (see [exceedsOutputCap]).
      *
      * @param input must be an ARGB_8888 bitmap.
      * @param onComplete optional callback invoked with (enhanced != null, elapsedMillis, gpuWaitMillis)
@@ -182,9 +191,13 @@ object MihonSyEnhancer {
         onComplete: ((enhanced: Boolean, elapsedMillis: Long, gpuWaitMillis: Long) -> Unit)? = null,
         sourceTag: String = "",
         pageIndex: Int = -1,
+        targetWidth: Int = -1,
+        targetHeight: Int = -1,
     ): Bitmap? {
         val start = SystemClock.uptimeMillis()
         if (input.isRecycled) {
+            // Komiho: 什么都没做 —— 角标记成 skip，别落回 engineLabel 的默认值 CPU OK。
+            EnhanceTimings.markSkipped(pageIndex)
             onComplete?.invoke(false, SystemClock.uptimeMillis() - start, 0L)
             return null
         }
@@ -192,6 +205,7 @@ object MihonSyEnhancer {
         // (can produce all-black frames on some devices). Decode-time enhancement runs
         // on software bitmaps, so a HARDWARE input simply skips enhancement.
         if (input.config == Bitmap.Config.HARDWARE) {
+            EnhanceTimings.markSkipped(pageIndex)
             onComplete?.invoke(false, SystemClock.uptimeMillis() - start, 0L)
             return null
         }
@@ -199,6 +213,26 @@ object MihonSyEnhancer {
         // Single selector: 0 = Off, 2 = Lanczos3, 3 = Catmull-Rom.
         // (MihonSY: Anime4K (1) and Spline36 (4) are disabled and excluded from the build.)
         val mode = preferences.enhancementMode.get()
+
+        // Komiho (2026-09-23): 拦「注定白做」的增强。输入已经大到 × scale 之后必然超过
+        // [MAX_ENHANCE_OUTPUT_PIXELS]，输出就会被 [capOutputSize] 缩回来 —— 先超分再缩，
+        // 不但白烧算力（实测单页 2.5~6s，串行排队时单页总耗可达 15s），最后那次非整数重采样
+        // 还会抹细节：实测 1600×20164 → AI 2x = 3200×40328 (129MP) → 缩到 1593×20082，
+        // **比源宽 1600 还窄**。这类输入（本地已超分好的大图正是典型）直接不增强。
+        if (mode != 0 && exceedsOutputCap(input, mode, preferences)) {
+            logcat(LogPriority.WARN) {
+                val inPx = input.width.toLong() * input.height.toLong()
+                val scale = scaleFor(mode, preferences)
+                "Enhancement skipped: ${input.width}x${input.height} (${inPx / 1_000_000}MP) " +
+                    "x$scale -> ${(inPx * scale * scale / 1_000_000).toLong()}MP " +
+                    "exceeds the ${MAX_ENHANCE_OUTPUT_PIXELS / 1_000_000}MP output cap"
+            }
+            onComplete?.invoke(false, SystemClock.uptimeMillis() - start, 0L)
+            // Komiho: 这一页没有引擎参与，角标要显示 skip 而不是 CPU OK。
+            EnhanceTimings.markSkipped(pageIndex)
+            return null
+        }
+
         // Komiho: GPU 档单独收集耗时拆分 —— 角标要显示「剔除等锁」的实际计算消耗。
         val gpuTiming = if (mode == 5) Waifu2x.Timing() else null
         val result = when (mode) {
@@ -249,7 +283,7 @@ object MihonSyEnhancer {
             }
 
             // Komiho: GPU AI upscale (ncnn + Vulkan). Scale is fixed by the model (2x).
-            5 -> enhanceWithGpu(input, preferences, sourceTag, gpuTiming, pageIndex)
+            5 -> enhanceWithGpu(input, preferences, sourceTag, gpuTiming, pageIndex, targetWidth, targetHeight)
 
             else -> null
         }
@@ -264,6 +298,23 @@ object MihonSyEnhancer {
             gpuTiming?.totalWaitMs() ?: 0L,
         )
         return capped
+    }
+
+    /** 当前档位实际会用到的放大倍率（AI 档固定见 [AI_UPSCALE_FACTOR]，CPU 档取偏好）。 */
+    private fun scaleFor(mode: Int, preferences: ReaderPreferences): Float =
+        if (mode == 5) AI_UPSCALE_FACTOR else preferences.lanczosScale.get() / 100f
+
+    /**
+     * [input] 经当前档位放大后，像素总量是否会超过 [MAX_ENHANCE_OUTPUT_PIXELS]。
+     *
+     * 超过就说明 [capOutputSize] 必然把结果缩回来：这次增强拿不到标称倍率，只白白多出
+     * 一次非整数重采样。调用方据此整页跳过（见 [enhance]）。
+     */
+    private fun exceedsOutputCap(input: Bitmap, mode: Int, preferences: ReaderPreferences): Boolean {
+        val scale = scaleFor(mode, preferences)
+        if (scale <= 1f) return false
+        val output = input.width.toDouble() * input.height.toDouble() * scale * scale
+        return output > MAX_ENHANCE_OUTPUT_PIXELS.toDouble()
     }
 
     /**
@@ -321,6 +372,8 @@ object MihonSyEnhancer {
         sourceTag: String = "",
         timing: Waifu2x.Timing? = null,
         pageIndex: Int = -1,
+        targetWidth: Int = -1,
+        targetHeight: Int = -1,
     ): Bitmap? {
         if (Waifu2x.isSupported) {
             // Komiho: model and tile geometry are user preferences. Both are pushed before
@@ -343,7 +396,32 @@ object MihonSyEnhancer {
                 id = pageIndex,
                 tag = sourceTag,
                 timing = timing,
-            )?.let { return it }
+            )?.let { upscaled ->
+                // Komiho: AI 固定 2x，SSIV 显示时用双线性把 2x 结果缩到适应显示尺寸，
+                // 网点图高频细节被双线性抹糊。改为软件层用 Lanczos3 先把 2x 结果缩到
+                // 适应屏幕尺寸（fit-into targetW×targetH），让 SSIV 缩放比≈1，网点细节
+                // 由 Lanczos3 保住，不再被双线性重采样一次。
+                // 长条页的 targetH 已是全高，fit-into 自然退化为按宽度缩放，无需单独分支。
+                if (upscaled.width > input.width) {
+                    val goalW = if (targetWidth > 0) targetWidth else input.width
+                    val goalH = if (targetHeight > 0) targetHeight else input.height
+                    val scale = min(
+                        goalW.toFloat() / upscaled.width.toFloat(),
+                        goalH.toFloat() / upscaled.height.toFloat(),
+                    )
+                    if (scale < 1f) {
+                        val argb = ensureArgb(upscaled) ?: return upscaled
+                        val down = nativeLanczosProcess(argb, scale)
+                        if (down != null && down !== argb) {
+                            if (argb !== upscaled) argb.recycle()
+                            upscaled.recycle()
+                            return down
+                        }
+                        if (argb !== upscaled) argb.recycle()
+                    }
+                }
+                return upscaled
+            }
             logcat(LogPriority.WARN) { "AI upscale produced no result; falling back to Lanczos3" }
         } else {
             logcat(LogPriority.WARN) { "AI upscale unavailable for this ABI; falling back to Lanczos3" }
