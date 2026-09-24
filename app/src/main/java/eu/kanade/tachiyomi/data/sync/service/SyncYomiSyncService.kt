@@ -1,12 +1,11 @@
 package eu.kanade.tachiyomi.data.sync.service
 
 import android.content.Context
+import android.os.Build
 import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.tachiyomi.data.backup.models.Backup
 import eu.kanade.tachiyomi.data.sync.SyncNotifier
-import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
-import eu.kanade.tachiyomi.network.PUT
 import eu.kanade.tachiyomi.network.await
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -27,8 +26,15 @@ import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.i18n.MR
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPOutputStream
 
+/**
+ * SyncYomi client using protocol v2: the server performs the merge and returns the
+ * data this device is missing. The request/response body is the same Tachiyomi backup
+ * protobuf already produced for v1; only the transport differs.
+ */
 class SyncYomiSyncService(
     context: Context,
     json: Json,
@@ -61,31 +67,14 @@ class SyncYomiSyncService(
         reportSyncEvent(SyncEventStatus.SYNC_STARTED)
 
         try {
-            val (remoteData, etag) = pullSyncData()
+            val backup = syncData.backup ?: return null
+            val remote = syncV2Merge(backup)
 
-            val finalSyncData = if (remoteData != null) {
-                assert(etag.isNotEmpty()) { "ETag should never be empty if remote data is not null" }
-                logcat(LogPriority.DEBUG, "SyncService") {
-                    "Try update remote data with ETag($etag)"
-                }
-                mergeSyncData(syncData, remoteData)
-            } else {
-                // init or overwrite remote data
-                logcat(LogPriority.DEBUG) {
-                    "Try overwrite remote data with ETag($etag)"
-                }
-                syncData
-            }
-
-            val success = pushSyncData(finalSyncData, etag)
-
-            if (success) {
-                reportSyncEvent(SyncEventStatus.SYNC_SUCCESS)
-            } else {
-                reportSyncEvent(SyncEventStatus.SYNC_FAILED, "Failed to push sync data")
-            }
-
-            return finalSyncData.backup
+            reportSyncEvent(SyncEventStatus.SYNC_SUCCESS)
+            // remote == null means the server reported nothing new to pull back; returning the
+            // local backup reference lets SyncManager skip the restore (its identity check) while
+            // still recording a successful sync.
+            return remote ?: syncData.backup
         } catch (e: Exception) {
             if (e is CancellationException) {
                 reportSyncEvent(SyncEventStatus.SYNC_CANCELLED, e.message)
@@ -98,145 +87,103 @@ class SyncYomiSyncService(
         }
     }
 
-    private suspend fun pullSyncData(): Pair<SyncData?, String> {
-        val host = syncPreferences.clientHost.get()
-        val apiKey = syncPreferences.clientAPIKey.get()
-        val downloadUrl = "$host/api/sync/content"
-
-        val headersBuilder = Headers.Builder().add("X-API-Token", apiKey)
-        val lastETag = syncPreferences.lastSyncEtag.get()
-        if (lastETag != "") {
-            headersBuilder.add("If-None-Match", lastETag)
-        }
-        val headers = headersBuilder.build()
-
-        val downloadRequest = GET(
-            url = downloadUrl,
-            headers = headers,
-        )
-
-        val client = OkHttpClient()
-        val response = client.newCall(downloadRequest).await()
-
-        if (response.code == HttpStatus.SC_NOT_MODIFIED) {
-            // not modified
-            assert(lastETag.isNotEmpty())
-            logcat(LogPriority.INFO) {
-                "Remote server not modified"
-            }
-            return Pair(null, lastETag)
-        } else if (response.code == HttpStatus.SC_NOT_FOUND) {
-            // maybe got deleted from remote
-            return Pair(null, "")
-        }
-
-        if (response.isSuccessful) {
-            val newETag = response.headers["ETag"]
-                .takeIf { it?.isNotEmpty() == true } ?: throw SyncYomiException("Missing ETag")
-
-            val byteArray = response.body.byteStream().use {
-                return@use it.readBytes()
-            }
-
-            return try {
-                val backup = protoBuf.decodeFromByteArray(Backup.serializer(), byteArray)
-                return Pair(SyncData(backup = backup), newETag)
-            } catch (_: SerializationException) {
-                logcat(LogPriority.INFO) {
-                    "Bad content responsed from server"
-                }
-                // the body is invalid
-                // return default value so we can overwrite it
-                Pair(null, "")
-            }
-        } else {
-            val responseBody = response.body.string()
-            notifier.showSyncError("Failed to download sync data: $responseBody")
-            logcat(LogPriority.ERROR) { "SyncError: $responseBody" }
-            throw SyncYomiException("Failed to download sync data: $responseBody")
-        }
-    }
-
     /**
-     * Return true if update success
+     * Push the local backup to the SyncYomi v2 server, which merges it server-side
+     * and returns the data this device is missing.
+     *
+     * @return the merged backup to restore, or null when the server reported no changes.
      */
-    private suspend fun pushSyncData(syncData: SyncData, eTag: String): Boolean {
-        val backup = syncData.backup ?: return true
-
-        val host = syncPreferences.clientHost.get()
+    private suspend fun syncV2Merge(backup: Backup): Backup? {
+        val host = syncPreferences.clientHost.get().trimEnd('/')
         val apiKey = syncPreferences.clientAPIKey.get()
-        val uploadUrl = "$host/api/sync/content"
-        val timeout = 30L
+        val uploadUrl = "$host/api/sync/v2/merge"
+        val timeout = 60L
 
-        val headersBuilder = Headers.Builder().add("X-API-Token", apiKey)
-        if (eTag.isNotEmpty()) {
-            headersBuilder.add("If-Match", eTag)
+        val rawBytes = protoBuf.encodeToByteArray(Backup.serializer(), backup)
+        if (rawBytes.isEmpty()) {
+            throw IllegalStateException(context.stringResource(MR.strings.empty_backup_error))
         }
-        val headers = headersBuilder.build()
+        val body = gzip(rawBytes).toRequestBody("application/octet-stream".toMediaType())
 
-        // Set timeout to 30 seconds
+        val headers = Headers.Builder()
+            .add("X-API-Token", apiKey)
+            .add("X-Device-ID", syncPreferences.uniqueDeviceID())
+            .add("X-Device-Name", Build.MODEL)
+            .add("X-Sync-Cursor", syncPreferences.syncV2Cursor.get().toString())
+            .add("X-Sync-Full", if (syncData.isFullSync) "true" else "false")
+            .add("Content-Encoding", "gzip")
+            .build()
+
         val client = OkHttpClient.Builder()
             .connectTimeout(timeout, TimeUnit.SECONDS)
             .readTimeout(timeout, TimeUnit.SECONDS)
             .writeTimeout(timeout, TimeUnit.SECONDS)
             .build()
 
-        val byteArray = protoBuf.encodeToByteArray(Backup.serializer(), backup)
-        if (byteArray.isEmpty()) {
-            throw IllegalStateException(context.stringResource(MR.strings.empty_backup_error))
+        val response = client.newCall(POST(url = uploadUrl, headers = headers, body = body)).await()
+
+        if (response.code == HttpStatus.SC_NOT_FOUND) {
+            // Server without the v2 protocol.
+            response.close()
+            throw SyncYomiException(
+                "当前 SyncYomi 服务端不支持 v2 同步协议，请升级到支持 v2 的版本。",
+            )
         }
-        val body = byteArray.toRequestBody("application/octet-stream".toMediaType())
-
-        val uploadRequest = PUT(
-            url = uploadUrl,
-            headers = headers,
-            body = body,
-        )
-
-        val response = client.newCall(uploadRequest).await()
-
-        if (response.isSuccessful) {
-            val newETag = response.headers["ETag"]
-                .takeIf { it?.isNotEmpty() == true } ?: throw SyncYomiException("Missing ETag")
-            syncPreferences.lastSyncEtag.set(newETag)
-            logcat(LogPriority.DEBUG) { "SyncYomi sync completed" }
-            return true
-        } else if (response.code == HttpStatus.SC_PRECONDITION_FAILED) {
-            // other clients updated remote data, will try next time
-            logcat(LogPriority.DEBUG) { "SyncYomi sync failed with 412" }
-            return false
-        } else {
+        if (!response.isSuccessful) {
             val responseBody = response.body.string()
             notifier.showSyncError("Failed to upload sync data: $responseBody")
             logcat(LogPriority.ERROR) { "SyncError: $responseBody" }
-            return false
+            throw SyncYomiException("Failed to upload sync data: $responseBody")
         }
+
+        val cursor = response.headers["X-Sync-Cursor"]?.toLongOrNull()
+            ?: throw SyncYomiException("Missing X-Sync-Cursor in server response")
+        val changed = response.headers["X-Sync-Changed"]?.toBooleanStrictOrNull() ?: true
+        val fullRequested = response.headers["X-Sync-Full-Requested"]?.toBooleanStrictOrNull() ?: false
+
+        syncPreferences.syncV2Cursor.set(cursor)
+        syncPreferences.syncV2FullRequested.set(fullRequested)
+
+        if (!changed) {
+            response.close()
+            return null
+        }
+
+        val bytes = response.body.bytes()
+        return try {
+            protoBuf.decodeFromByteArray(Backup.serializer(), bytes)
+        } catch (e: SerializationException) {
+            logcat(LogPriority.ERROR) { "Bad content responded from server: ${e.message}" }
+            notifier.showSyncError("服务端返回的同步数据无法解析")
+            throw SyncYomiException("Bad content responded from server: ${e.message}")
+        }
+    }
+
+    private fun gzip(input: ByteArray): ByteArray {
+        val bos = ByteArrayOutputStream()
+        GZIPOutputStream(bos).use { it.write(input) }
+        return bos.toByteArray()
     }
 
     private suspend fun reportSyncEvent(event: SyncEventStatus, message: String? = null) {
         withContext(NonCancellable) {
             try {
-                val host = syncPreferences.clientHost.get()
+                val host = syncPreferences.clientHost.get().trimEnd('/')
                 val apiKey = syncPreferences.clientAPIKey.get()
                 val url = "$host/api/sync/event"
 
-                val headersBuilder = Headers.Builder().add("X-API-Token", apiKey)
-                val headers = headersBuilder.build()
+                val headers = Headers.Builder().add("X-API-Token", apiKey).build()
 
                 val bodyObj = SyncEvent(
                     event = event,
-                    deviceName = android.os.Build.MODEL,
+                    deviceName = Build.MODEL,
                     message = message,
                 )
 
                 val jsonBody = json.encodeToString(SyncEvent.serializer(), bodyObj)
                 val requestBody = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType())
 
-                val request = POST(
-                    url = url,
-                    headers = headers,
-                    body = requestBody,
-                )
+                val request = POST(url = url, headers = headers, body = requestBody)
 
                 val client = OkHttpClient()
                 client.newCall(request).await().close()

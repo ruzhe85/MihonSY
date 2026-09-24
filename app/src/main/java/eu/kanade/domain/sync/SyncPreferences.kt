@@ -13,7 +13,12 @@ class SyncPreferences(
     val clientAPIKey: Preference<String> = preferenceStore.getString("sync_client_api_key", "")
     val lastSyncTimestamp: Preference<Long> = preferenceStore.getLong(Preference.appStateKey("last_sync_timestamp"), 0L)
 
-    val lastSyncEtag: Preference<String> = preferenceStore.getString("sync_etag", "")
+    // SY: SyncYomi v2 protocol state
+    val syncV2Cursor: Preference<Long> = preferenceStore.getLong("sync_v2_cursor", 0L)
+    val syncV2FullRequested: Preference<Boolean> = preferenceStore.getBoolean("sync_v2_full_requested", false)
+
+    // 距上次全量同步的时间戳；用于周期性全量兜底（传播本地删除）。
+    val lastFullSyncTimestamp: Preference<Long> = preferenceStore.getLong("sync_last_full_ts", 0L)
 
     val syncInterval: Preference<Int> = preferenceStore.getInt("sync_interval", 0)
     val syncService: Preference<Int> = preferenceStore.getInt("sync_service", 0)

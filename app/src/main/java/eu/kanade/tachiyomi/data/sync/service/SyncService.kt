@@ -21,6 +21,7 @@ import kotlin.time.Duration.Companion.seconds
 data class SyncData(
     val deviceId: String = "",
     val backup: Backup? = null,
+    val isFullSync: Boolean = true,
 )
 
 abstract class SyncService(
