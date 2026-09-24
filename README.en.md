@@ -4,9 +4,9 @@
 
 ![MihonSY](.github/readme-images/app-icon.png)
 
-**A manga reader based on [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY)**
+**A manga reader based on [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY), focused on image enhancement and an enhanced webtoon experience**
 
-Package `eu.kanade.mihonsy` ｜ Version 1.0.6 (7) ｜ Android 8.0+
+Package `eu.kanade.mihonsy` ｜ Version 1.1.0 (9) ｜ Android 8.0+
 
 [English](./README.en.md) | [中文](./README.md)
 
@@ -16,126 +16,65 @@ Package `eu.kanade.mihonsy` ｜ Version 1.0.6 (7) ｜ Android 8.0+
 
 ## About
 
-MihonSY is a fork of TachiyomiSY (SY). It keeps all of SY's features and enhances the **webtoon reading experience**:
+MihonSY is a fork of [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY). It keeps all upstream features and improves **image enhancement** and the **webtoon reading experience**.
 
-- Adjustable tap-to-scroll distance with constant-speed animation
-- Smarter automatic webtoon detection
-- Komga tracking progress synced **per book**, precisely
-- Lightweight image enhancement (Lanczos3, no heavy models)
-- Original-resolution (1:1) display
-
-> ⚠️ This app has the **update checker removed** and never checks for updates online. It uses a different package name from the official TachiyomiSY, so both can be installed side by side — but **do not mix data between the two versions** (be careful when backing up / restoring).
+- On-device image enhancement
+- Improved webtoon reading experience
+- Komga progress synced **per book**, precisely
 
 ---
 
-## ✨ New Features
+## ✨ Key Features
 
-### 1. Webtoon Tap-to-Scroll Settings
+### 1. Image Enhancement
 
-- **Tap scroll distance**: half screen / 3/4 screen / full screen (3 options).
-- **Scroll animation**: tap scrolling uses a **constant-speed linear animation**; the duration is adjustable (0–1000ms, default 250ms). Set to 0 for an instant jump.
-- **Where**: reader settings (webtoon group) or Global settings → Reader → Webtoon.
+Image enhancement covers both classic interpolation and AI upscaling:
 
-### 2. Enhanced Auto-Webtoon Detection
+**Classic interpolation**: Lanczos3 / Catmull-Rom.
+**AI upscaling (GPU / NPU)**
 
-- Keeps the original tag-based detection (tags containing webtoon / long strip, etc.).
-- **New aspect-ratio detection**: when the first page of a chapter is a long strip (height/width > 2.5), the reader automatically switches to webtoon mode.
+- NPU models ship as **separate model-pack APKs** (reusing Komiho's builds, validated by package-prefix + SHA-256 cert allowlist), not bundled into the app.
 
-### 3. Per-Book Komga Progress Sync
+### 2. Webtoon Reading Enhancements
 
-- Instead of the cumulative "mark chapters 1–N as read" endpoint, progress is now synced per book via a single-chapter PATCH
-  (`PATCH /api/v1/books/{id}/read-progress`) — **other chapters are unaffected**, progress is precise to the chapter.
+- **Tap scroll distance**: half / 3-4 / full screen.
+- **Scroll animation**: constant-speed linear, 0–1000ms (0 = instant); v1.1.0 adds an **ease-out animation**.
+- **Instant trigger**: from v1.1.0, taps trigger instantly for a more responsive feel.
+- **Original resolution**: webtoon pages render at 1:1 native pixels.
+- **Preload settings**: new in v1.1.0 — paged and webtoon modes can both set the number of preloaded pages / screens.
+- Where: reader settings (webtoon group) or Global settings → Reader → Webtoon.
 
-### 4. Image Enhancement (Lightweight)
+### 3. Enhanced Auto-Webtoon Detection
 
-| Algorithm | Type | Presets |
-|-----------|------|---------|
-| **Lanczos3** | Classic resampling | 1.5x / 2x / 2.5x / 3x |
+- Keeps tag-based detection (webtoon / long strip) and adds **aspect-ratio detection** (first page height/width > 2.5 → auto webtoon).
 
-- Optimized for manga/webtoon line art; fast to load and low memory usage.
-- **No** heavy models such as waifu2x / Real-CUGAN / Real-ESRGAN (avoids lag).
-- **Where**: Global settings → Reader → Image enhancement; the reader settings
-  dialog can toggle "Show enhancement status" directly.
+### 4. Per-Book Komga Progress Sync
 
-### 5. Original-Resolution Display
-
-- Webtoon mode has a new "Original resolution" toggle: images display at **1:1** original pixels, no scaling.
-- In regular paging mode you can pick "Original size" in the zoom type.
+- Progress is PATCHed per actually-read book (`PATCH /api/v1/books/{id}/read-progress`); other chapters are unaffected.
 
 ---
 
-## 🧩 Upstream TachiyomiSY Features (All Kept)
+## 🧩 Upstream Features (Kept)
 
-- Online reading from a variety of sources; local reading
-- Configurable reader (multiple viewers, reading directions, other settings)
-- Tracker support: MyAnimeList, AniList, Kitsu, MangaUpdates, Shikimori, Bangumi, Hikka
-- Categories to organize your library
-- Light and dark themes
-- Scheduled library updates for new chapters
-- Local/cloud backups
-- Latest tab (up to 5 sources)
-- Automatic webtoon detection (upstream)
-- Manga recommendations (MAL / AniList / Neko Similar Manga)
-- Lewd filter, tracking filter, custom source categories, and more
-
----
-
-## 📦 Build
-
-### GitHub Actions (recommended, already configured in this repo)
-
-Pushing to the `master` branch triggers a build automatically, or manually trigger the `Build MihonSY APK` workflow:
-
-```bash
-git push origin master
-# or manually trigger
-gh workflow run 332560481 --repo ruzhe85/MihonSY
-# download artifacts
-gh run download <run-id> --repo ruzhe85/MihonSY
-```
-
-- Artifacts: release APKs for 5 ABIs (arm64-v8a / armeabi-v7a / x86_64 / x86 / universal)
-- Signing: `keystore/mihonmod.jks` (injected via GitHub Secrets, never committed)
-- Dependencies: JDK 17 + Android SDK 36 + NDK 28.2 + CMake
-
-### Local Build (not recommended)
-
-```bash
-# Requires JDK 17, Android SDK 36, NDK 28.2.13676358, Gradle 9.6.1
-./gradlew assembleRelease -Pdisable-code-shrink
-```
-
----
-
-## 🗂️ Project Structure
-
-| Path | Description |
-|------|-------------|
-| `app/src/main/cpp/` | Lanczos3 native implementation (JNI) |
-| `.../reader/viewer/webtoon/` | Tap-to-scroll, constant-speed animation, original resolution |
-| `.../reader/setting/ReaderPreferences.kt` | Preference definitions |
-| `.../util/MihonSyEnhancer.kt` | Image enhancement orchestration |
-| `.../data/track/komga/` | Per-book Komga progress sync |
-| `.github/workflows/build.yml` | GitHub Actions build configuration |
-
----
-
-## 📝 Changelog
-
-See [CHANGELOG.en.md](./CHANGELOG.en.md).
+- Online sources + local reading
+- Configurable reader (multiple viewers, directions)
+- Trackers: MyAnimeList, AniList, Kitsu, MangaUpdates, Shikimori, Bangumi, Hikka
+- Categories, light/dark themes, scheduled updates, local/cloud backups
+- Latest tab, auto webtoon detection, recommendations
+- Lewd/tracker/custom-source filters, and more
 
 ---
 
 ## ⚠️ Notes
 
-- For personal learning and use only; do not use commercially.
-- Please respect the copyright of the manga you read.
-- This fork is not affiliated with the upstream project; for issues please open an Issue in this repository.
+- The built-in updater checks the `ruzhe85/MihonSY` Releases (at most once per 3 days, auto-skips pre-releases).
+- Different package name from official TachiyomiSY, so they can coexist — but **keep their data separate** when backing up/restoring.
+- For personal learning and use only; respect manga copyright.
 
 ---
 
 ## Credits
 
-- [TachiyomiSY (jobobby04)](https://github.com/jobobby04/TachiyomiSY) — upstream project
-- [Mihon](https://github.com/mihonapp/mihon) — main project
-- [Anime4K](https://github.com/bloc97/Anime4K) — image enhancement algorithm
+- [TachiyomiSY (jobobby04)](https://github.com/jobobby04/TachiyomiSY)
+- [Mihon](https://github.com/mihonapp/mihon)
+- [mihon_img_upscale (HaoweiLi97)](https://github.com/HaoweiLi97/mihon_img_upscale)

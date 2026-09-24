@@ -4,9 +4,9 @@
 
 ![MihonSY](.github/readme-images/app-icon.png)
 
-**基于 [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY) 的漫画阅读器**
+**基于 TachiyomiSY 的漫画阅读器，主打图像增强与条漫阅读增强**
 
-包名 `eu.kanade.mihonsy` ｜ 版本 1.0.6 (7) ｜ Android 8.0+
+包名 `eu.kanade.mihonsy` ｜ 版本 1.1.0 (9) ｜ Android 8.0+
 
 [中文](./README.md) | [English](./README.en.md)
 
@@ -16,125 +16,67 @@
 
 ## 简介
 
-MihonSY 是 TachiyomiSY（SY）的分支，在保留 SY 全部特性的基础上，针对**条漫阅读体验**做了增强：
+MihonSY 是 [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY) 的一个分支，在保留上游全部特性的基础上，强化了**图像增强**与**条漫阅读体验**。
 
-- 点击滚动距离与匀速动画可调
-- 更聪明的自动条漫判定
-- Komga 追番进度**逐本精确**同步
-- 轻量图像增强（Lanczos3，无大模型）
-- 原始分辨率 1:1 显示
-
-> ⚠️ 本应用**移除了原版更新检查**，不会联网检查更新；与官方 TachiyomiSY 包名不同，可共存安装，但**请勿混淆两个版本的数据**（备份/恢复时注意区分）。
+- 端侧图像增强
+- 条漫阅读体验优化
+- Komga 进度**逐本精确**同步
 
 ---
 
-## ✨ 新增功能
+## ✨ 核心功能
 
-### 1. 条漫点击滚动设置
+### 1. 图像增强
 
-- **点击滚动距离**：半个屏幕 / 3/4 屏幕 / 一个屏幕，三档可选。
-- **滚动动画**：点击滚动采用**匀速线性动画**，动画时长可调（0–1000ms，默认 250ms）；设为 0 即瞬时跳页。
-- **入口**：阅读器内设置（条漫分组）或 全局设置 → 阅读器 → 条漫。
+图像增强包含经典插值与AI超分两套方案：
 
-### 2. 自动条漫判定增强
+**经典插值**：Lanczos3 / Catmull-Rom，
+**AI 超分（GPU / NPU）**
 
-- 保留原版标签判定（标签含 webtoon / long strip 等）。
-- 新增**按图片分辨率判定**：打开阅读器后若首页为长条图（高/宽 > 2.5），自动切换条漫模式。
 
-### 3. Komga 进度逐本同步
+- NPU 模型以**独立模型包 APK** 形式分发（复用 Komiho 成品，经包名前缀 + 证书 SHA-256 白名单校验），不打包进主程序。
 
-- 阅读进度不再使用"把第 1~N 话全部标记已读"的累积接口，改为对**实际读到的单话**逐本 PATCH
-  （`PATCH /api/v1/books/{id}/read-progress`），**其他章节不受影响**，进度精确到话。
+### 2. 条漫阅读增强
 
-### 4. 图像增强（轻量方案）
+- **点击滚动距离**：半屏 / 3/4 屏 / 全屏，三档可选。
+- **滚动动画**：匀速线性动画，时长 0–1000ms 可调（0 = 瞬时跳页）；v1.1.0 起新增**缓出动画**。
+- **瞬时触发**：v1.1.0 起点击改为瞬时触发，更跟手流畅。
+- **原始分辨率**：条漫按原始像素 1:1 显示，不缩放。
+- **预载设置**：v1.1.0 新增，页漫与条漫均可设置预载页面 / 屏幕数量。
+- 入口：阅读器设置（条漫分组）或 全局设置 → 阅读器 → 条漫。
 
-| 算法 | 类型 | 档位 |
-|------|------|------|
-| **Lanczos3** | 经典插值 | 1.5x / 2x / 2.5x / 3x |
+### 3. 自动条漫判定增强
 
-- 针对漫画/条漫线条优化，加载快、内存占用低。
-- **不含** waifu2x / Real-CUGAN / Real-ESRGAN 等重型模型（避免卡顿）。
-- 入口：全局设置 → 阅读器 → 图像增强；阅读器设置内可直接开关「显示增强状态」。
+- 保留原版标签判定（webtoon / long strip 等）。
+- 新增**按图片比例判定**：首页为长条图（高/宽 > 2.5）自动切条漫。
 
-### 5. 原始分辨率显示
+### 4. Komga 进度逐本同步
 
-- 条漫模式新增「原始分辨率」开关：图片按原始像素 **1:1** 显示，不缩放。
-- 普通翻页模式可在缩放类型中选择「原始大小」。
+- 改为对实际读到的单话逐本 `PATCH /api/v1/books/{id}/read-progress`，**其他章节不受影响**，进度精确到话。
 
 ---
 
-## 🧩 原版 TachiyomiSY 特性（全部保留）
+## 🧩 保留的上游特性
 
-- 多源在线阅读、本地阅读
-- 可配置阅读器（多视图、多阅读方向、其他设置）
-- 追踪支持：MyAnimeList、AniList、Kitsu、MangaUpdates、Shikimori、Bangumi、Hikka
-- 分类管理书架
-- 明/暗主题
-- 定时更新书架新章节
-- 本地/云备份
-- Latest 标签（最多 5 个源）
-- 自动 webtoon 检测（原版）
-- 漫画推荐（MAL / Anilist / Neko Similar Manga）
-- Lewd 过滤、追踪过滤、自定义源分类等
-
----
-
-## 📦 构建
-
-### GitHub Actions（推荐，本仓库已配置）
-
-推送到 `master` 分支自动触发构建，或手动触发 `Build MihonSY APK` workflow：
-
-```bash
-git push origin master
-# 或手动触发
-gh workflow run 332560481 --repo ruzhe85/MihonSY
-# 下载产物
-gh run download <run-id> --repo ruzhe85/MihonSY
-```
-
-- 产物：5 个 ABI 的 release APK（arm64-v8a / armeabi-v7a / x86_64 / x86 / universal）
-- 签名：`keystore/mihonmod.jks`（经 GitHub Secrets 注入，不落入代码库）
-- 依赖：JDK 17 + Android SDK 36 + NDK 28.2 + CMake
-
-### 本地构建（不推荐）
-
-```bash
-# 需要 JDK 17、Android SDK 36、NDK 28.2.13676358、Gradle 9.6.1
-./gradlew assembleRelease -Pdisable-code-shrink
-```
-
----
-
-## 🗂️ 项目结构
-
-| 路径 | 说明 |
-|------|------|
-| `app/src/main/cpp/` | Lanczos3 原生实现（JNI） |
-| `.../reader/viewer/webtoon/` | 条漫点击滚动、匀速动画、原始分辨率 |
-| `.../reader/setting/ReaderPreferences.kt` | 偏好项定义 |
-| `.../util/MihonSyEnhancer.kt` | 图像增强调度 |
-| `.../data/track/komga/` | Komga 逐本进度同步 |
-| `.github/workflows/build.yml` | GitHub Actions 构建配置 |
-
----
-
-## 📝 更新记录
-
-详见 [CHANGELOG.md](./CHANGELOG.md)（[English](./CHANGELOG.en.md)）。
+- 多源在线 + 本地阅读
+- 可配置阅读器（多视图、多方向）
+- 追踪：MyAnimeList、AniList、Kitsu、MangaUpdates、Shikimori、Bangumi、Hikka
+- 分类书架、明暗主题、定时更新、本地/云备份
+- Latest 标签、自动 webtoon 检测、漫画推荐
+- Lewd/追踪/自定义源分类过滤等
 
 ---
 
 ## ⚠️ 注意事项
 
-- 仅用于个人学习与使用，请勿用于商业用途。
-- 请遵守所阅读漫画的版权规定。
-- 本 fork 与上游无关联，问题请自行排查或在本仓库 Issue 讨论。
+- 内置更新检查会访问 `ruzhe85/MihonSY` 的 Releases（最多每 3 天一次，自动忽略 pre-release）。
+- 与官方 TachiyomiSY 包名不同，可共存，但**备份/恢复时注意区分数据**。
+- 仅个人学习使用，请遵守所读漫画的版权。
 
 ---
 
 ## 致谢
 
-- [TachiyomiSY (jobobby04)](https://github.com/jobobby04/TachiyomiSY) — 上游项目
-- [Mihon](https://github.com/mihonapp/mihon) — 主项目
-- [Anime4K](https://github.com/bloc97/Anime4K) — 图像增强算法
+- [TachiyomiSY (jobobby04)](https://github.com/jobobby04/TachiyomiSY)
+- [Mihon](https://github.com/mihonapp/mihon)
+- [mihon_img_upscale (HaoweiLi97)](https://github.com/HaoweiLi97/mihon_img_upscale) 
