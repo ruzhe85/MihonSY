@@ -8,10 +8,8 @@ import tachiyomi.domain.track.model.Track
 data class BackupTracking(
     // in 1.x some of these values have different types or names
     @ProtoNumber(1) var syncId: Int,
-    // LibraryId is not null in 1.x, but proto3 omits it on the wire when 0, so it needs a
-    // default value here or kotlinx throws MissingFieldException ("Field 'libraryId' is required")
-    // while decoding the server's sync response.
-    @ProtoNumber(2) var libraryId: Long = 0,
+    // LibraryId is not null in 1.x
+    @ProtoNumber(2) var libraryId: Long,
     @Deprecated("Use mediaId instead", level = DeprecationLevel.WARNING)
     @ProtoNumber(3)
     var mediaIdInt: Int = 0,

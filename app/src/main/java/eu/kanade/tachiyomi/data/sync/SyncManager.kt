@@ -52,10 +52,6 @@ class SyncManager(
     private val notifier: SyncNotifier = SyncNotifier(context)
     private val mangaRestorer: MangaRestorer = MangaRestorer()
 
-    // SY: SyncYomi v2 增量同步快照（记录已同步到服务端的 manga version）
-    private val snapshotFile = File(context.filesDir, "mihonsy_sync_snapshot.json")
-    private val fullSyncIntervalMs = 7L * 24 * 60 * 60 * 1000 // 7 天全量兜底（传播本地删除）
-
     enum class SyncService(val value: Int) {
         NONE(0),
         SYNCYOMI(1),
@@ -84,15 +80,6 @@ class SyncManager(
         val syncOptions = syncPreferences.getSyncSettings()
         val databaseManga = getAllMangaThatNeedsSync()
 
-        // 增量同步：仅首次/周期性全量时才发完整库，否则只发 version 变化的 manga
-        val isFullSync = shouldFullSync()
-        val snapshot = if (isFullSync) emptyMap() else loadSnapshot()
-        val syncManga = if (isFullSync) {
-            databaseManga
-        } else {
-            databaseManga.filter { snapshot[snapshotKey(it)] != it.version }
-        }
-
         val backupOptions = BackupOptions(
             libraryEntries = syncOptions.libraryEntries,
             categories = syncOptions.categories,
@@ -112,7 +99,7 @@ class SyncManager(
         )
 
         logcat(LogPriority.DEBUG) { "Begin create backup" }
-        val backupManga = backupCreator.backupMangas(syncManga, backupOptions)
+        val backupManga = backupCreator.backupMangas(databaseManga, backupOptions)
         val backup = Backup(
             backupManga = backupManga,
             backupCategories = backupCreator.backupCategories(backupOptions),
@@ -131,7 +118,6 @@ class SyncManager(
         val syncData = SyncData(
             deviceId = syncPreferences.uniqueDeviceID(),
             backup = backup,
-            isFullSync = isFullSync,
         )
 
         // Handle sync based on the selected service
@@ -167,7 +153,6 @@ class SyncManager(
             // nothing changed
             logcat(LogPriority.DEBUG) { "Skip restore due to remote was overwrite from local" }
             syncPreferences.lastSyncTimestamp.set(Date().time)
-            commitSnapshot(isFullSync, databaseManga)
             notifier.showSyncSuccess("Sync completed successfully")
             return
         }
@@ -178,13 +163,10 @@ class SyncManager(
             return
         }
 
-        // Check if it's first sync based on lastSyncTimestamp.
-        // Only skip the restore when the server returned nothing new (V2 returns the merged
-        // authoritative data on first sync, so we must apply it instead of dropping it).
-        if (syncPreferences.lastSyncTimestamp.get() == 0L && databaseManga.isNotEmpty() && remoteBackup === syncData.backup) {
-            // It's first sync and the server returned nothing new; just update remote data.
+        // Check if it's first sync based on lastSyncTimestamp
+        if (syncPreferences.lastSyncTimestamp.get() == 0L && databaseManga.isNotEmpty()) {
+            // It's first sync no need to restore data. (just update remote data)
             syncPreferences.lastSyncTimestamp.set(Date().time)
-            commitSnapshot(isFullSync, databaseManga)
             notifier.showSyncSuccess("Updated remote data successfully")
             return
         }
@@ -219,7 +201,6 @@ class SyncManager(
         ) {
             // update the sync timestamp
             syncPreferences.lastSyncTimestamp.set(Date().time)
-            commitSnapshot(isFullSync, databaseManga)
             notifier.showSyncSuccess("Sync completed successfully")
             return
         }
@@ -261,7 +242,6 @@ class SyncManager(
 
             // update the sync timestamp
             syncPreferences.lastSyncTimestamp.set(Date().time)
-            commitSnapshot(isFullSync, databaseManga)
         } else {
             logcat(LogPriority.ERROR) { "Failed to write sync data to file" }
         }
@@ -289,42 +269,6 @@ class SyncManager(
         return database.mangasQueries
             .getAllManga(::mapManga)
             .awaitAsList()
-    }
-
-    // SY: SyncYomi v2 增量同步快照管理
-    private fun snapshotKey(m: Manga) = "${m.source}|${m.url}"
-
-    private fun loadSnapshot(): MutableMap<String, Long> {
-        if (!snapshotFile.exists()) return mutableMapOf()
-        return try {
-            json.decodeFromString<MutableMap<String, Long>>(snapshotFile.readText())
-        } catch (e: Exception) {
-            logcat(LogPriority.WARN) { "加载同步快照失败，重置: ${e.message}" }
-            mutableMapOf()
-        }
-    }
-
-    private fun saveSnapshot(manga: List<Manga>) {
-        try {
-            val map = manga.associateTo(linkedMapOf()) { snapshotKey(it) to it.version }
-            snapshotFile.writeText(json.encodeToString(map))
-        } catch (e: Exception) {
-            logcat(LogPriority.WARN) { "保存同步快照失败: ${e.message}" }
-        }
-    }
-
-    private fun shouldFullSync(): Boolean {
-        if (!snapshotFile.exists()) return true
-        val lastFull = syncPreferences.lastFullSyncTimestamp.get()
-        if (lastFull == 0L) return true
-        return System.currentTimeMillis() - lastFull > fullSyncIntervalMs
-    }
-
-    private fun commitSnapshot(isFullSync: Boolean, manga: List<Manga>) {
-        saveSnapshot(manga)
-        if (isFullSync) {
-            syncPreferences.lastFullSyncTimestamp.set(System.currentTimeMillis())
-        }
     }
 
     private suspend fun getAllMangaThatNeedsSync(): List<Manga> {

@@ -6,8 +6,8 @@ import kotlinx.serialization.protobuf.ProtoNumber
 
 @Serializable
 data class BackupSearchTitle(
-    @ProtoNumber(1) var title: String = "",
-    @ProtoNumber(2) var type: Int = 0,
+    @ProtoNumber(1) var title: String,
+    @ProtoNumber(2) var type: Int,
 ) {
     fun getSearchTitle(mangaId: Long): SearchTitle {
         return SearchTitle(

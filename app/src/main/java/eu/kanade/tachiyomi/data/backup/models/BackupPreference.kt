@@ -5,14 +5,14 @@ import kotlinx.serialization.protobuf.ProtoNumber
 
 @Serializable
 data class BackupPreference(
-    @ProtoNumber(1) val key: String = "",
-    @ProtoNumber(2) val value: PreferenceValue = StringPreferenceValue(""),
+    @ProtoNumber(1) val key: String,
+    @ProtoNumber(2) val value: PreferenceValue,
 )
 
 @Serializable
 data class BackupSourcePreferences(
-    @ProtoNumber(1) val sourceKey: String = "",
-    @ProtoNumber(2) val prefs: List<BackupPreference> = emptyList(),
+    @ProtoNumber(1) val sourceKey: String,
+    @ProtoNumber(2) val prefs: List<BackupPreference>,
 )
 
 @Serializable
