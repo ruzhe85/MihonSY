@@ -68,7 +68,7 @@ class SyncYomiSyncService(
 
         try {
             val backup = syncData.backup ?: return null
-            val remote = syncV2Merge(backup)
+            val remote = syncV2Merge(backup, syncData.isFullSync)
 
             reportSyncEvent(SyncEventStatus.SYNC_SUCCESS)
             // remote == null means the server reported nothing new to pull back; returning the
@@ -93,7 +93,7 @@ class SyncYomiSyncService(
      *
      * @return the merged backup to restore, or null when the server reported no changes.
      */
-    private suspend fun syncV2Merge(backup: Backup): Backup? {
+    private suspend fun syncV2Merge(backup: Backup, isFullSync: Boolean): Backup? {
         val host = syncPreferences.clientHost.get().trimEnd('/')
         val apiKey = syncPreferences.clientAPIKey.get()
         val uploadUrl = "$host/api/sync/v2/merge"
@@ -110,7 +110,7 @@ class SyncYomiSyncService(
             .add("X-Device-ID", syncPreferences.uniqueDeviceID())
             .add("X-Device-Name", Build.MODEL)
             .add("X-Sync-Cursor", syncPreferences.syncV2Cursor.get().toString())
-            .add("X-Sync-Full", if (syncData.isFullSync) "true" else "false")
+            .add("X-Sync-Full", if (isFullSync) "true" else "false")
             .add("Content-Encoding", "gzip")
             .build()
 
