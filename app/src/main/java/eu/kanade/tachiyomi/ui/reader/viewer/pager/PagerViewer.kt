@@ -22,8 +22,11 @@ import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.system.logcat
@@ -40,6 +43,15 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     val downloadManager: DownloadManager by injectLazy()
 
     val scope = MainScope()
+
+    /** Komiho: 合并中的适配器重建任务（见 [refreshAdapter]），null = 没有待办。 */
+    private var refreshJob: Job? = null
+
+    /**
+     * Komiho: 上一次「真正重建」时的成像指纹（见 `ViewerConfig.imageFingerprint()`）。
+     * 构造时先按当前偏好记下基线，随后 config 里各 register 的首发回调就会因指纹相同而被跳过。
+     */
+    private var lastImageFingerprint: String? = null
 
     /**
      * View pager used by this viewer. It's abstract to implement L2R, R2L and vertical pagers on
@@ -121,6 +133,11 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
 
         override fun onPageScrollStateChanged(state: Int) {
             isIdle = state == ViewPager.SCROLL_STATE_IDLE
+            // Komiho (2026-10-01): 手指拖动期间让原生推理让位（见 [Waifu2x.setUiBusy]）。
+            // 只认 DRAGGING、不认 SETTLING：抬手后的惯性动画很短，而批次大小本身已被时间窗口
+            // 封顶（`waifu2x.cpp`），连惯性期也让位只会白白推迟出图。
+            // 这套让位逻辑在原生里一直存在，但此前没有任何 Kotlin 调用点 —— 等于死代码。
+            Waifu2x.setUiBusy(state == ViewPager.SCROLL_STATE_DRAGGING)
         }
     }
 
@@ -181,8 +198,12 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         }
 
         config.imagePropertyChangedListener = {
-            refreshAdapter()
+            config.onImagePropertyChanged()
         }
+        config.bindRefreshAdapter { refreshAdapter() }
+
+        // 基线：此刻适配器就是按这些设置建的，所以紧接着的首发回调不该触发重建。
+        lastImageFingerprint = config.imageFingerprint()
 
         config.navigationModeChangedListener = {
             val showOnStart = config.navigationOverlayOnStart || config.forceNavigationOverlay
@@ -237,6 +258,10 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     fun onPrepareStart(pageIndex: Int, visible: Boolean) {
         val previous = lastPreparePage
         lastPreparePage = pageIndex
+        // Komiho (2026-10-01): 标记「当前可见页」，供 Waifu2x 的可见页优先闸门把这张页的推理
+        // 排到预取之前（见 Waifu2x.prioritizeEnhancement）。只在 visible 时写 —— 预取调用点
+        // 传 false，不能把它解读成「可见页已经换了」。
+        if (visible) Waifu2x.visiblePageIndex = pageIndex
         if (!visible || previous < 0 || previous == pageIndex) return
         prewarmLog("preempt page=$previous by-page=$pageIndex")
         Waifu2x.abortProcessing()
@@ -554,12 +579,33 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * changed.
      */
     private fun refreshAdapter() {
-        val currentItem = pager.currentItem
-        preparedCache.clear() // SY: 图像配置变更（分割/裁剪/背景等）后旧结果全部失效
-        adapter.refresh()
-        pager.adapter = adapter
-        pager.setCurrentItem(currentItem, false)
+        // Komiho (2026-09-24): 先过指纹门 —— config 里每个 `register()` 订阅时会**首发一次当前值**
+        // （`AndroidPreference.changes()` 的 `onStart { emit(…) }`，`distinctUntilChanged` 在赋值之后
+        // 挡不住这第一次），刚建好 viewer 时这一批回调不代表设置变了；照着重建会把可见页重新解码 +
+        // 增强（请求 memory/disk 双 DISABLED，没有缓存兜底）。指纹相同直接返回。
+        val fingerprint = config.imageFingerprint()
+        if (fingerprint == lastImageFingerprint) {
+            android.util.Log.d(KOMIHA_REBUILD_TAG, "skip rebuild: image settings unchanged")
+            return
+        }
+        lastImageFingerprint = fingerprint
+
+        // 合并连续触发：一串真变更并成一次重建，同时避免 preparedCache 被连续清空（清一次就够）。
+        refreshJob?.cancel()
+        refreshJob = scope.launch {
+            delay(REFRESH_COALESCE_DELAY_MS)
+            android.util.Log.d(KOMIHA_REBUILD_TAG, "rebuild adapter (coalesced)")
+            val currentItem = pager.currentItem
+            preparedCache.clear() // SY: 图像配置变更（分割/裁剪/背景等）后旧结果全部失效
+            adapter.refresh()
+            pager.adapter = adapter
+            pager.setCurrentItem(currentItem, false)
+        }
     }
+
+    override fun deferImagePropertyRefresh() = config.deferImagePropertyRefresh()
+
+    override fun flushImagePropertyRefresh() = config.flushImagePropertyRefresh()
 
     /**
      * Called from the containing activity when a key [event] is received. It should return true
@@ -658,3 +704,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
  * XLog 的 WARN 级别吞掉，所以这里直接用 android.util.Log。
  */
 private fun prewarmLog(msg: String) = android.util.Log.d("Waifu2xPrewarm", msg)
+
+/** Komiho 诊断：适配器重建日志（webtoon 侧同名 tag，便于一起 grep）。 */
+private const val KOMIHA_REBUILD_TAG = "Waifu2xRebuild"
+
+/** Komiho: 适配器重建的合并窗口 —— 把同一批 register 首发回调并成一次重建。 */
+private const val REFRESH_COALESCE_DELAY_MS = 120L

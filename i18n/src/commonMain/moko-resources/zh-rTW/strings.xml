@@ -954,6 +954,13 @@
     <string name="enhancement_group_gpu">GPU</string>
     <string name="enhancement_group_npu">NPU</string>
     <string name="enhancement_scale">倍率</string>
+    <string name="ai_bypass_fit">高解析度圖強制增強</string>
+    <string name="ai_area_downscale">降低摩爾紋</string>
+    <string name="ai_area_downscale_strength">濾波強度</string>
+    <string name="ai_area_strength_light">中</string>
+    <string name="ai_area_strength_medium">強</string>
+    <string name="enhancement_group_title">增強</string>
+    <string name="enhancement_denoise">降噪</string>
     <string name="loader_epub_no_images_error">該 EPUB 沒有圖片頁，請改用 Komga 伺服器閱讀。</string>
     <string name="password_incorrect">密碼錯誤</string>
     <string name="password_label">密碼</string>

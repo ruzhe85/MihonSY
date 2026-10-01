@@ -72,21 +72,33 @@ fun ImageEnhancementSection(
     val mode by preferences.enhancementMode.collectAsState()
 
     Column(modifier) {
-        // Off — not part of either platform group.
-        SettingsChipRow {
-            FilterChip(
-                selected = mode == 0,
-                onClick = { preferences.enhancementMode.set(0) },
-                label = { Text(stringResource(MR.strings.enhancement_off)) },
-            )
-        }
+        // Komiho: 降噪独立于增强档位（mode 0 也生效），常驻首行；打勾开关样式。
+        val denoise by preferences.denoiseLevel.collectAsState()
+        CheckboxItem(
+            label = stringResource(MR.strings.enhancement_denoise),
+            checked = denoise != 0,
+            onClick = { preferences.denoiseLevel.set(if (denoise != 0) 0 else 1) },
+        )
 
+        // Komiho: 图像增强总开关（打勾样式）；关闭时下方 CPU/GPU/NPU 分组全部隐藏。
+        val lastMode by preferences.enhancementLastMode.collectAsState()
+        val setMode: (Int) -> Unit = {
+            preferences.enhancementLastMode.set(it)
+            preferences.enhancementMode.set(it)
+        }
+        CheckboxItem(
+            label = stringResource(MR.strings.enhancement_group_title),
+            checked = mode != 0,
+            onClick = { setMode(if (mode != 0) 0 else if (lastMode != 0) lastMode else 2) },
+        )
+
+        if (mode != 0) {
         EnhancementGroupLabel(MR.strings.enhancement_group_cpu)
         SettingsChipRow {
             ReaderPreferences.CpuEnhancementModes.forEach { (flag, labelRes) ->
                 FilterChip(
                     selected = mode == flag,
-                    onClick = { preferences.enhancementMode.set(flag) },
+                    onClick = { setMode(flag) },
                     label = { Text(stringResource(labelRes)) },
                 )
             }
@@ -122,7 +134,7 @@ fun ImageEnhancementSection(
                         selected = mode == 5 && activeModel == model,
                         onClick = {
                             preferences.aiModelId.set(model.id)
-                            preferences.enhancementMode.set(5)
+                            setMode(5)
                         },
                         label = { Text(model.displayLabel()) },
                     )
@@ -197,7 +209,7 @@ fun ImageEnhancementSection(
                             selected = mode == 5 && activeModel == model,
                             onClick = {
                                 preferences.aiModelId.set(model.id)
-                                preferences.enhancementMode.set(5)
+                                setMode(5)
                             },
                             label = { Text(model.displayLabel()) },
                         )
@@ -206,10 +218,45 @@ fun ImageEnhancementSection(
             }
         }
 
+        // Komiho: 显示增强状态角标——随增强组开关隐藏。
         CheckboxItem(
             label = stringResource(MR.strings.pref_show_enhancement_status),
             pref = preferences.showEnhancementStatus,
         )
+
+        if (mode == 5) {
+            // Komiho: 大图强制 AI 增强（放开 r≤1 尺寸门控；MP 输出门仍兜底）。
+            val bypass by preferences.aiBypassFitGate.collectAsState()
+            CheckboxItem(
+                label = stringResource(MR.strings.ai_bypass_fit),
+                checked = bypass,
+                onClick = { preferences.aiBypassFitGate.set(!bypass) },
+            )
+            // Komiho: AI 面积回缩（防摩尔纹）—— AI 2x 输出按显示尺寸用高斯核压回
+            // 显示带通再交 SSIV（SSIV 整图双线性缩小无低通，高频网点会拍频）。
+            val areaDownscale by preferences.aiAreaDownscale.collectAsState()
+            CheckboxItem(
+                label = stringResource(MR.strings.ai_area_downscale),
+                checked = areaDownscale,
+                onClick = { preferences.aiAreaDownscale.set(!areaDownscale) },
+            )
+            if (areaDownscale) {
+                // Komiho: 回缩强度 —— σ 随档位走，盖住网点晶格周期才积得成均匀灰；
+                // 强档灰度均匀但线稿更软，按网点粗细取舍。
+                val strength by preferences.aiAreaDownscaleStrength.collectAsState()
+                EnhancementParamLabel(MR.strings.ai_area_downscale_strength)
+                SettingsChipRow {
+                    ReaderPreferences.AiAreaDownscaleStrengthOptions.forEach { (value, labelRes) ->
+                        FilterChip(
+                            selected = strength == value,
+                            onClick = { preferences.aiAreaDownscaleStrength.set(value) },
+                            label = { Text(stringResource(labelRes)) },
+                        )
+                    }
+                }
+            }
+        }
+        }  // Komiho: if (mode != 0) —— 关闭时隐藏增强分组、模型选择、角标开关与强制增强
     }
 }
 

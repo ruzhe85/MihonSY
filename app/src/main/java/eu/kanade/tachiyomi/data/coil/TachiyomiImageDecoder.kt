@@ -96,9 +96,21 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         // GPU limit.
         val isTallStrip = srcHeight > 0 && srcWidth > 0 &&
             srcHeight.toFloat() / srcWidth.toFloat() > 2.5f
+        // Komiho: 增强时解码/预缩目标。
+        // 默认 = 视图尺寸（capped 2048）：AI 只对 r>1（显示需放大）的源图跑（下方 skipAi 门），
+        // 这类图 < 2×视图，inSampleSize 无损失。
+        // 开启「大图强制 AI 增强」（aiBypassFitGate）后放宽到统一 2048 上限——大源图 AI 也能
+        // 吃到 2048 内的真实细节；MP 输出门（enhance() 里）始终兜底防 OOM。
+        // AI 2x 结果默认直接交 SSIV 缩放显示；aiAreaDownscale 开启时在增强后按视图尺寸
+        // 面积回缩（见下方 areaDownscaleToDisplay 调用）。
+        val preferences = Injekt.get<ReaderPreferences>()
         val (targetW, targetH) = if (options.enhanced) {
             if (isTallStrip) {
-                enhanceTarget(dstWidth) to srcHeight
+                // 采样高度仍用 srcHeight（高度不约束解码；负数不能流进 calculateInSampleSize
+                // —— coil3 DecodeUtils 对它的语义未知）。
+                (if (preferences.aiBypassFitGate.get()) MAX_ENHANCE_SOURCE_DIMENSION else enhanceTarget(dstWidth)) to srcHeight
+            } else if (preferences.aiBypassFitGate.get()) {
+                MAX_ENHANCE_SOURCE_DIMENSION to MAX_ENHANCE_SOURCE_DIMENSION
             } else {
                 enhanceTarget(dstWidth) to enhanceTarget(dstHeight)
             }
@@ -118,6 +130,28 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         decoder.recycle()
 
         check(bitmap != null) { "Failed to decode image" }
+
+        // Komiho (2026-09-26 定稿): AI 跳过门 —— 解码后、预缩前算 fit 比例 r。
+        // 普通页 r = min(视图宽/图宽, 视图高/图高)：r ≤ 1 = 屏幕只会缩小显示，源图高频细节
+        // 本来就够，AI 2x 再缩回视图是白做往返（真机实测 2890×4096 源图净画质不升反降），
+        // 直接跳过，原图交 SSIV 缩小显示（双线性无锐化负瓣，不会锐化摩尔纹）。
+        // 长条页 r 只看宽度（dstWidth/图宽）—— 高度是滚动维度，不参与 fit；判据仍是
+        // 「解码宽度已 ≥ 视图宽度就跳过」。r > 1 才喂 AI：图 < 2×视图宽，2x 输出默认
+        // 直接交 SSIV；aiAreaDownscale 开启时按视图尺寸面积回缩（防摩尔纹）。
+        // ⚠️ 必须在预缩块之前算 —— 预缩会动 bitmap 尺寸，污染 r 的语义。
+        val fitRatio = if (isTallStrip) {
+            dstWidth / bitmap.width.toFloat()
+        } else {
+            minOf(
+                dstWidth / bitmap.width.toFloat(),
+                dstHeight / bitmap.height.toFloat(),
+            )
+        }
+        val skipAi = options.enhanced &&
+            preferences.enhancementMode.get() == 5 &&
+            !preferences.aiBypassFitGate.get() &&
+            !bitmap.isRecycled &&
+            fitRatio <= 1f
 
         // Komiho: 把「长边 ≤ MAX_ENHANCE_SOURCE_DIMENSION」这个意图真正落实。
         // 采样率只能取 2 的幂，所以实际解出的图可能比目标大最多一倍：源 5780×4096、
@@ -153,44 +187,70 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         // Applies to every image size (strips included, sampled by width only).
         if (options.enhanced) {
             try {
-                val preferences = Injekt.get<ReaderPreferences>()
-                if (preferences.enhancementMode.get() != 0) {
-                    // Komiho 诊断：来源标识 = 谁发起的 + 第几页。
-                    // 用来判断并发增强请求是「同一页被算了两遍」还是「相邻两页各一次」——
-                    // 同包内取 top-level 扩展，无需 import。
-                    val sourceTag = (if (options.prewarm) "prewarm" else "holder") +
-                        "#${options.pageIndex}"
-                    // Komiho: 角标口径 = 「解码 + 增强」的**实际计算**耗时（剔除等锁）。
-                    // `gpuWaitMs` 是**两段**等锁之和（MihonSyEnhancer 给的 totalWaitMs）——
-                    // 只剔第一段不够：nativeProcess 内部还有一次 g_lock 排队。
-                    // 在同线程用局部变量收集回调值，避免并发页互相串号。
-                    var enhanceOk = false
-                    var gpuWaitMs = 0L
-                    val enhanced = MihonSyEnhancer.enhance(
-                        bitmap,
-                        preferences,
-                        onComplete = { ok, _, wait ->
-                            enhanceOk = ok
-                            gpuWaitMs = wait
-                        },
-                        sourceTag = sourceTag,
-                        // Komiho: 页号透传给增强器 —— 角标按页登记引擎，别让并发页互相覆盖。
-                        pageIndex = options.pageIndex,
-                        // Komiho: 把「适应屏幕」的目标尺寸传进去，AI 2x 后由软件层 Lanczos3 缩回，
-                        // 避免 SSIV 双线性把网点糊掉。
-                        targetWidth = targetW,
-                        targetHeight = targetH,
-                    )
-                    if (enhanceOk) {
-                        EnhanceTimings.put(
-                            options.pageIndex,
-                            (android.os.SystemClock.uptimeMillis() - decodeStart) -
-                                gpuWaitMs.coerceAtLeast(0L),
+                // Komiho: 降噪已独立于增强档位——mode 0 + 降噪开启也要进链路（只降噪不增强）。
+                if (preferences.enhancementMode.get() != 0 || preferences.denoiseLevel.get() != 0) {
+                    if (skipAi) {
+                        // Komiho: AI 跳过门命中 —— 登记 skip，角标显示「跳过」，原图直出。
+                        EnhanceTimings.markSkipped(options.pageIndex)
+                    } else {
+                        // Komiho 诊断：来源标识 = 谁发起的 + 第几页。
+                        // 用来判断并发增强请求是「同一页被算了两遍」还是「相邻两页各一次」——
+                        // 同包内取 top-level 扩展，无需 import。
+                        val sourceTag = (if (options.prewarm) "prewarm" else "holder") +
+                            "#${options.pageIndex}"
+                        // Komiho: 角标口径 = 「解码 + 增强」的**实际计算**耗时（剔除等锁）。
+                        // `gpuWaitMs` 是**两段**等锁之和（MihonSyEnhancer 给的 totalWaitMs）——
+                        // 只剔第一段不够：nativeProcess 内部还有一次 g_lock 排队。
+                        // 在同线程用局部变量收集回调值，避免并发页互相串号。
+                        var enhanceOk = false
+                        var gpuWaitMs = 0L
+                        var enhanced = MihonSyEnhancer.enhance(
+                            bitmap,
+                            preferences,
+                            onComplete = { ok, _, wait ->
+                                enhanceOk = ok
+                                gpuWaitMs = wait
+                            },
+                            sourceTag = sourceTag,
+                            // Komiho: 页号透传给增强器 —— 角标按页登记引擎，别让并发页互相覆盖。
+                            pageIndex = options.pageIndex,
                         )
-                    }
-                    if (enhanced != null && enhanced !== bitmap && !enhanced.isRecycled) {
-                        bitmap.recycle()
-                        bitmap = enhanced
+                        // Komiho (2026-09-30): AI 面积回缩（防摩尔纹）。SSIV 对 bitmap 源是
+                        // 整图双线性缩小、无低通，AI 2x 的高频网点与屏幕像素网格拍频出摩尔纹；
+                        // 相对显示区缩比 < 0.85 时用面积核压回显示带通。放在
+                        // EnhanceTimings.put 之前 —— 回缩是真实计算耗时，角标要计入。
+                        // 只对 mode 5 生效（含引擎失败回落 Lanczos 的页）；webtoon 原始尺寸
+                        // 模式 1:1 显示无缩小、回缩只会丢细节，跳过。
+                        if (
+                            enhanced != null &&
+                            enhanced !== bitmap &&
+                            preferences.enhancementMode.get() == 5 &&
+                            preferences.aiAreaDownscale.get() &&
+                            !options.originalSizeDisplay
+                        ) {
+                            val downscaled = MihonSyEnhancer.areaDownscaleToDisplay(
+                                enhanced,
+                                viewWidth = dstWidth,
+                                viewHeight = dstHeight,
+                                isTallStrip = isTallStrip,
+                                strength = preferences.aiAreaDownscaleStrength.get() / 100f,
+                            )
+                            if (downscaled !== enhanced) {
+                                enhanced.recycle()
+                                enhanced = downscaled
+                            }
+                        }
+                        if (enhanceOk) {
+                            EnhanceTimings.put(
+                                options.pageIndex,
+                                (android.os.SystemClock.uptimeMillis() - decodeStart) -
+                                    gpuWaitMs.coerceAtLeast(0L),
+                            )
+                        }
+                        if (enhanced != null && enhanced !== bitmap && !enhanced.isRecycled) {
+                            bitmap.recycle()
+                            bitmap = enhanced
+                        }
                     }
                 }
             } catch (e: Throwable) {

@@ -7,6 +7,7 @@ import android.os.Build
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import org.json.JSONObject
+import java.io.File
 import java.security.MessageDigest
 
 /**
@@ -39,9 +40,8 @@ object NpuModelPluginScanner {
     /**
      * Reserved applicationId prefixes for model packages.
      *
-     * MihonSY: 本 fork 直接复用 Komiho 发布的模型包（`ruzhe85/Komiho` 的 `qnn-model`
-     * release，见 [UpscaleModelRegistry.MODEL_PACKAGE_RELEASE_URL]），因此必须同时接受
-     * Komiho 的前缀；第二项留给本仓库将来自建的模型包（`-PmodelId` 起这个前缀即可）。
+     * MihonSY 直接复用 Komiho 发布的模型包，
+     * 因此必须同时接受 Komiho 的前缀；第二项留给本仓库将来自建的模型包。
      */
     val MODEL_PACKAGE_PREFIXES = listOf(
         "cn.ruzhe.komiho.model.",
@@ -49,18 +49,18 @@ object NpuModelPluginScanner {
     )
 
     /**
-     * MihonSY: 允许的模型包签名证书 SHA-256 白名单。
+     * HTP generation numbers asked for by name.
      *
-     * 复用 Komiho 的模型包意味着「签名必须与宿主一致」这条判据不再成立——宿主是
-     * `mihonmod.jks`，模型包是 Komiho 的 `komiho-release.jks`。判据因此改为「宿主自己的
-     * 签名，或已知颁发者的证书指纹」，语义不变：仍然只认自己人打的包。
-     *
-     * ⚠️ Komiho 的 release keystore 与其口令是随其仓库公开的，所以这条校验防的是
-     * 「装错包 / 来路不明的包」，不是密码学意义上的防伪。
+     * A model package's applicationId is `cn.ruzhe.komiho.model.v<arch>` (`v69`, `v75`, …), so
+     * the candidate names are enumerable even where the installed-package list is not: some
+     * ROMs hand `getInstalledPackages` back with only the calling package inside, while the
+     * per-name lookup path still answers. Sweeping a range instead of listing today's
+     * generations keeps a future SoC working without a host release.
      */
-    private val ALLOWED_PLUGIN_CERT_SHA256 = setOf(
-        "A2:B7:E5:24:EE:59:9F:84:15:60:8A:D7:BE:1A:90:A1:C8:37:9C:51:92:3A:15:A7:93:79:29:36:29:81:64:D2",
-    )
+    private val PROBE_ARCH_CODES = 64..96
+
+    /** Package declared in this app's `<queries>`; used to sanity-check the per-name lookup. */
+    private const val CONTROL_PROBE_PACKAGE = "com.android.settings"
 
     /**
      * Manifest protocol this host understands. Bump only on a semantic redesign of
@@ -70,6 +70,9 @@ object NpuModelPluginScanner {
 
     private const val MANIFEST_ASSET = "models.json"
     private const val DEFAULT_ASSET_DIR = "qnn-contexts"
+
+    /** Name of the trace file written only when a scan finds nothing (see [scan]). */
+    private const val DIAG_FILE = "npu-diag.txt"
 
     private const val KEY_PROTOCOL_VERSION = "protocolVersion"
     private const val KEY_MODELS = "models"
@@ -83,48 +86,142 @@ object NpuModelPluginScanner {
 
     /**
      * Scans every installed package whose applicationId starts with
-     * [MODEL_PACKAGE_PREFIX], verifies its signature against the host's and parses its
+     * [MODEL_PACKAGE_PREFIXES], verifies its signature against the host's and parses its
      * manifest. Malformed entries are skipped individually (with a WARN), never fatal —
      * one broken package must not hide the others.
      */
     fun scan(context: Context): List<PluginUpscaleModel> {
         val pm = context.packageManager
-        // MihonSY: 宿主签名读不到时不再直接放弃扫描 —— 白名单里的证书指纹仍足以判定
-        // 模型包是否可信（见 [isTrustedSignature]）。
+        // Komiho (2026-09-23): a scan that finds nothing has to say *why* somewhere. Some OEM
+        // ROMs also swallow logcat (a Nubia/RedMagic build reports `0 B readable` for main and
+        // system even for a self-written probe), so the only reliable channel is a trace in the
+        // app's own external files dir. It is written **only when discovery comes up empty**
+        // (and a stale one is dropped on success), so a healthy device never touches disk.
+        val diag = StringBuilder()
+
+        // Komiho (2026-09-23): the host's own certificate is not always reachable through
+        // SigningInfo — some OEM ROMs hand back a null `apkContentsSigners` for a v2-only
+        // signed APK, and then this whole scan used to bail out before looking at a single
+        // package (the model list went empty while the very same packages loaded fine in a
+        // sibling build on the same device). Losing the host certificate must NOT disable
+        // discovery: [ALLOWED_PLUGIN_CERT_SHA256] still separates our packages from foreign
+        // ones. The host certificate stays the primary check whenever it is available.
         val hostSignature = firstSignature(pm, context.packageName)
+        diag.append("host signature: ")
+            .append(
+                if (hostSignature == null) {
+                    "UNREADABLE (whitelist only)"
+                } else {
+                    "${hostSignature.size} bytes"
+                },
+            )
+            .append('\n')
         if (hostSignature == null) {
             logcat(LogPriority.WARN) {
                 "ModelPlugins: host signature unavailable — falling back to the cert whitelist"
             }
         }
 
-        val candidates = try {
+        // Two independent discovery channels. Enumeration is the natural one, but a ROM may
+        // answer `getInstalledPackages` with only the calling package (seen on Android 16 even
+        // with QUERY_ALL_PACKAGES granted and the model package installed), while the per-name
+        // lookup path still works — so ask for the names we expect as well.
+        val names = LinkedHashSet<String>()
+        val enumerated = try {
             pm.getInstalledPackages(0)
         } catch (e: Exception) {
+            diag.append("package enumeration FAILED: ").append(e).append('\n')
             logcat(LogPriority.WARN, e) { "ModelPlugins: package enumeration failed" }
-            return emptyList()
+            null
         }
+        enumerated?.forEach { info -> info.packageName?.let(names::add) }
+        diag.append("installed packages: ").append(enumerated?.size ?: -1)
+            .append(" -> [").append(names.joinToString(",")).append("]\n")
+
+        var probed = 0
+        for (arch in PROBE_ARCH_CODES) {
+            for (prefix in MODEL_PACKAGE_PREFIXES) {
+                val pkg = prefix + "v" + arch
+                if (names.contains(pkg)) continue
+                if (runCatching { pm.getPackageInfo(pkg, 0) }.isSuccess) {
+                    names += pkg
+                    probed++
+                }
+            }
+        }
+        // Control probe: a package this app declares in <queries>. Separates "per-name lookup
+        // works, the list API is what is blocked" from "every package query is blocked".
+        diag.append("control probe ($CONTROL_PROBE_PACKAGE): ")
+            .append(runCatching { pm.getPackageInfo(CONTROL_PROBE_PACKAGE, 0) }.isSuccess)
+            .append('\n')
+        diag.append("name probes: ").append(PROBE_ARCH_CODES.count())
+            .append(" tried, ").append(probed).append(" hit\n")
+        diag.append("prefixes: ").append(MODEL_PACKAGE_PREFIXES.joinToString(",")).append('\n')
 
         val models = mutableListOf<PluginUpscaleModel>()
         val seenIds = mutableSetOf<String>()
-        for (info in candidates) {
-            val pkg = info.packageName ?: continue
+        for (pkg in names) {
             if (MODEL_PACKAGE_PREFIXES.none { pkg.startsWith(it) }) continue
+            diag.append("candidate: ").append(pkg).append('\n')
 
             val pluginSignature = firstSignature(pm, pkg)
-            if (pluginSignature == null || !isTrustedSignature(pluginSignature, hostSignature)) {
+            if (pluginSignature == null) {
+                diag.append("  signature: UNREADABLE -> skipped\n")
+                logcat(LogPriority.WARN) { "ModelPlugins: $pkg signature unreadable — skipped" }
+                continue
+            }
+            if (!isTrustedSignature(pluginSignature, hostSignature)) {
+                diag.append("  signature: UNTRUSTED -> skipped\n")
                 logcat(LogPriority.WARN) {
                     "ModelPlugins: $pkg signature is not trusted — skipped"
                 }
                 continue
             }
+            diag.append("  signature: ok\n")
 
-            models += parsePackage(context, pkg, seenIds)
+            val parsed = parsePackage(context, pkg, seenIds, diag)
+            diag.append("  parsed models: ").append(parsed.size).append('\n')
+            models += parsed
+        }
+
+        diag.append("RESULT: ").append(models.size).append(" models\n")
+        if (models.isEmpty()) {
+            writeDiagnostics(context, diag)
+            logcat(LogPriority.WARN) {
+                "ModelPlugins: no model discovered — trace written to $DIAG_FILE"
+            }
+        } else {
+            // Discovery worked, so nothing to explain: drop the trace of an earlier failure —
+            // whatever sits on disk must describe the latest attempt, not an old one.
+            clearDiagnostics(context)
         }
         return models
     }
 
-    /** 签名可信 = 与宿主一致，或证书 SHA-256 在白名单内。 */
+    /** Writes the scan trace to `Android/data/<pkg>/files/<DIAG_FILE>` (see [scan]). */
+    private fun writeDiagnostics(context: Context, diag: StringBuilder) {
+        runCatching {
+            val dir = context.getExternalFilesDir(null) ?: return
+            File(dir, DIAG_FILE).writeText(diag.toString())
+        }
+    }
+
+    /** Drops the trace left by an earlier empty scan, so it can never be read as current. */
+    private fun clearDiagnostics(context: Context) {
+        runCatching {
+            val dir = context.getExternalFilesDir(null) ?: return
+            File(dir, DIAG_FILE).delete()
+        }
+    }
+
+    /**
+     * Trusted = the package carries the host's own certificate, or its SHA-256 is listed in
+     * [ALLOWED_PLUGIN_CERT_SHA256].
+     *
+     * The whitelist covers the "host certificate unreadable" case above. It is not
+     * cryptography-grade anti-tampering — the release keystore ships with the repository —
+     * it only tells "a package we produced" apart from "some other package".
+     */
     private fun isTrustedSignature(plugin: ByteArray, host: ByteArray?): Boolean {
         if (host != null && plugin.contentEquals(host)) return true
         return try {
@@ -137,15 +234,27 @@ object NpuModelPluginScanner {
         }
     }
 
+    /** SHA-256 of the Komiho release certificate — what every model package is signed with. */
+    private val ALLOWED_PLUGIN_CERT_SHA256 = setOf(
+        "A2:B7:E5:24:EE:59:9F:84:15:60:8A:D7:BE:1A:90:A1:C8:37:9C:51:92:3A:15:A7:93:79:29:36:29:81:64:D2",
+    )
+
     /** Opens [pkg]'s `models.json` and converts each valid entry into a [PluginUpscaleModel]. */
-    private fun parsePackage(context: Context, pkg: String, seenIds: MutableSet<String>): List<PluginUpscaleModel> {
+    private fun parsePackage(
+        context: Context,
+        pkg: String,
+        seenIds: MutableSet<String>,
+        diag: StringBuilder,
+    ): List<PluginUpscaleModel> {
         return try {
             val pluginContext = context.createPackageContext(pkg, Context.CONTEXT_IGNORE_SECURITY)
             val manifest = pluginContext.assets.open(MANIFEST_ASSET).bufferedReader().use { it.readText() }
             val root = JSONObject(manifest)
 
             val protocol = root.optInt(KEY_PROTOCOL_VERSION, 1)
+            diag.append("  models.json read ok, protocol=").append(protocol).append('\n')
             if (protocol > SUPPORTED_PROTOCOL_VERSION) {
+                diag.append("  protocol newer than supported -> skipped\n")
                 logcat(LogPriority.WARN) {
                     "ModelPlugins: $pkg manifest protocol v$protocol > supported " +
                         "v$SUPPORTED_PROTOCOL_VERSION — update the host app to use it; skipped"
@@ -153,11 +262,14 @@ object NpuModelPluginScanner {
                 return emptyList()
             }
 
-            val entries = root.optJSONArray(KEY_MODELS) ?: return emptyList()
+            val entries = root.optJSONArray(KEY_MODELS)
+            diag.append("  entries: ").append(entries?.length() ?: -1).append('\n')
+            if (entries == null) return emptyList()
+
             val result = mutableListOf<PluginUpscaleModel>()
             for (i in 0 until entries.length()) {
                 val entry = entries.optJSONObject(i) ?: continue
-                val model = entryOrNull(pkg, entry) ?: continue
+                val model = entryOrNull(pkg, entry, diag) ?: continue
                 if (!seenIds.add(model.id)) {
                     logcat(LogPriority.WARN) { "ModelPlugins: duplicate model id ${model.id} — skipped" }
                     continue
@@ -170,24 +282,27 @@ object NpuModelPluginScanner {
             result
         } catch (e: Exception) {
             // No manifest, unparseable JSON, absent assets — treat as "no models here".
+            diag.append("  models.json FAILED -> ").append(e).append('\n')
             logcat(LogPriority.WARN, e) { "ModelPlugins: failed to read $pkg — skipped" }
             emptyList()
         }
     }
 
     /** Validates one manifest entry; `null` when a required field is missing or nonsense. */
-    private fun entryOrNull(pkg: String, entry: JSONObject): PluginUpscaleModel? {
+    private fun entryOrNull(pkg: String, entry: JSONObject, diag: StringBuilder): PluginUpscaleModel? {
         val id = entry.optString(KEY_ID).trim()
         val stem = entry.optString(KEY_STEM).trim()
         val label = entry.optString(KEY_LABEL).trim()
         val padding = entry.optInt(KEY_PADDING, -1)
         val scale = entry.optInt(KEY_SCALE, 2)
         val assetDir = entry.optString(KEY_ASSET_DIR).trim().ifEmpty { DEFAULT_ASSET_DIR }
-        val arches = entry.optJSONArray(KEY_ARCHES)?.let { array ->
-            (0 until array.length()).mapNotNull { array.optInt(it, -1).takeIf { v -> v > 0 } }
-        }.orEmpty()
+        val arches = parseArches(entry)
 
         if (id.isEmpty() || stem.isEmpty() || label.isEmpty() || padding <= 0 || arches.isEmpty()) {
+            diag.append("  entry '").append(id).append("' rejected: padding=").append(padding)
+                .append(" arches=").append(arches)
+                .append(" rawArches=").append(entry.optJSONArray(KEY_ARCHES))
+                .append('\n')
             logcat(LogPriority.WARN) { "ModelPlugins: incomplete entry in $pkg — skipped" }
             return null
         }
@@ -201,6 +316,26 @@ object NpuModelPluginScanner {
             scale = if (scale > 0) scale else 2,
             assetDir = assetDir,
         )
+    }
+
+    /**
+     * HTP generations from a manifest entry.
+     *
+     * Komiho (2026-09-23): the packager writes these as **strings** (`os.environ` values are
+     * always strings, so `models.json` really contains `"arches": ["75"]`), while this reader
+     * used to call `optInt` — a number-only accessor. Accept either shape so a package built
+     * by the workflow is readable as-is.
+     */
+    private fun parseArches(entry: JSONObject): List<Int> {
+        val array = entry.optJSONArray(KEY_ARCHES) ?: return emptyList()
+        return (0 until array.length()).mapNotNull { i ->
+            when (val raw = array.opt(i)) {
+                is Int -> raw
+                is Number -> raw.toInt()
+                is String -> raw.trim().toIntOrNull()
+                else -> null
+            }?.takeIf { it > 0 }
+        }
     }
 
     /** First signing certificate of [pkg] as raw bytes, or null when unreadable. */

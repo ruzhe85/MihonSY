@@ -117,6 +117,12 @@ import java.util.HashSet
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
+ * Komiho 诊断：自动条漫切换 / viewer 重建的日志 tag（与条漫 holder 的 `Waifu2xWebtoon` 同名，
+ * 一起 grep 即可看到「检测命中 → 重建 viewer → 页面重算」的完整时序）。
+ */
+private const val KOMIHA_AUTOWEBTOON_TAG = "Waifu2xWebtoon"
+
+/**
  * Presenter used by the activity to perform background operations.
  */
 class ReaderViewModel @JvmOverloads constructor(
@@ -743,26 +749,14 @@ class ReaderViewModel @JvmOverloads constructor(
         if (readyPages.isEmpty()) return
 
         viewModelScope.launchIO {
-            for (candidate in readyPages) {
-                if (synchronized(autoWebtoonCheckedIndices) { autoWebtoonCheckedIndices.contains(candidate.index) }) {
-                    continue
-                }
-                val ratio = measurePageAspectRatio(candidate) ?: continue
-                logcat { "MihonSY auto-webtoon aspect check page ${candidate.number}: ratio=$ratio" }
-                if (ratio > AUTO_WEBTOON_MIN_ASPECT_RATIO) {
-                    logcat { "MihonSY auto-webtoon: page ${candidate.number} is a tall strip, switching to webtoon mode" }
-                    applyAutoWebtoonForCurrentChapter(chapterUrl)
-                    return@launchIO
-                }
-                synchronized(autoWebtoonCheckedIndices) { autoWebtoonCheckedIndices.add(candidate.index) }
+            val hit = probeAutoWebtoonPages(readyPages)
+            if (hit != null) {
+                logcat { "MihonSY auto-webtoon: page ${hit.number} is a tall strip, switching to webtoon mode" }
+                applyAutoWebtoonForCurrentChapter(chapterUrl)
+                return@launchIO
             }
-            val allEarlyChecked = synchronized(autoWebtoonCheckedIndices) {
-                (0 until checkCount).all { autoWebtoonCheckedIndices.contains(it) }
-            }
-            if (allEarlyChecked) {
-                autoWebtoonAspectDone = true
-                logcat { "MihonSY auto-webtoon: none of the first $checkCount pages is tall, giving up" }
-            } else if (autoWebtoonRetriesLeft > 0) {
+            if (concludeAutoWebtoonCheckIfAllEarlyChecked(checkCount)) return@launchIO
+            if (autoWebtoonRetriesLeft > 0) {
                 // Some early pages are still downloading. Retry shortly so a strip that
                 // becomes ready after the cover (without the user scrolling) is still
                 // detected and the reader switches to webtoon mode immediately.
@@ -779,17 +773,143 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     /**
+     * Komiho (2026-09-24): 首次把章节喂给 viewer **之前**的提前判定。
+     *
+     * 本地目录 / 归档 / SMB·WebDAV 散图源在列页时（`PageLoader.getPages()`）就把所有页置
+     * `Page.State.Ready`，而判定只需读图片头（[measurePageAspectRatio] 用 `inJustDecodeBounds`），
+     * 所以模式可以在 viewer 拿到第一页之前就定下来 —— 避免「先按页漫建起来、再切换重建」，
+     * 那条路径会把可见页白白解码一遍。
+     *
+     * 只探测**已经 Ready** 的页面，绝不等待：在线源的页面 Ready 由 holder 拉取驱动，不喂章节就没人
+     * 下载，在这里等会死锁；所以没有 Ready 页时立即返回。探测有 [PRE_RESOLVE_BUDGET_MS] 预算，
+     * 超预算就把剩下的交给兜底路径（[maybeAutoWebtoonByAspectRatio]），不拖首屏。
+     *
+     * @return true 表示模式已改，调用方应**先重建 viewer 再喂章节**（此刻 viewer 手里一页都没有，
+     *         重建是零成本的）。
+     */
+    internal suspend fun preResolveAutoWebtoon(chapter: ReaderChapter): Boolean {
+        if (!readerPreferences.useAutoWebtoon.get()) return false
+        val manga = manga ?: return false
+        // 只对「没有显式模式」的书生效：手动选择的模式优先，自动检测永不覆盖。
+        if (ReadingMode.fromPreference(manga.readingMode.toInt()) != ReadingMode.DEFAULT) return false
+        // 标签/全局推断已经判定条漫（Komga 的 readingDirection、或 tags 里的 webtoon/long strip）⇒ 无需再探
+        if (getMangaReadingMode() == ReadingMode.WEBTOON.flagValue) return false
+        val chapterPages = chapter.pages ?: return false
+        val chapterUrl = chapter.chapter.url
+        if (autoWebtoonCheckChapter != chapterUrl) {
+            // 新章：重开检测窗口。与 [maybeAutoWebtoonByAspectRatio] 里的窗口重开口径一致，
+            // 但不重复「离开条漫章就重建」那一步 —— 新章 URL 与旧 effectiveChapter 不同，
+            // getMangaReadingMode() 本就已经回落到默认，那一步不会生效。
+            synchronized(autoWebtoonCheckedIndices) { autoWebtoonCheckedIndices.clear() }
+            autoWebtoonCheckChapter = chapterUrl
+            autoWebtoonRetriesLeft = AUTO_WEBTOON_RETRIES
+            autoWebtoonAspectDone = false
+        } else if (autoWebtoonAspectDone) {
+            return false
+        }
+
+        val checkCount = minOf(AUTO_WEBTOON_PAGES_TO_CHECK, chapterPages.size)
+        val readyPages = chapterPages
+            .take(checkCount)
+            .filter { it.status == Page.State.Ready && it.stream != null }
+        if (readyPages.isEmpty()) return false
+
+        return withIOContext {
+            val hit = probeAutoWebtoonPages(
+                readyPages = readyPages,
+                deadlineMillis = System.currentTimeMillis() + PRE_RESOLVE_BUDGET_MS,
+            )
+            if (hit != null) {
+                // Komiho 诊断：这条决策要能在 logcat 里看见（logcat{} 走 XLog，不进 logcat），
+                // 否则排查「第一帧用了哪种 viewer」时只能靠猜。
+                android.util.Log.d(
+                    KOMIHA_AUTOWEBTOON_TAG,
+                    "pre-resolve: page ${hit.number} is a tall strip -> webtoon before first feed",
+                )
+                logcat {
+                    "MihonSY auto-webtoon: page ${hit.number} is a tall strip, " +
+                        "switching to webtoon mode (before first feed)"
+                }
+                markAutoWebtoonForChapter(chapterUrl)
+            } else {
+                if (concludeAutoWebtoonCheckIfAllEarlyChecked(checkCount)) {
+                    android.util.Log.d(
+                        KOMIHA_AUTOWEBTOON_TAG,
+                        "pre-resolve: none of the first $checkCount pages is tall -> keep page mode",
+                    )
+                }
+                false
+            }
+        }
+    }
+
+    /**
+     * Komiho: 逐个探测 [readyPages] 的图片比例（只读图片头，不解码像素）。命中长条返回那一页；
+     * 未命中的页记入 [autoWebtoonCheckedIndices]，已量过的页跳过。
+     *
+     * [deadlineMillis] 给「首次喂章节前」的判定设预算：超预算立刻返回 null，剩下的交给兜底路径。
+     * 必须在 IO 上下文调用（会读磁盘 / 网络）。
+     */
+    private fun probeAutoWebtoonPages(
+        readyPages: List<ReaderPage>,
+        deadlineMillis: Long = Long.MAX_VALUE,
+    ): ReaderPage? {
+        for (candidate in readyPages) {
+            if (System.currentTimeMillis() > deadlineMillis) return null
+            if (synchronized(autoWebtoonCheckedIndices) { autoWebtoonCheckedIndices.contains(candidate.index) }) {
+                continue
+            }
+            val ratio = measurePageAspectRatio(candidate) ?: continue
+            logcat { "MihonSY auto-webtoon aspect check page ${candidate.number}: ratio=$ratio" }
+            if (ratio > AUTO_WEBTOON_MIN_ASPECT_RATIO) return candidate
+            synchronized(autoWebtoonCheckedIndices) { autoWebtoonCheckedIndices.add(candidate.index) }
+        }
+        return null
+    }
+
+    /** 早期页全部量过且都不是长条 ⇒ 本章判定结束（放弃自动条漫）。返回是否就此结束。 */
+    private fun concludeAutoWebtoonCheckIfAllEarlyChecked(checkCount: Int): Boolean {
+        val allEarlyChecked = synchronized(autoWebtoonCheckedIndices) {
+            (0 until checkCount).all { autoWebtoonCheckedIndices.contains(it) }
+        }
+        if (allEarlyChecked) {
+            autoWebtoonAspectDone = true
+            logcat { "MihonSY auto-webtoon: none of the first $checkCount pages is tall, giving up" }
+        }
+        return allEarlyChecked
+    }
+
+    /**
+     * 把 [chapterUrl] 记为「本章自动条漫」，返回**模式是否真的变了**（调用方据此决定是否重建 viewer）。
+     * 只改内存状态（[autoWebtoonEffectiveChapter]），不写 manga.readingMode。
+     */
+    private fun markAutoWebtoonForChapter(chapterUrl: String): Boolean {
+        val previousMode = getMangaReadingMode()
+        autoWebtoonAspectDone = true
+        autoWebtoonEffectiveChapter = chapterUrl
+        // 已经是条漫（全局默认 / 标签推断）时只是记账，模式不变 ⇒ 不需要重建
+        return getMangaReadingMode() != previousMode
+    }
+
+    /**
      * MihonSY: 比例检测命中后调用——把当前章标记为「自动条漫」并按需重建 viewer。
      * 只改内存状态（[autoWebtoonEffectiveChapter]），不写 manga.readingMode：
      * 持久模式记忆仅由用户手动切换（[setMangaReadingMode]）更新，自动判断永不污染。
+     *
+     * Komiho: 记账交给 [markAutoWebtoonForChapter]；这里额外负责重建 viewer。
+     * （[preResolveAutoWebtoon] 走另一条路：它在喂章节前就知道模式，由调用方直接重建，不发事件。）
      */
     private fun applyAutoWebtoonForCurrentChapter(chapterUrl: String) {
-        autoWebtoonAspectDone = true
         val previousMode = getMangaReadingMode()
-        autoWebtoonEffectiveChapter = chapterUrl
-        // 已经是条漫（如全局默认/标签推断）则只需记账，无需重建
-        if (getMangaReadingMode() == previousMode) return
+        if (!markAutoWebtoonForChapter(chapterUrl)) return
         logcat { "MihonSY auto-webtoon: chapter $chapterUrl switches to webtoon (in-memory, not saved)" }
+        // Komiho 诊断：这条切换会让 Activity 重建 viewer ⇒ 所有可见页重新解码 + 增强。
+        // 上面那句 logcat{} 走 XLog，不进 logcat，所以这里补一条 android.util.Log。
+        android.util.Log.d(
+            KOMIHA_AUTOWEBTOON_TAG,
+            "auto-webtoon switch chapter=$chapterUrl mode=$previousMode->${getMangaReadingMode()} " +
+                "(viewer will be recreated)",
+        )
         recreateViewerForAutoMode()
     }
 
@@ -802,6 +922,12 @@ class ReaderViewModel @JvmOverloads constructor(
         val currChapters = state.value.viewerChapters ?: return
         val currChapter = currChapters.currChapter
         currChapter.requestedPage = currChapter.chapter.last_page_read
+        // Komiho 诊断：viewer 重建 = 可见页全部重算（增强不留缓存），值得在日志里留痕。
+        android.util.Log.d(
+            KOMIHA_AUTOWEBTOON_TAG,
+            "recreateViewerForAutoMode: sending Event.RecreateViewer " +
+                "(requestedPage=${currChapter.requestedPage})",
+        )
         // Channel 默认 RENDEZVOUS，trySend 在无接收者时会丢——用 send 保证送达
         viewModelScope.launchIO { eventChannel.send(Event.RecreateViewer) }
     }
@@ -837,6 +963,12 @@ class ReaderViewModel @JvmOverloads constructor(
 
         /** Max delayed re-checks while waiting for early pages to finish downloading. */
         const val AUTO_WEBTOON_RETRIES = 4
+
+        /**
+         * Komiho: [preResolveAutoWebtoon] 的探测预算（ms）。超预算就不再继续量，
+         * 剩下的交给 [maybeAutoWebtoonByAspectRatio] 兜底 —— 首屏不等慢源。
+         */
+        const val PRE_RESOLVE_BUDGET_MS = 150L
 
         /** Minimum interval between Komga page-progress syncs while reading (ms). */
         const val KOMGA_PAGE_SYNC_INTERVAL_MS = 5_000L

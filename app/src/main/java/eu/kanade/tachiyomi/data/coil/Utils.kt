@@ -73,3 +73,15 @@ val Options.pageIndex: Int
     get() = getExtra(pageIndexKey)
 
 private val pageIndexKey = Extras.Key(default = -1)
+
+// Komiho: webtoon「原始尺寸」模式 —— 页面按 1:1 显示（无缩小），AI 面积回缩不应触发
+// （回缩会把 1:1 显示的图永久降到屏宽，细节丢失且无防摩尔纹收益）。
+// ReaderPageImageView 按 Config.minimumScaleType 置位；PagerPreparedCache 走默认 false。
+fun ImageRequest.Builder.originalSizeDisplay(enable: Boolean) = apply {
+    extras[originalSizeDisplayKey] = enable
+}
+
+val Options.originalSizeDisplay: Boolean
+    get() = getExtra(originalSizeDisplayKey)
+
+private val originalSizeDisplayKey = Extras.Key(default = false)

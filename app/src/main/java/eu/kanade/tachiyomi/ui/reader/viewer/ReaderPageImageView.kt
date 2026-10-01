@@ -41,6 +41,7 @@ import com.github.chrisbanes.photoview.PhotoView
 import eu.kanade.tachiyomi.data.coil.cropBorders
 import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.data.coil.enhanced
+import eu.kanade.tachiyomi.data.coil.originalSizeDisplay
 import eu.kanade.tachiyomi.data.coil.pageIndex
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonSubsamplingImageView
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
@@ -257,16 +258,19 @@ open class ReaderPageImageView @JvmOverloads constructor(
      * meant a concurrent page's fallback could mislabel this page (`CPU OK` on a page that ran
      * on the NPU); see [Waifu2x.engineFor].
      */
-    internal fun showEnhancementOutcome(success: Boolean, elapsedMillis: Long) {
+    internal fun showEnhancementOutcome(success: Boolean, elapsedMillis: Long, output: String? = null) {
         val preferences = Injekt.get<ReaderPreferences>()
         if (preferences.enhancementMode.get() == 0 || !preferences.showEnhancementStatus.get()) return
         val tv = ensureEnhanceStatusView()
         tv.text = if (success) {
             String.format(
                 java.util.Locale.US,
-                "%s %.1fs",
+                "%s %.1fs%s",
                 engineLabel(pageIndex),
                 elapsedMillis / 1000f,
+                // Komiho (2026-09-26): 附输出分辨率（如 1080×1620）—— 降采样核/开关排障时
+                // 直接看最终出图尺寸，不用再猜链路走到哪一步。
+                output?.let { " $it" }.orEmpty(),
             )
         } else {
             context.getString(R.string.reader_enhancement_skipped)
@@ -443,6 +447,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .diskCachePolicy(CachePolicy.DISABLED)
                     .enhanced(true)
                     .customDecoder(true)
+                    // Komiho: webtoon 原始尺寸模式（1:1 显示）不下调 AI 面积回缩 ——
+                    // 没有缩小就没有摩尔纹，回缩只会丢细节。
+                    .originalSizeDisplay(config.minimumScaleType == SubsamplingScaleImageView.SCALE_TYPE_ORIGINAL_SIZE)
                     // Komiho 诊断：带上页号（prewarm 保持默认 false → 日志里显示 holder#N）。
                     .pageIndex(this@ReaderPageImageView.pageIndex)
                     .target(
@@ -479,6 +486,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
                                     EnhanceTimings.take(pageIndex)
                                         ?: (android.os.SystemClock.uptimeMillis() - startTime)
                                 },
+                                output = "${image.bitmap.width}×${image.bitmap.height}",
                             )
                         },
                     )

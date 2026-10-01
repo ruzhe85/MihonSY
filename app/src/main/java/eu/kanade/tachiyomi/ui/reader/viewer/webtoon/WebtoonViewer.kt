@@ -26,8 +26,11 @@ import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -48,6 +51,15 @@ class WebtoonViewer(
     val downloadManager: DownloadManager by injectLazy()
 
     private val scope = MainScope()
+
+    /** Komiho: 合并中的适配器重建任务（见 [refreshAdapter]），null = 没有待办。 */
+    private var refreshJob: Job? = null
+
+    /**
+     * Komiho: 上一次「真正重建」时的成像指纹（见 `ViewerConfig.imageFingerprint()`）。
+     * 构造时先按当前偏好记下基线，随后 config 里各 register 的首发回调就会因指纹相同而被跳过。
+     */
+    private var lastImageFingerprint: String? = null
 
     /**
      * Recycler view used by this viewer.
@@ -151,6 +163,15 @@ class WebtoonViewer(
         recycler.adapter = adapter
         recycler.addOnScrollListener(
             object : RecyclerView.OnScrollListener() {
+                // Komiho (2026-10-01): 手指拖动期间让原生推理让位（见 Waifu2x.setUiBusy）。
+                // 条漫只认 DRAGGING（手指真在动）：SETTLING 的惯性滚动也占位会把增强饿死
+                // —— 单页推理是 8 秒级，而连续滚动时惯性期很长。
+                override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                    eu.kanade.tachiyomi.util.waifu2x.Waifu2x.setUiBusy(
+                        newState == RecyclerView.SCROLL_STATE_DRAGGING,
+                    )
+                }
+
                 override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                     onScrolled()
 
@@ -223,8 +244,12 @@ class WebtoonViewer(
         }
 
         config.imagePropertyChangedListener = {
-            refreshAdapter()
+            config.onImagePropertyChanged()
         }
+        config.bindRefreshAdapter { refreshAdapter() }
+
+        // 基线：此刻适配器就是按这些设置建的，所以紧接着的首发回调不该触发重建。
+        lastImageFingerprint = config.imageFingerprint()
 
         config.themeChangedListener = {
             ActivityCompat.recreate(activity)
@@ -578,6 +603,30 @@ class WebtoonViewer(
      * Used when an image configuration is changed.
      */
     private fun refreshAdapter() {
+        // Komiho (2026-09-24): 只有「成像设置真的变了」才重建。config 里每个 `register()` 在订阅时
+        // 都会**首发一次当前值**（`AndroidPreference.changes()` 的 `onStart { emit(…) }`），
+        // `distinctUntilChanged` 在赋值之后、挡不住这第一次 —— viewer 刚建好时十几个 register 各发
+        // 一次，全部打到这个回调上。而每次重建都会销毁所有可见 holder、让它们**重跑解码 + 增强**
+        // （请求 memory/disk 双 DISABLED，没有缓存兜底），于是刚打开一本书就会把可见页渲染两遍。
+        // 指纹把「首发噪音」与「用户真改了设置」区分开；指纹相同直接跳过。
+        val fingerprint = config.imageFingerprint()
+        if (fingerprint == lastImageFingerprint) {
+            android.util.Log.d(KOMIHA_REBUILD_TAG, "skip rebuild: image settings unchanged")
+            return
+        }
+        lastImageFingerprint = fingerprint
+
+        // 合并连续触发：一串真变更并成一次重建（理由同上，代价与上面一致）。
+        refreshJob?.cancel()
+        refreshJob = scope.launch {
+            delay(REFRESH_COALESCE_DELAY_MS)
+            android.util.Log.d(KOMIHA_REBUILD_TAG, "rebuild adapter (coalesced)")
+            rebuildAdapter()
+        }
+    }
+
+    /** 真正重建适配器：销毁并重建所有可见 holder，按最新图像设置重解码。 */
+    private fun rebuildAdapter() {
         // 强制重建适配器（与 pager 的 pager.adapter = adapter 同款）：销毁并重建所有可见
         // WebtoonPageHolder，重新走加载链并按最新增强设置重解码，保证切换增强实时生效。
         // 重设 adapter 会清空滚动位置，故先记下首可见项与像素偏移，重建后再还原，避免跳页。
@@ -585,11 +634,15 @@ class WebtoonViewer(
         val firstPos = lm?.findFirstVisibleItemPosition() ?: 0
         val firstView = if (firstPos >= 0) lm?.findViewByPosition(firstPos) else null
         val offset = firstView?.let { it.top - recycler.paddingTop } ?: 0
-        recycler.adapter = adapter
+            recycler.adapter = adapter
         if (firstPos >= 0) {
             lm?.scrollToPositionWithOffset(firstPos, offset)
         }
     }
+
+    override fun deferImagePropertyRefresh() = config.deferImagePropertyRefresh()
+
+    override fun flushImagePropertyRefresh() = config.flushImagePropertyRefresh()
 }
 
 // Double the cache size to reduce rebinds/recycles incurred by the extra layout space on scroll direction changes
@@ -599,6 +652,12 @@ private val RECYCLER_VIEW_CACHE_SIZE = if (Build.VERSION.SDK_INT >= Build.VERSIO
 // preset, mirroring ComicScreen's set_menu_pagekey_offset default (23dp). A sliver of
 // the next page stays visible so each tap feels like one full screen changed.
 private const val TAP_SCROLL_PEEK_MARGIN_DP = 23f
+
+/** Komiho 诊断：适配器重建日志（pager 侧同名 tag，便于一起 grep）。 */
+private const val KOMIHA_REBUILD_TAG = "Waifu2xRebuild"
+
+/** Komiho: 适配器重建的合并窗口 —— 把同一批 register 首发回调并成一次重建。 */
+private const val REFRESH_COALESCE_DELAY_MS = 120L
 
 // Komiho 翻页动画 v2 的曲线：三次方减速 (t-1)^3 + 1（等价于 1-(1-t)^3）。
 // ComicScreen / RecyclerView 默认用的是五次方（(t-1)^5+1），但五次方在 50% 时间就

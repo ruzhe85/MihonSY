@@ -42,4 +42,14 @@ interface Viewer {
      * return true if the event was handled, false otherwise.
      */
     fun handleGenericMotionEvent(event: MotionEvent): Boolean
+
+    /**
+     * Komiho: 设置窗口打开时调用，进入图像属性刷新延迟模式（连续改选项不逐次重建）。
+     */
+    fun deferImagePropertyRefresh()
+
+    /**
+     * Komiho: 设置窗口关闭时调用，退出延迟模式并一次性刷新待重建的图像属性。
+     */
+    fun flushImagePropertyRefresh()
 }

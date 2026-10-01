@@ -1098,6 +1098,13 @@
     <string name="enhancement_group_gpu">GPU</string>
     <string name="enhancement_group_npu">NPU</string>
     <string name="enhancement_scale">Scale</string>
+    <string name="ai_bypass_fit">Force enhancement on high-resolution images</string>
+    <string name="ai_area_downscale">Reduce moiré</string>
+    <string name="ai_area_downscale_strength">Filter strength</string>
+    <string name="ai_area_strength_light">Medium</string>
+    <string name="ai_area_strength_medium">Strong</string>
+    <string name="enhancement_group_title">Enhancement</string>
+    <string name="enhancement_denoise">Denoise</string>
     <string name="loader_epub_no_images_error">This EPUB has no image pages. Please open it via your Komga server.</string>
     <string name="password_incorrect">Incorrect password</string>
     <string name="password_label">Password</string>

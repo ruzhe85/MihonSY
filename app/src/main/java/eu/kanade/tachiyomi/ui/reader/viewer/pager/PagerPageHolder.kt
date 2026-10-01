@@ -311,6 +311,7 @@ class PagerPageHolder(
                         android.graphics.drawable.BitmapDrawable(resources, bitmap),
                         viewerImageConfig(),
                     )
+                    // SY: 预解码路径补发增强角标（现场解码路径由 SSIV 的 Coil 回调触发）
                     // Komiho: enhanceElapsedMillis = -1 表示这份预处理**没有做过增强**（尺寸门 /
                     // 已解到位图等），角标要显示 SKIP 而不是 CPU OK。这条路径不走 Coil 解码，
                     // 因此顺手把 skip 标记消费掉，避免陈旧标记残留、误标后续同号页。
@@ -319,6 +320,7 @@ class PagerPageHolder(
                     showEnhancementOutcome(
                         success = !enhancementSkipped,
                         elapsedMillis = result.enhanceElapsedMillis,
+                        output = "${bitmap.width}×${bitmap.height}",
                     )
                 } else {
                     setImage(result.source.peek(), result.isAnimated, viewerImageConfig())

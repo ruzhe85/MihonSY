@@ -135,11 +135,14 @@ object Waifu2x {
     }
 
     /**
-     * Komiho: AI tile edge (px) — the native default is 128 (`waifu2x.cpp:150`).
+     * Komiho: AI tile edge (px) 兜底值，与「阅读设置 → AI tile」偏好的默认保持一致
+     * （2026-10-01 由 128 上调到 192；依据与实测数据见 ReaderPreferences.aiTileSize 的 KDoc：
+     * 单页耗时正比于加了 padding 的总像素数，128 在实测的两类页面上都是最差档）。
+     *
      * Each tile allocates `(tilesize + 2*prepadding)` input and `tilesize * scale` output,
      * so the GPU working set grows with the square of this value.
      */
-    private const val DEFAULT_TILE_SIZE = 128
+    private const val DEFAULT_TILE_SIZE = 192
 
     /**
      * 256 is the ceiling the bundled `prepadding = 18` is documented safe for
@@ -293,6 +296,57 @@ object Waifu2x {
     }
 
     /**
+     * Komiho (2026-10-01): 当前可见页的页号（-1 = 未知）。阅读器准备**可见页**时写入
+     * （见 `PagerViewer.onPrepareStart`），供 [process] 判断「这次请求是不是用户正在看的那页」。
+     *
+     * 只服务于 [prioritizeEnhancement]，不参与任何功能判定 —— 值过期最坏的后果是某个请求
+     * 被当成「可见页」直接放行（本来就放行），没有副作用。
+     */
+    @Volatile
+    var visiblePageIndex: Int = -1
+
+    /**
+     * Komiho (2026-10-01): 可见页优先闸门。
+     *
+     * 要解决的问题：进阅读器时 pager 窗口的 3 页会同时发起增强，而原生 `g_lock` 覆盖整次推理
+     * ⇒ 谁先到谁先跑。实测进入后 3 页串行 9.9 秒，可见页排在队尾（10.7 秒才出图）。
+     * `abortProcessing` 只能打断**正在跑**的那次，对「已发起、还在等锁」的无效。
+     *
+     * 规则：可见页**永不等待**（直接进）；预取在「有可见页正在跑」时等待，等它跑完再进。
+     * 因此最坏情况只是「预取被顺延」，不可能死锁 —— 可见页不受任何人阻塞，而预取等待的那个
+     * 计数只由可见页自己的 finally 递减。
+     *
+     * 包住的只有「进原生锁 → 推理 → 释放」这一段，[Timing] 的 wait/proc 口径不变。
+     */
+    private val gateLock = Object()
+    private var visibleInFlight = 0
+
+    private fun <T> prioritizeEnhancement(visible: Boolean, block: () -> T): T {
+        if (!visible) {
+            synchronized(gateLock) {
+                while (visibleInFlight > 0) {
+                    try {
+                        gateLock.wait()
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        break
+                    }
+                }
+            }
+            return block()
+        }
+        synchronized(gateLock) { visibleInFlight++ }
+        try {
+            return block()
+        } finally {
+            synchronized(gateLock) {
+                visibleInFlight--
+                if (visibleInFlight == 0) gateLock.notifyAll()
+            }
+        }
+    }
+
+    /**
      * Runs AI upscaling on [input]. **Blocking** — call it from a background thread.
      * Returns the upscaled bitmap, or null when unavailable / failed (caller keeps the original).
      *
@@ -328,15 +382,26 @@ object Waifu2x {
             // 那段被计入下面的 `inference`（用 pure= 才能摘出来，见 [Timing] 的说明）。
             // 判据：wait 常年 ≈0 → 解码线程没被占住，方案 A 不必做；wait 经常上千毫秒
             // → 线程饥饿真实存在，再考虑把增强搬出解码器。
-            // 用 android.util.Log 而非项目 logcat()：release 构建下 XLog 级别是 WARN
-            // （App.kt 的 setupExhLogging），logcat() 的 DEBUG/INFO 会被整条吞掉。
+            // Komiho (2026-10-01): 可见页优先闸门 —— 只包住「进原生锁 → 推理 → 释放」这一段，
+            // wait/proc 的计时口径完全不变。判据 = 这次请求的页号就是阅读器刚标记的可见页。
+            val visible = id >= 0 && id == visiblePageIndex
+            var waitMs = 0L
+            var procMs = 0L
+            // 闸门排队与原生锁排队是同一件事（都在等 GPU 空出来），所以一起计入 [waitMs]
+            // —— 角标据此剔除的总排队时间才不会漏掉这一段。
+            // 用 exh.log.DiagLog 而非项目 logcat()：release 构建下 XLog 级别是 WARN
+            // （App.kt 的 setupExhLogging），logcat() 的 DEBUG/INFO 会被整条吞掉；DiagLog
+            // 同时写 android.util.Log 与进程内缓冲，所以 logcat 与「导出诊断日志」都能拿到。
             val waitStart = android.os.SystemClock.uptimeMillis()
-            nativeClearAbortProcessing()
-            val waitMs = android.os.SystemClock.uptimeMillis() - waitStart
+            val out = prioritizeEnhancement(visible) {
+                nativeClearAbortProcessing()
+                waitMs = android.os.SystemClock.uptimeMillis() - waitStart
 
-            val procStart = android.os.SystemClock.uptimeMillis()
-            val out = nativeProcess(argb, id)
-            val procMs = android.os.SystemClock.uptimeMillis() - procStart
+                val procStart = android.os.SystemClock.uptimeMillis()
+                val result = nativeProcess(argb, id)
+                procMs = android.os.SystemClock.uptimeMillis() - procStart
+                result
+            }
 
             // Komiho：记录**真正跑完的那台引擎**，供阅读器角标显示 CPU/GPU/NPU OK。
             // 必须在推理成功之后才登记：只有 nativeProcess 返回了结果，才能说这条路径成立。
@@ -417,6 +482,63 @@ object Waifu2x {
         (nativeGetProgress() and 0xFFFFFFFFL).toInt()
     } catch (_: Exception) {
         -1
+    }
+
+    /**
+     * Komiho (2026-10-01): 原生日志环快照（`Waifu2xNative` / `Waifu2xJNI`），供「导出诊断日志」。
+     *
+     * 为什么需要：原生日志走 `__android_log_print`，只进系统 logcat；而 App 侧的
+     * [exh.log.DiagnosticLogBuffer] 是进程内缓冲，读不到它 —— 于是导出文件里恰好缺掉
+     * `Fused Vulkan scheduling` / `adaptive batch` / `processing completed in N ms` 这几行，
+     * 也就无法判断瓶颈在排队、批次还是纯计算。原生自己另写一份进程内环，这里取出来。
+     *
+     * 每行格式 `<epochMillis>|<level>|<tag>|<message>`，解析与合并见
+     * [exh.log.DiagnosticLogBuffer.getLogsMerged]。老 .so 没有这个符号时返回空串
+     * （导出退化为「只有 Kotlin 侧两个来源」，不阻断导出）。
+     */
+    fun nativeLogs(): String = try {
+        if (libraryLoaded) nativeGetLogs().orEmpty() else ""
+    } catch (_: Throwable) {
+        ""
+    }
+
+    /**
+     * Komiho (2026-10-01): 告诉原生「UI 正在占用 GPU」（手指按下/拖动期间）。
+     *
+     * 原生的批次循环会在每个 tile 之前、以及每次提交之前检查这个标志：为真就停在那里不
+     * 提交新批次，抬手立刻继续。之所以要它 —— `submit_and_wait()` 是**不可中断**的 fence
+     * 等待，一批占住 GPU 的这段时间里 SurfaceFlinger 抢不到 GPU 时间，这正是「滚动掉帧」的
+     * 直接来源。批次大小本身已由时间窗口封顶（`waifu2x.cpp`），这个标志再保证「手指还在
+     * 屏幕上时」完全不新开批次。
+     *
+     * 只按「手指按下」判、不按「滚动进行中」判：条漫连续滚动时后者几乎恒为真，会直接把
+     * 增强饿死。
+     *
+     * 接线点见 `PagerViewer` / `WebtoonViewer` 的手势监听（原先没有任何调用点，这套让位
+     * 逻辑一直是死代码）。
+     */
+    fun setUiBusy(busy: Boolean) {
+        if (!libraryLoaded) return
+        try {
+            nativeSetUiBusy(busy)
+        } catch (_: Throwable) {
+            // 老 .so 没有这个符号：让位退化为「不接线」，不影响功能。
+        }
+    }
+
+    /**
+     * Komiho (2026-10-01): [id] 那次推理是否被 [abortProcessing] 打断。
+     *
+     * 用途：[MihonSyEnhancer] 判定「这次没出结果还要不要跑 CPU Lanczos 兜底」。被抢占的页
+     * 跑兜底是纯浪费 —— 一整幅重采样要占住 CPU 0.5~1 秒，而且该页的 AI 结果稍后重算时还会
+     * 再来一遍；它的原始解码图本来就已经在屏幕上，不会留黑帧。
+     * 与 [abortProcessing] 同款竞态：下一次 nativeProcess 会清掉这份记录，此时返回 false
+     * 只会退回「照旧跑兜底」，方向安全。
+     */
+    fun wasAborted(id: Int): Boolean = try {
+        nativeWasAborted(id)
+    } catch (_: Throwable) {
+        false
     }
 
     // Internals -----------------------------------------------------------------------
@@ -814,6 +936,17 @@ object Waifu2x {
     private external fun nativeClearAbortProcessing()
 
     private external fun nativeGetProgress(): Long
+
+    /**
+     * Komiho: 原生日志环快照（见 [nativeLogs]），格式 `<epochMillis>|<level>|<tag>|<message>`。
+     */
+    private external fun nativeGetLogs(): String?
+
+    /** Komiho: UI 占用标志（见 [setUiBusy]）。 */
+    private external fun nativeSetUiBusy(busy: Boolean)
+
+    /** Komiho: [id] 那次推理是否被抢占打断（见 [wasAborted]）。 */
+    private external fun nativeWasAborted(id: Int): Boolean
 
     // Komiho: QNN/HTP — see app/src/main/cpp/waifu2x_jni.cpp -------------------------
 

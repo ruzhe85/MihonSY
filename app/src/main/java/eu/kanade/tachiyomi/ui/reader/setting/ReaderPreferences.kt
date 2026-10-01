@@ -235,16 +235,28 @@ class ReaderPreferences(
     val lanczosScale: Preference<Int> = preferenceStore.getInt("pref_lanczos_scale", 200) // 150/200/300 = 1.5x/2x/3x
 
     /**
-     * Komiho: tile edge (px) for the AI upscaler — forwarded to the native `tilesize`
-     * (`waifu2x.cpp:150`, default 128) via `nativeUpdatePerformanceConfig`.
+     * Komiho: tile edge (px) for the AI upscaler — forwarded to the native `tilesize` via
+     * `nativeUpdatePerformanceConfig`. Only affects AI upscale (mode 5).
      *
-     * Only affects AI upscale (mode 5). Larger tiles cut the number of tile
-     * dispatches (and the per-tile fixed overhead) at the cost of a higher peak
-     * GPU working set — each tile allocates `(tilesize + 2*prepadding)` input and
-     * `tilesize * scale` output, so the working set scales with the square of this value.
-     * The engine ships with `prepadding = 18`, annotated as safe up to tile size 256.
+     * 默认 192（2026-10-01 由 128 上调）。**实测成本模型**：单页耗时正比于
+     * `ceil(w/t) * ceil(h/t) * (t + 2*prepadding)^2`，也就是「加了 padding 的总像素数」；
+     * 每像素成本几乎与 t 无关（0.79~0.98 ns/px，t 越大反而越省）。所以最优 t 完全取决于
+     * **图片尺寸除以 t 的余数**，没有任何档位普遍最优。四个内置档在两类真实页面上的总像素：
+     *
+     * | t   | 1099x1600 | 1445x2048 |
+     * |-----|-----------|-----------|
+     * | 96  | 2.74M     | 4.74M     |
+     * | 128 | 2.56M     | 4.21M     |  ← 原默认：两列都是最差
+     * | 192 | **2.43M** | 3.96M     |
+     * | 256 | 2.67M     | **3.66M** |
+     *
+     * 192 在两类页面上都接近最优（1099x1600 命中；1445x2048 只比 256 差 8%），峰值显存也比
+     * 256 低，故取作默认。要更准只能按 `w/h` 自动选 t（闭式、零成本），留给后续。
+     *
+     * 代价：tile 越大，单片中间量按平方涨（`(t + 2*prepadding)` 输入、`t*scale` 输出），
+     * 峰值显存随之上升；`MAX_TILE_SIZE = 256` 的上限维持不变。
      */
-    val aiTileSize: Preference<Int> = preferenceStore.getInt("pref_ai_tile_size", 128)
+    val aiTileSize: Preference<Int> = preferenceStore.getInt("pref_ai_tile_size", 192)
 
     /**
      * Komiho: which AI model the upscaler runs (a built-in [AiUpscaleModel] or a model
@@ -258,6 +270,45 @@ class ReaderPreferences(
         "pref_ai_model_id",
         AiUpscaleModel.Default.id,
     )
+
+    /**
+     * Komiho: 漫画降噪总开关（CPU Guided Filter）。
+     * 0=关 1=开启（固定强档 radius/eps=12/64，预平滑后平坦区 a≈0.03 近全平但保线稿）。
+     * 对所有增强模式（Lanczos3 / Catmull-Rom / AI）生效；**默认关** —— 先人工对比验证
+     * 「降噪 + 超分是否值得」再考虑改默认。
+     * （曾用 Fast NLM：3.1MP 实测单页 ~11s，判定不可行已删，见 guided.cpp 头注释。）
+     */
+    val denoiseLevel: Preference<Int> = preferenceStore.getInt("pref_denoise_level", 0)
+
+    /**
+     * Komiho (2026-09-26): 放开 AI 尺寸门控。默认关——r≤1（图已 ≥ 屏幕）的源图跳过 AI；
+     * 开启后这类图也跑 AI（扫描质量差、需要 AI 补细节的场景），同时解码/预缩目标从视图
+     * 尺寸放宽到 2048 上限，AI 才有真实细节可补。OOM 防护不依赖此开关：enhance() 里的
+     * MP 输出门（输入×2 超 80MP 照样 skip）始终生效。变更进 [enhancementCacheKey] 指纹。
+     */
+    val aiBypassFitGate: Preference<Boolean> = preferenceStore.getBoolean("pref_ai_bypass_fit_gate", false)
+
+    /**
+     * Komiho (2026-09-30): AI 面积回缩（防摩尔纹）。**默认关 —— 真机 A/B 后再定默认。**
+     * AI 2x 输出相对显示区缩比 < 0.85 时，用面积平均核（软边 box、支撑窗随缩比走）
+     * 压回显示带通再交 SSIV。根因：SSIV 对 bitmap 源是非瓦片整图双线性缩小、无低通，
+     * AI 2x 的高频网点与屏幕像素网格拍频出摩尔纹。只对 mode 5 生效（含引擎失败回落
+     * Lanczos 的页）；webtoon 原始尺寸模式（1:1 显示）不触发。变更进 [enhancementCacheKey]。
+     */
+    val aiAreaDownscale: Preference<Boolean> = preferenceStore.getBoolean("pref_ai_area_downscale", false)
+
+    /**
+     * Komiho (2026-10-01): 滤波强度档（%）：100=中（σ=0.5，积分窗 ~4.6 源像素 @0.655 缩比）、
+     * 150=强（σ=0.75，~7px）。第一版软边 box 窗口仅 ~1.5px，盖不住 AI 2x 后 6~16px 的网点
+     * 晶格周期、残留低频云纹（真机 0.655 缩比实测）——换高斯核（σ 随此档走）后由用户按网点
+     * 粗细调档：强档灰度均匀但线稿更软。变更进 [enhancementCacheKey]。
+     */
+    val aiAreaDownscaleStrength: Preference<Int> = preferenceStore.getInt("pref_ai_area_downscale_strength", 100)
+
+    /**
+     * Komiho: 上一次的非关闭增强档位——「开启」chip 用它恢复（不改变像素，不进指纹）。
+     */
+    val enhancementLastMode: Preference<Int> = preferenceStore.getInt("pref_enhancement_last_mode", 2)
 
     /** Independent toggle: show the bottom-left enhancement status overlay (elapsed seconds / OK). */
     val showEnhancementStatus: Preference<Boolean> = preferenceStore.getBoolean("pref_show_enhancement_status", false)
@@ -280,6 +331,10 @@ class ReaderPreferences(
         append('|').append(lanczosScale.get())
         append('|').append(aiModelId.get())
         append('|').append(aiTileSize.get())
+        append('|').append(denoiseLevel.get())
+        append('|').append(if (aiBypassFitGate.get()) 1 else 0)
+        append('|').append(if (aiAreaDownscale.get()) 1 else 0)
+        append('|').append(aiAreaDownscaleStrength.get())
         append('|').append(cropBorders.get())
         append('|').append(cropBordersWebtoon.get())
     }
@@ -436,8 +491,19 @@ class ReaderPreferences(
         )
 
         /**
-         * Komiho: AI tile edge options. 128 is the native default (`waifu2x.cpp:150`);
-         * 256 is the largest value the bundled `prepadding = 18` is documented safe for.
+         * Komiho: AI 滤波强度档（%）：100=中（σ=0.5）、150=强（σ=0.75）。历史键名
+         * ai_area_strength_light/medium 保留（老安装无迁移成本），显示文案已改为 中/强。
+         * 原第三档 200 已删（真机无必要，线稿过软）。
+         */
+        val AiAreaDownscaleStrengthOptions = listOf(
+            100 to MR.strings.ai_area_strength_light,
+            150 to MR.strings.ai_area_strength_medium,
+        )
+
+        /**
+         * Komiho: AI tile edge options. 默认 192 —— 实测依据（总 padded 像素最小的折中）
+         * 见 [ReaderPreferences.aiTileSize] 的 KDoc。256 是内置 `prepadding = 18` 文档标注的
+         * 安全上限，故维持为最高档。
          */
         val AiTileSizeOptions = listOf(
             96 to MR.strings.ai_tile_size_96,

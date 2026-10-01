@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <array>
 #include <thread>
 #include <vector>
@@ -33,6 +34,40 @@ inline float catmullRomKernel(float x) {
   return -0.5f * x * x * x + 2.5f * x * x - 4.0f * x + 2.0f;
 }
 
+// Komiho: Mitchell-Netravali (B=C=1/3) cubic filter — 降采样专用。Lanczos3 负瓣振铃
+// 会把网点/高频纹理锐化出摩尔纹；Mitchell 无振铃，缩图更平滑。
+inline float mitchellKernel(float x) {
+  constexpr float B = 1.0f / 3.0f;
+  constexpr float C = 1.0f / 3.0f;
+  x = std::fabs(x);
+  if (x >= 2.0f) return 0.0f;
+  const float x2 = x * x;
+  const float x3 = x2 * x;
+  if (x < 1.0f) {
+    return ((12.0f - 9.0f * B - 6.0f * C) * x3 +
+            (-18.0f + 12.0f * B + 6.0f * C) * x2 +
+            (6.0f - 2.0f * B)) / 6.0f;
+  }
+  return ((-B - 6.0f * C) * x3 +
+          (6.0f * B + 30.0f * C) * x2 +
+          (-12.0f * B - 48.0f * C) * x +
+          (8.0f * B + 24.0f * C)) / 6.0f;
+}
+
+// Komiho: 面积平均核（软边 box，支撑窗 ±(0.5+ε)，边缘线性过渡）。窗口随缩比放大后
+// 也只是 ~1/缩比 个源像素宽 —— 对 AI 2x 后周期 6~16px 的网点晶格积分不足，非整数
+// 缩比下残留低频云纹（实测 0.655 缩比明显）。高斯核（kernel id 5，σ 随强度走）
+// 才能把晶格积成均匀灰：见 resizeWithKernel case 5。
+constexpr float AREA_KERNEL_EDGE = 1.0f / 256.0f;
+
+inline float areaKernel(float x) {
+  x = std::fabs(x);
+  const float edge = 0.5f + AREA_KERNEL_EDGE;
+  if (x >= edge) return 0.0f;
+  if (x <= 0.5f - AREA_KERNEL_EDGE) return 1.0f;
+  return (edge - x) / (2.0f * AREA_KERNEL_EDGE);
+}
+
 // MihonSY: Spline36 disabled — kept for reference but no longer compiled into a
 // code path. Comments out the kernel and its resizeWithKernel case below.
 // inline float spline36Kernel(float x) {
@@ -50,14 +85,16 @@ inline float catmullRomKernel(float x) {
 //          (26.0f / 209.0f) * v;
 // }
 
-using KernelFn = float (*)(float);
+// Komiho: 核函数放宽到 std::function —— 高斯核的 σ 由调用方参数决定（强度可调）。
+using KernelFn = std::function<float(float)>;
 
 struct KernelLUT {
   std::vector<int16_t> tbl;
   float invStep;
   float radius;
 
-  KernelLUT(KernelFn fn, int radius) : radius(static_cast<float>(radius)) {
+  // Komiho: radius 为 float —— 面积核（kernel id 4）用 0.5+ε 的半径。
+  KernelLUT(KernelFn fn, float radius) : radius(radius) {
     tbl.resize(KERNEL_LUT_N);
     invStep = static_cast<float>(KERNEL_LUT_N - 1) / (2.0f * radius);
     const int scale = KQ_ONE;
@@ -106,30 +143,39 @@ struct ResamplePlan {
 
   ResamplePlan() = default;
 
-  ResamplePlan(int srcSize, int dstSize_, int radius, const KernelLUT &lut)
-      : dstSize(dstSize_), taps(2 * radius + 2),
-        indices(static_cast<size_t>(dstSize_) * taps),
-        weights(static_cast<size_t>(dstSize_) * taps),
-        weightSums(dstSize_, 0) {
+  ResamplePlan(int srcSize, int dstSize_, float radius, const KernelLUT &lut)
+      : dstSize(dstSize_) {
     const float scale = srcSize / static_cast<float>(dstSize_);
+
+    // Komiho: 缩小时（scale>1）滤波支撑窗必须随缩小比放大（核输入也除以 scale），
+    // 否则固定 ±radius 源像素窗在 2:1 缩小时会跳过一半源像素 → 混叠/摩尔纹，
+    // 效果反而不如双线性。放大时维持原窗口不变。
+    const bool downscaling = scale > 1.0f;
+    const float support = downscaling ? radius * scale : radius;
+    const float kscale = downscaling ? scale : 1.0f;
+
+    taps = 2 * static_cast<int>(std::ceil(support)) + 2;
+    indices.assign(static_cast<size_t>(dstSize_) * taps, 0);
+    weights.assign(static_cast<size_t>(dstSize_) * taps, 0);
+    weightSums.assign(dstSize_, 0);
 
     for (int d = 0; d < dstSize_; ++d) {
       const float center = (d + 0.5f) * scale - 0.5f;
-      const int first = static_cast<int>(std::floor(center - radius));
-      const int last = static_cast<int>(std::ceil(center + radius));
+      const int first = static_cast<int>(std::floor(center - support));
+      const int last = static_cast<int>(std::ceil(center + support));
       const int base = d * taps;
 
       int sum = 0;
       int k = 0;
       for (int i = first; i <= last && k < taps; ++i, ++k) {
         const int clamped = std::max(0, std::min(srcSize - 1, i));
-        const int16_t w = lut.at(center - i);
+        const int16_t w = lut.at((center - i) / kscale);
         indices[base + k] = clamped;
         weights[base + k] = w;
         sum += w;
       }
-      // Remaining slots are harmless zero taps. Keeping a fixed tap count makes
-      // the hot loops branch-free and works for both 2/3-radius kernels.
+      // Remaining slots are harmless zero taps. Keeping a fixed tap count per
+      // plan keeps the hot loops branch-free.
       for (; k < taps; ++k) {
         indices[base + k] = indices[base + (k ? k - 1 : 0)];
         weights[base + k] = 0;
@@ -314,7 +360,7 @@ void resizeAlpha(const unsigned char *src, int sw, int sh, unsigned char *dst, i
 }
 
 void resizeGeneric(const unsigned char *src, int sw, int sh, unsigned char *dst, int dw,
-                   int dh, KernelFn kernel, int radius, bool opaque) {
+                   int dh, KernelFn kernel, float radius, bool opaque) {
   // Kernel generation remains outside the pixel loops. The important additional
   // optimization here is that all per-destination coordinate math, clamping and
   // LUT interpolation are also moved into these two plans.
@@ -341,11 +387,36 @@ bool isFullyOpaque(const unsigned char *src, int width, int height) {
 }
 
 void resizeWithKernel(const unsigned char *src, int sw, int sh, unsigned char *dst, int dw,
-                      int dh, int kernel) {
+                      int dh, int kernel, float kparam) {
   switch (kernel) {
     case 1: {
       const bool opaque = isFullyOpaque(src, sw, sh);
       resizeGeneric(src, sw, sh, dst, dw, dh, catmullRomKernel, 2, opaque);
+      break;
+    }
+    // Komiho: Mitchell-Netravali (kernel id 3) — GPU/AI 路线的降采样用。
+    case 3: {
+      const bool opaque = isFullyOpaque(src, sw, sh);
+      resizeGeneric(src, sw, sh, dst, dw, dh, mitchellKernel, 2.0f, opaque);
+      break;
+    }
+    // Komiho: 面积平均（kernel id 4）— 已被高斯核（id 5）取代，保留备用。
+    case 4: {
+      const bool opaque = isFullyOpaque(src, sw, sh);
+      resizeGeneric(src, sw, sh, dst, dw, dh, areaKernel, 0.5f + AREA_KERNEL_EDGE, opaque);
+      break;
+    }
+    // Komiho: 高斯核（kernel id 5）— AI 2x 回缩的主用核。σ = kparam（0.5×强度档），
+    // 支撑窗 3σ：缩比 r 下实际积分窗 ≈ 3σ/r 源像素，强度 1.0 时 ~4.6px、1.5 时 ~7px、
+    // 2.0 时 ~9px —— 覆盖网点晶格周期才能积成均匀灰（box 的 ~1.5px 只会留云纹）。
+    // 高斯滚降平滑，无振铃；线稿边缘由 AI 2x 预先锐化，适度模糊可接受。
+    case 5: {
+      const float sigma = std::max(0.1f, kparam);
+      const bool opaque = isFullyOpaque(src, sw, sh);
+      resizeGeneric(
+          src, sw, sh, dst, dw, dh,
+          [sigma](float x) { return std::exp(-(x * x) / (2.0f * sigma * sigma)); },
+          3.0f * sigma, opaque);
       break;
     }
     // MihonSY: Spline36 (kernel id 2) disabled — spline36Kernel is commented out above.
@@ -356,7 +427,7 @@ void resizeWithKernel(const unsigned char *src, int sw, int sh, unsigned char *d
     // }
     default: {
       const bool opaque = isFullyOpaque(src, sw, sh);
-      resizeGeneric(src, sw, sh, dst, dw, dh, lanczosKernel, LANCZOS_A, opaque);
+      resizeGeneric(src, sw, sh, dst, dw, dh, lanczosKernel, static_cast<float>(LANCZOS_A), opaque);
       break;
     }
   }
@@ -365,6 +436,8 @@ void resizeWithKernel(const unsigned char *src, int sw, int sh, unsigned char *d
 }  // namespace
 
 static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jint kernel);
+static jobject resampleBitmapTo(JNIEnv *env, jobject bitmap, jint dw, jint dh, jint kernel,
+                                jfloat kparam);
 
 extern "C" JNIEXPORT jobject JNICALL
 Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeLanczosProcess(
@@ -378,9 +451,52 @@ Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeResample(
   return nativeResampleImpl(env, bitmap, scale, kernel);
 }
 
-static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jint kernel) {
-  if (scale <= 1.0f) return bitmap;
+// Komiho: AI 2x 回缩到显式目标尺寸（kernel id 5 高斯，σ = 0.5×strength；strength 1.0/1.5/2.0
+// 对应轻/中/强）。目标大于源时钳回源尺寸（绝不放大）；与 nativeResample 的统一倍率不同，
+// 宽高比可各自独立。失败返回入参。
+extern "C" JNIEXPORT jobject JNICALL
+Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeAreaDownscaleTo(
+    JNIEnv *env, jobject thiz, jobject bitmap, jint dstWidth, jint dstHeight, jfloat strength) {
+  AndroidBitmapInfo info;
+  if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS) {
+    LOGE("AndroidBitmap_getInfo failed");
+    return bitmap;
+  }
+  if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) {
+    LOGE("Unsupported bitmap format %d", info.format);
+    return bitmap;
+  }
+  const int sw = static_cast<int>(info.width);
+  const int sh = static_cast<int>(info.height);
+  const int dw = std::max(1, std::min(sw, dstWidth));
+  const int dh = std::max(1, std::min(sh, dstHeight));
+  if (dw == sw && dh == sh) return bitmap;
+  return resampleBitmapTo(env, bitmap, dw, dh, 5, 0.5f * std::max(0.5f, std::min(3.0f, strength)));
+}
 
+static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jint kernel) {
+  // Komiho: 允许 scale < 1（GPU/AI 路线把 2x 结果缩到显示尺寸靠它）；scale==1 无事可做。
+  if (scale <= 0.0f || scale == 1.0f) return bitmap;
+
+  AndroidBitmapInfo info;
+  if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS) {
+    LOGE("AndroidBitmap_getInfo failed");
+    return bitmap;
+  }
+  if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) {
+    LOGE("Unsupported bitmap format %d", info.format);
+    return bitmap;
+  }
+
+  return resampleBitmapTo(
+      env, bitmap,
+      static_cast<int>(info.width * scale),
+      static_cast<int>(info.height * scale),
+      kernel, 0.0f);
+}
+
+static jobject resampleBitmapTo(JNIEnv *env, jobject bitmap, jint dw, jint dh, jint kernel,
+                                jfloat kparam) {
   AndroidBitmapInfo info;
   if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS) {
     LOGE("AndroidBitmap_getInfo failed");
@@ -393,8 +509,6 @@ static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jin
 
   const int sw = static_cast<int>(info.width);
   const int sh = static_cast<int>(info.height);
-  const int dw = static_cast<int>(info.width * scale);
-  const int dh = static_cast<int>(info.height * scale);
   if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0 || dw > 16384 || dh > 65536) {
     LOGE("Output size %dx%d out of bounds", dw, dh);
     return bitmap;
@@ -470,7 +584,7 @@ static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jin
     resampleDst = packedDst.data();
   }
 
-  resizeWithKernel(srcPixels, sw, sh, resampleDst, dw, dh, kernel);
+  resizeWithKernel(srcPixels, sw, sh, resampleDst, dw, dh, kernel, kparam);
 
   // Defensive blank-output check — run against the REAL render target
   // (resampleDst). When dstStride != dw*4 Android gave a padded output bitmap,

@@ -1,19 +1,30 @@
 #include "waifu2x.h"
 #include "qnn_backend.h"
+#include "native_log.h"
 #include <android/bitmap.h>
 #include <android/log.h>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdarg>
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
+#include <deque>
 #include <jni.h>
 #include <mutex>
+#include <string>
+#include <utility>
 #include <vector>
 
+// Komiho (2026-10-01): 原生日志改走 mihonsy_native_log —— 除 logcat 外再写一份进程内环，
+// 供「设置-高级-导出诊断日志」在无法使用 adb 的设备（鸿蒙等）上取走。宏签名与用法不变。
+// 详见 native_log.h。
 #define TAG "Waifu2xJNI"
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+#define LOGD(...) mihonsy_native_log(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define LOGE(...) mihonsy_native_log(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 static Waifu2x *g_waifu2x = nullptr;
 static std::mutex g_lock;
@@ -27,6 +38,94 @@ static std::atomic<bool> g_abort_processing{false};
 // 实测某页 Kotlin 报 4913ms，而原生三趟都是 ~2450ms ⇒ 角标因此虚高 2.4s。
 // 这里把纯耗时单独曝给 Kotlin，让它能把两段等锁都剔除。
 static std::atomic<long long> g_last_inference_ms{-1};
+// Komiho (2026-10-01): 最近一次被 abortProcessing 打断的请求 id（-1 = 没有）。
+// 用途：Kotlin 侧据此区分「这次没出结果是被**抢占**」还是「真的失败」—— 被抢占的页不必再跑
+// 一遍 CPU Lanczos 兜底（那一整幅重采样白白占着 CPU，且该页的 AI 结果稍后会重算）。
+// 按 id 判定：别的页覆盖了它只会退回「照旧跑 Lanczos」，方向是安全的。
+static std::atomic<int> g_last_aborted_id{-1};
+
+// ── Komiho (2026-10-01): 原生诊断日志环 ──────────────────────────────────────
+// LOGD/LOGE（见 native_log.h）在这里留一份进程内副本，由 Kotlin 的
+// Waifu2x.nativeLogs() 取走、合并进「设置-高级-导出诊断日志」。鸿蒙这类设备装不了
+// adb，导出文件是唯一能看到 Fused Vulkan scheduling / adaptive batch /
+// processing completed in N ms 的地方 —— 判断瓶颈在排队、批次还是纯计算全靠它。
+namespace {
+
+// 8000 条：一页约 10~30 行（scheduling 1 + adaptive batch 每批 1 + completed 1），
+// 够覆盖一两百页；内存上限约 1MB。
+constexpr size_t kNativeLogCapacity = 8000;
+
+struct NativeLogEntry {
+  int64_t wall_ms;
+  char level;
+  std::string tag;
+  std::string message;
+};
+
+std::mutex g_native_log_mutex;
+std::deque<NativeLogEntry> g_native_log_ring;
+
+// epoch 毫秒 —— 与 Kotlin 侧 System.currentTimeMillis() 同基准，导出时才能合并排序。
+int64_t native_log_wall_ms() {
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  return static_cast<int64_t>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
+}
+
+// 与 logcat 的单字母级别对齐（导出文件的第一列就是它）。
+char native_log_level(int android_priority) {
+  if (android_priority >= ANDROID_LOG_ERROR) return 'E';
+  if (android_priority >= ANDROID_LOG_WARN) return 'W';
+  if (android_priority >= ANDROID_LOG_INFO) return 'I';
+  if (android_priority >= ANDROID_LOG_DEBUG) return 'D';
+  return 'V';
+}
+
+} // namespace
+
+void mihonsy_native_log(int android_priority, const char *tag, const char *fmt,
+                        ...) {
+  char buf[1024];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(buf, sizeof(buf), fmt, ap);
+  va_end(ap);
+
+  // logcat 侧行为不变（原来就是 __android_log_print(prio, TAG, fmt, ...)）。
+  __android_log_print(android_priority, tag, "%s", buf);
+
+  NativeLogEntry entry;
+  entry.wall_ms = native_log_wall_ms();
+  entry.level = native_log_level(android_priority);
+  entry.tag = tag;
+  entry.message = buf;
+  // 环是**按行**序列化的，消息里不能出现 '\n'（会破坏 Kotlin 侧的行解析）。
+  for (char &c : entry.message) {
+    if (c == '\n' || c == '\r') c = ' ';
+  }
+
+  std::lock_guard<std::mutex> lock(g_native_log_mutex);
+  g_native_log_ring.push_back(std::move(entry));
+  while (g_native_log_ring.size() > kNativeLogCapacity)
+    g_native_log_ring.pop_front();
+}
+
+std::string mihonsy_native_log_dump() {
+  std::lock_guard<std::mutex> lock(g_native_log_mutex);
+  std::string out;
+  out.reserve(g_native_log_ring.size() * 96);
+  for (const NativeLogEntry &e : g_native_log_ring) {
+    out += std::to_string(e.wall_ms);
+    out += '|';
+    out += e.level;
+    out += '|';
+    out += e.tag;
+    out += '|';
+    out += e.message;
+    out += '\n';
+  }
+  return out;
+}
 
 // ── Komiho: QNN/HTP (Qualcomm NPU) 接线 ─────────────────────────────────────
 // 引擎选择发生在 Kotlin 侧（ensureEngine 按模型 backend 调 nativeInitQnn 或
@@ -205,6 +304,54 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
   int ret = -1;
   jobject outBitmap = nullptr;
 
+  // Komiho: 位图拷贝与 alpha 探测都是纯 CPU 工作，不需要引擎锁 —— 挪到 g_lock
+  // 之外，让本页的搬运与上一页（可能仍在锁内跑 GPU）的推理重叠，并顺带缩短
+  // 排队（Kotlin 侧记的 wait = nativeClearAbortProcessing + nativeProcess 两段
+  // 等锁之和）。锁内只留真正的推理。
+  AndroidBitmapInfo info{};
+  if (AndroidBitmap_getInfo(env, bitmap, &info) < 0)
+    return bitmap;
+  if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888)
+    return bitmap;
+
+  void *pixels;
+  if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0)
+    return bitmap;
+
+  const int w = info.width;
+  const int h = info.height;
+  const int stride = info.stride;
+
+  // Keep a packed RGBA copy for the fused Vulkan upload. This also lets the
+  // staged path reconstruct its planar input without keeping Bitmap locked.
+  ncnn::Mat packed_input(w, h, (size_t)4u, 1);
+  if (packed_input.empty()) {
+    AndroidBitmap_unlockPixels(env, bitmap);
+    return bitmap;
+  }
+  for (int y = 0; y < h; y++) {
+    memcpy((unsigned char *)packed_input.data + (size_t)y * w * 4,
+           (const unsigned char *)pixels + (size_t)y * stride,
+           (size_t)w * 4);
+  }
+  AndroidBitmap_unlockPixels(env, bitmap);
+
+  // Komiho: alpha 探测同样挪出锁 —— 纯 CPU 扫描，只依赖 packed_input。
+  bool input_has_alpha =
+      (info.flags & ANDROID_BITMAP_FLAGS_ALPHA_MASK) !=
+      ANDROID_BITMAP_FLAGS_ALPHA_OPAQUE;
+  if (input_has_alpha) {
+    input_has_alpha = false;
+    const unsigned char *packed_pixels =
+        static_cast<const unsigned char *>(packed_input.data);
+    for (int i = 0; i < w * h; i++) {
+      if (packed_pixels[i * 4 + 3] != 255) {
+        input_has_alpha = true;
+        break;
+      }
+    }
+  }
+
   // Inference Scope (GPU) - Holds Lock for entire duration of incremental
   // process
   {
@@ -214,6 +361,7 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
     g_current_id.store(id);
     // Komiho: 本次跑完前先清掉，避免并发下把上一次的纯耗时当成这次的（拿不到就保持 -1）
     g_last_inference_ms.store(-1);
+    g_last_aborted_id.store(-1);
 
     // Komiho: QNN-only 模式下 g_waifu2x 可能尚未加载（ncnn 引擎与 QNN 引擎独立），
     // 所以这里不再以 g_waifu2x 为准入判据 —— 只要 QNN 已初始化就继续往下走；
@@ -221,34 +369,6 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
     const bool qnn_active = qnn_backend::is_initialized();
     if (!g_waifu2x && !qnn_active)
       return bitmap;
-
-    AndroidBitmapInfo info{};
-    if (AndroidBitmap_getInfo(env, bitmap, &info) < 0)
-      return bitmap;
-    if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888)
-      return bitmap;
-
-    void *pixels;
-    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0)
-      return bitmap;
-
-    int w = info.width;
-    int h = info.height;
-    int stride = info.stride;
-
-    // Keep a packed RGBA copy for the fused Vulkan upload. This also lets the
-    // staged path reconstruct its planar input without keeping Bitmap locked.
-    ncnn::Mat packed_input(w, h, (size_t)4u, 1);
-    if (packed_input.empty()) {
-      AndroidBitmap_unlockPixels(env, bitmap);
-      return bitmap;
-    }
-    for (int y = 0; y < h; y++) {
-      memcpy((unsigned char *)packed_input.data + (size_t)y * w * 4,
-             (const unsigned char *)pixels + (size_t)y * stride,
-             (size_t)w * 4);
-    }
-    AndroidBitmap_unlockPixels(env, bitmap);
 
     // Komiho: 输出倍率 —— QNN 引擎自报 scale；否则用 ncnn 引擎的。两者都无 → 失败。
     int out_scale = qnn_active ? qnn_backend::scale() : 0;
@@ -280,21 +400,6 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
           if (g_waifu2x) {
             g_waifu2x->progress_ptr = &g_progress;
             g_waifu2x->should_abort_ptr = &g_abort_processing;
-          }
-
-          bool input_has_alpha =
-              (info.flags & ANDROID_BITMAP_FLAGS_ALPHA_MASK) !=
-              ANDROID_BITMAP_FLAGS_ALPHA_OPAQUE;
-          if (input_has_alpha) {
-            input_has_alpha = false;
-            const unsigned char *packed_pixels =
-                static_cast<const unsigned char *>(packed_input.data);
-            for (int i = 0; i < w * h; i++) {
-              if (packed_pixels[i * 4 + 3] != 255) {
-                input_has_alpha = true;
-                break;
-              }
-            }
           }
 
           // Komiho: QNN/HTP 优先 —— 引擎由 Kotlin 侧按模型 backend 初始化；
@@ -353,6 +458,14 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
           if (g_waifu2x) {
             g_waifu2x->progress_ptr = nullptr;
             g_waifu2x->should_abort_ptr = nullptr;
+          }
+
+          // Komiho: 记下「这次没出结果是被抢占打断的」，供 Kotlin 跳过 CPU 兜底
+          // （见 Waifu2x.wasAborted / MihonSyEnhancer.enhanceWithGpu）。放在这里是因为
+          // ret 已成定局，而整个 nativeProcess 都持有 g_lock ⇒ 期间只有 abortProcessing
+          // 能改这个标志（nativeClearAbortProcessing 也要拿锁，插不进来）。
+          if (ret != 0 && g_abort_processing.load()) {
+            g_last_aborted_id.store(id);
           }
 
           AndroidBitmap_unlockPixels(env, outBitmap);
@@ -721,14 +834,37 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeSetUiBusy(JNIEnv *env,
   g_ui_busy.store(busy ? 1 : 0);
 }
 
+// Komiho (2026-10-01): 原生日志环快照，供 Kotlin 的 Waifu2x.nativeLogs() 取出、并入
+// 「设置-高级-导出诊断日志」。每行 `<epochMillis>|<level>|<tag>|<message>`，见 native_log.h。
+// 只在用户点导出的那一刻调用一次，不在推理热路径上。
+extern "C" JNIEXPORT jstring JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeGetLogs(JNIEnv *env,
+                                                            jobject thiz) {
+  const std::string logs = mihonsy_native_log_dump();
+  return env->NewStringUTF(logs.c_str());
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeUpdatePerformanceConfig(
     JNIEnv *env, jobject thiz, jint sleep_ms, jint tile_size) {
   std::lock_guard<std::mutex> lock(g_lock);
   if (g_waifu2x) {
+    // Komiho: tile 尺寸变了 ⇒ 上一个尺寸收敛出的批次结论（大小与上限）不再适用。
+    if (g_waifu2x->tilesize != tile_size) {
+      g_waifu2x->batch_target_hint = 0;
+      g_waifu2x->batch_target_ceiling = 0;
+    }
     g_waifu2x->tile_sleep_ms = sleep_ms;
     g_waifu2x->tilesize = tile_size;
     LOGD("Updated performance config: sleep=%dms, tilesize=%d", sleep_ms,
          tile_size);
   }
+}
+
+// Komiho (2026-10-01): [id] 那次推理是否被 abortProcessing 打断 —— 供 Kotlin 决定要不要跑
+// CPU Lanczos 兜底。见 g_last_aborted_id 与 MihonSyEnhancer.enhanceWithGpu。
+extern "C" JNIEXPORT jboolean JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeWasAborted(JNIEnv *, jobject,
+                                                               jint id) {
+  return g_last_aborted_id.load() == id ? JNI_TRUE : JNI_FALSE;
 }
