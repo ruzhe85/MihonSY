@@ -168,8 +168,11 @@ class PagerConfig(
             )
 
         // SY -->
+        // MihonSY (2026-10-03): usePageTransitions 只在 setCurrentItem 调用时现读（PagerViewer
+        // 的 moveToNext/moveToPrevious），不改任何位图输出，不再接 imagePropertyChangedListener
+        // —— 否则拨一下开关会白白重建 adapter、清 preparedCache，可见页重新解码 + 重跑 AI 增强。
         readerPreferences.pageTransitionsPager
-            .register({ usePageTransitions = it }, { imagePropertyChangedListener?.invoke() })
+            .register({ usePageTransitions = it })
         readerPreferences.readerTheme
             .register(
                 {
@@ -255,7 +258,7 @@ class PagerConfig(
         append('|').append(readerPreferences.dualPageInvertPaged.get())
         append('|').append(readerPreferences.dualPageRotateToFit.get())
         append('|').append(readerPreferences.dualPageRotateToFitInvert.get())
-        append('|').append(readerPreferences.pageTransitionsPager.get())
+        // MihonSY: pageTransitionsPager 不改位图输出（见上方 register 处注释），不进指纹。
         append('|').append(readerPreferences.centerMarginType.get())
         append('|').append(readerPreferences.invertDoublePages.get())
     }
