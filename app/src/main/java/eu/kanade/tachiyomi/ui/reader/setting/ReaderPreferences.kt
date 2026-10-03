@@ -284,7 +284,8 @@ class ReaderPreferences(
      * Komiho (2026-09-26): 放开 AI 尺寸门控。默认关——r≤1（图已 ≥ 屏幕）的源图跳过 AI；
      * 开启后这类图也跑 AI（扫描质量差、需要 AI 补细节的场景），同时解码/预缩目标从视图
      * 尺寸放宽到 2048 上限，AI 才有真实细节可补。OOM 防护不依赖此开关：enhance() 里的
-     * MP 输出门（输入×2 超 80MP 照样 skip）始终生效。变更进 [enhancementCacheKey] 指纹。
+     * MP 输出门（MihonSyEnhancer.MAX_ENHANCE_OUTPUT_PIXELS = 36MP；AI 固定 2x，即输入面积
+     * >9MP 照样 skip）始终生效。变更进 [enhancementCacheKey] 指纹。
      */
     val aiBypassFitGate: Preference<Boolean> = preferenceStore.getBoolean("pref_ai_bypass_fit_gate", false)
 

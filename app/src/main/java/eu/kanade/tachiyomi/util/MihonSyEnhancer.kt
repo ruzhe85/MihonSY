@@ -35,11 +35,16 @@ object MihonSyEnhancer {
     // private const val ANIME4K_ASSET_DIR = "anime4k"
 
     /**
-     * 增强结果允许的最大像素总量（ARGB_8888 下 32MP ≈ 128MB）；超出即等比缩小。
-     * 推导见 [capOutputSize]：取值刻意高于实测条漫的 2x 输出（31.8MP），
+     * 增强结果允许的最大像素总量（ARGB_8888 下 36MP ≈ 144MB）；超出即等比缩小。
+     * 推导见 [capOutputSize]：取值刻意高出实测条漫的 2x 输出（31.8MP），
      * 好让「正常的条漫」不受任何影响，只拦 CPU 倍率档那种极端尺寸。
+     *
+     * Komiho (2026-10-02): 32MP → 36MP。32MP 在 800 宽下等价于「高度 >10000 就整页 skip」，
+     * 会让 800×10070 / 800×10082 这类只高出一点点的条漫页（2x = 32.2~32.3MP）白拿不到增强；
+     * 而它们比本就已经在跑的 800×9856（31.5MP）大不了多少。36MP 单张 +16MB（144MB），
+     * 位图像素走 native 堆、不进 Java 堆上限，8GB 机型余量充足（8MP 输入门 = 800 宽下高 ≤11250）。
      */
-    private const val MAX_ENHANCE_OUTPUT_PIXELS = 32_000_000L
+    private const val MAX_ENHANCE_OUTPUT_PIXELS = 36_000_000L
 
     /**
      * 倍率。AI 档（mode 5）由模型固定为 2x；CPU 档（2/3）用 [ReaderPreferences.lanczosScale]。
@@ -451,10 +456,11 @@ object MihonSyEnhancer {
      * （1440）以下还要再放大，而且是在 AI **之后**做 0.825 的非整数重采样，细节明显变糊
      * （用户实测反馈）。像素总量才对应真正的内存开销（ARGB_8888 = 4B/px）。
      *
-     * [MAX_ENHANCE_OUTPUT_PIXELS] 取 32MP ≈ 128MB：
+     * [MAX_ENHANCE_OUTPUT_PIXELS] 取 36MP ≈ 144MB（2026-10-02 由 32MP 上调，理由见常量注释）：
      *  - 实测条漫 2x = 31.8MP → **不触发**，画质不受影响；
      *  - 普通页（输入 ≤2048 → 2x ≤4096 ≈ 16.8MP）→ 永不触发；
-     *  - CPU 倍率档在同类条漫上会得到 2400×29781 ≈ 71MP / **286MB**，会被缩到 32MP/128MB
+     *  - 800×10082 这类条漫页 2x = 32.3MP：32MP 时代被整页 skip，36MP 后正常增强；
+     *  - CPU 倍率档在同类条漫上会得到 2400×29781 ≈ 71MP / **286MB**，会被缩到 36MP/144MB
      *    —— 那才是真正需要拦住的极端情况。
      */
     private fun capOutputSize(bitmap: Bitmap?): Bitmap? {
