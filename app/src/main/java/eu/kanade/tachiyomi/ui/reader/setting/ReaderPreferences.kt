@@ -305,10 +305,28 @@ class ReaderPreferences(
      */
     val aiAreaDownscaleStrength: Preference<Int> = preferenceStore.getInt("pref_ai_area_downscale_strength", 100)
 
-    /**
-     * Komiho: 上一次的非关闭增强档位——「开启」chip 用它恢复（不改变像素，不进指纹）。
-     */
-    val enhancementLastMode: Preference<Int> = preferenceStore.getInt("pref_enhancement_last_mode", 2)
+    // Komiho (2026-10-03): 每个增强方式各自的「最后一次选择」。
+    // 一级列表在**非当前方式**的行上也显示它们（此前只显示占位符「—」），这样「切回去会得到
+    // 什么」一眼可见。三者与 enhancementMode / aiModelId 相互独立 —— 切换方式不会抹掉别的
+    // 方式的记忆。
+    //
+    // 旧的 enhancementLastMode（单一档位值）已删除：它被 setEnhancementMode 每次覆盖，本来就
+    // 当不了「按方式记忆」；它唯一的作用（恢复 CPU 档位）由下面的 enhancementLastCpuMode 接管。
+
+    /** CPU 上次选的算法：2 = Lanczos3，3 = Catmull-Rom。 */
+    val enhancementLastCpuMode: Preference<Int> = preferenceStore.getInt("pref_enhancement_last_cpu_mode", 2)
+
+    /** GPU（Vulkan）上次选的模型 id。 */
+    val enhancementLastGpuModelId: Preference<String> = preferenceStore.getString(
+        "pref_enhancement_last_gpu_model_id",
+        AiUpscaleModel.Default.id,
+    )
+
+    /** NPU（HTP）上次选的模型 id；空 = 从未选过，界面回落到本机可用列表的第一个。 */
+    val enhancementLastNpuModelId: Preference<String> = preferenceStore.getString(
+        "pref_enhancement_last_npu_model_id",
+        "",
+    )
 
     /** Independent toggle: show the bottom-left enhancement status overlay (elapsed seconds / OK). */
     val showEnhancementStatus: Preference<Boolean> = preferenceStore.getBoolean("pref_show_enhancement_status", false)

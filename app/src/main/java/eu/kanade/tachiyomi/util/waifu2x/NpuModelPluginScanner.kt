@@ -85,6 +85,13 @@ object NpuModelPluginScanner {
     private const val KEY_ASSET_DIR = "assetDir"
 
     /**
+     * Komiho (2026-10-01): optional series name for folding related models in the picker.
+     * Absent in every package built before this field existed — [PluginUpscaleModel.group]
+     * then stays null and the picker derives the series from the label instead.
+     */
+    private const val KEY_GROUP = "group"
+
+    /**
      * Scans every installed package whose applicationId starts with
      * [MODEL_PACKAGE_PREFIXES], verifies its signature against the host's and parses its
      * manifest. Malformed entries are skipped individually (with a WARN), never fatal —
@@ -296,6 +303,7 @@ object NpuModelPluginScanner {
         val padding = entry.optInt(KEY_PADDING, -1)
         val scale = entry.optInt(KEY_SCALE, 2)
         val assetDir = entry.optString(KEY_ASSET_DIR).trim().ifEmpty { DEFAULT_ASSET_DIR }
+        val group = entry.optString(KEY_GROUP).trim().ifEmpty { null }
         val arches = parseArches(entry)
 
         if (id.isEmpty() || stem.isEmpty() || label.isEmpty() || padding <= 0 || arches.isEmpty()) {
@@ -315,6 +323,7 @@ object NpuModelPluginScanner {
             sourcePackage = pkg,
             scale = if (scale > 0) scale else 2,
             assetDir = assetDir,
+            group = group,
         )
     }
 

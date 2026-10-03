@@ -1097,6 +1097,12 @@
     <string name="enhancement_group_cpu">CPU</string>
     <string name="enhancement_group_gpu">GPU</string>
     <string name="enhancement_group_npu">NPU</string>
+    <!-- Komiho (2026-10-02): 图像增强页改为「一级选方式 + 二级详情」，以下为一级/详情页文案。 -->
+    <string name="enhancement_section_methods">Enhancement method</string>
+    <string name="enhancement_detail_model">Model</string>
+    <string name="enhancement_detail_advanced">AI options</string>
+    <!-- Komiho: NPU 详情里「没有系列、或系列只有它一个」的模型统一归到这个组。 -->
+    <string name="enhancement_series_standalone">Standalone</string>
     <string name="enhancement_scale">Scale</string>
     <string name="ai_bypass_fit">Force enhancement on high-resolution images</string>
     <string name="ai_area_downscale">Reduce moiré</string>

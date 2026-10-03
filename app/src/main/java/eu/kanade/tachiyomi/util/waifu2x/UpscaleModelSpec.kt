@@ -56,6 +56,18 @@ interface UpscaleModelSpec {
     val labelText: String?
 
     /**
+     * Komiho (2026-10-01): optional **series** name used to fold related models together in
+     * the picker (`W2xEX`, `Real-CUGAN`, `Waifu2x`, …). Comes from the plugin manifest's
+     * optional `group` field.
+     *
+     * Deliberately additive: a package built before the field existed yields `null`, and the
+     * picker then falls back to splitting [labelText] on its first space — so carrying this
+     * needed **no protocol bump** (absent/unknown fields are ignored, see the file header).
+     * A series with a single member is never folded; it stays a plain chip.
+     */
+    val group: String? get() = null
+
+    /**
      * Package name of the plugin APK this model was loaded from; `null` for built-in
      * models. [Waifu2x] uses it to open the owning APK's [android.content.res.AssetManager]
      * instead of the host's.
@@ -81,6 +93,7 @@ data class PluginUpscaleModel(
     override val sourcePackage: String,
     override val scale: Int = 2,
     override val assetDir: String = "qnn-contexts",
+    override val group: String? = null,
 ) : UpscaleModelSpec {
     override val backend: UpscaleModelSpec.Backend get() = UpscaleModelSpec.Backend.QNN_HTP
     override val labelRes: StringResource? get() = null

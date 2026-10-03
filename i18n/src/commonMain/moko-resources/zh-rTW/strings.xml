@@ -953,6 +953,12 @@
     <string name="enhancement_group_cpu">CPU</string>
     <string name="enhancement_group_gpu">GPU</string>
     <string name="enhancement_group_npu">NPU</string>
+    <!-- Komiho (2026-10-02): 圖像增強頁改為「一級選方式 + 二級詳情」，以下為一級/詳情頁文案。 -->
+    <string name="enhancement_section_methods">增強方式</string>
+    <string name="enhancement_detail_model">模型</string>
+    <string name="enhancement_detail_advanced">AI 選項</string>
+    <!-- Komiho: NPU 詳情裡「沒有系列、或系列只有它一個」的模型統一歸到這個組。 -->
+    <string name="enhancement_series_standalone">Standalone</string>
     <string name="enhancement_scale">倍率</string>
     <string name="ai_bypass_fit">高解析度圖強制增強</string>
     <string name="ai_area_downscale">降低摩爾紋</string>
