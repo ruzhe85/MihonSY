@@ -775,6 +775,8 @@
     <string name="onboarding_action_skip">跳过</string>
     <string name="onboarding_action_next">下一步</string>
     <string name="action_bar_up_description">返回</string>
+    <!-- Komiho (2026-10-02): 图像增强二级详情页返回按钮。 -->
+    <string name="action_back">返回</string>
     <string name="onboarding_description">首先调整一些设置。稍后也可以在设置中修改。</string>
     <string name="onboarding_permission_ignore_battery_opts_description">避免需要长时间运行的书架更新、下载、备份恢复任务受到中断。</string>
     <string name="onboarding_permission_action_grant">允许</string>
@@ -981,6 +983,7 @@
     <string name="enhancement_group_title">增强</string>
     <string name="enhancement_denoise">降噪</string>
     <string name="loader_epub_no_images_error">该 EPUB 没有图片页，请改用 Komga 服务器阅读。</string>
+    <string name="loader_epub_drm_error">该 EPUB 受 DRM 保护，无法在此阅读。请用购买它的应用打开，或改用无 DRM 的副本。</string>
     <string name="password_incorrect">密码错误</string>
     <string name="password_label">密码</string>
     <string name="pref_ai_tile_size">分块大小</string>

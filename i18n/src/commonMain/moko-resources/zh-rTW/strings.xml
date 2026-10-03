@@ -761,6 +761,8 @@
     <string name="selected">已勾選</string>
     <string name="not_selected">尚未勾選</string>
     <string name="action_bar_up_description">向上瀏覽</string>
+    <!-- Komiho (2026-10-02): 圖像增強二級詳情頁返回按鈕。 -->
+    <string name="action_back">返回</string>
     <string name="pref_storage_location">儲存位置</string>
     <string name="pref_storage_location_info">供自動備份、章節下載和本機來源使用</string>
     <string name="onboarding_storage_action_select">選擇資料夾</string>
@@ -968,6 +970,7 @@
     <string name="enhancement_group_title">增強</string>
     <string name="enhancement_denoise">降噪</string>
     <string name="loader_epub_no_images_error">該 EPUB 沒有圖片頁，請改用 Komga 伺服器閱讀。</string>
+    <string name="loader_epub_drm_error">該 EPUB 受 DRM 保護，無法在此閱讀。請用購買它的應用程式開啟，或改用無 DRM 的副本。</string>
     <string name="password_incorrect">密碼錯誤</string>
     <string name="password_label">密碼</string>
     <string name="pref_ai_tile_size">分塊大小</string>

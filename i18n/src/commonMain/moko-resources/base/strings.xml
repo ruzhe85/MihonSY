@@ -9,6 +9,8 @@
     <string name="not_selected">Not selected</string>
     <string name="action_menu_overflow_description">More options</string>
     <string name="action_bar_up_description">Navigate up</string>
+    <!-- Komiho (2026-10-02): 图像增强二级详情页返回按钮。 -->
+    <string name="action_back">Back</string>
 
     <!-- Models -->
     <string name="name">Name</string>
@@ -1112,6 +1114,7 @@
     <string name="enhancement_group_title">Enhancement</string>
     <string name="enhancement_denoise">Denoise</string>
     <string name="loader_epub_no_images_error">This EPUB has no image pages. Please open it via your Komga server.</string>
+    <string name="loader_epub_drm_error">This EPUB is DRM-protected, so it can\'t be read here. Please open it in the app it was purchased from, or use a DRM-free copy.</string>
     <string name="password_incorrect">Incorrect password</string>
     <string name="password_label">Password</string>
     <string name="pref_ai_tile_size">Tile size</string>
