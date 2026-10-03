@@ -166,12 +166,16 @@ class WebtoonConfig(
         readerPreferences.cropBordersContinuousVertical
             .register({ continuousCropBorders = it }, { imagePropertyChangedListener?.invoke() })
 
+        // MihonSY (2026-10-03): 两个动画开关都只在滚动动作时现读（WebtoonViewer 的
+        // scrollUp/scrollDown/scrollDownBy），不改任何位图输出，不再接
+        // imagePropertyChangedListener —— 否则拨一下开关会白白重建 adapter，可见页
+        // 重新解码 + 重跑 AI 增强。
         readerPreferences.pageTransitionsWebtoon
-            .register({ usePageTransitions = it }, { imagePropertyChangedListener?.invoke() })
+            .register({ usePageTransitions = it })
 
-        // Komiho: v2 动画开关（切到 v2 不需要重排页面，但仍走同一回调保持一致）
+        // Komiho: v2 动画开关（切到 v2 不需要重排页面）
         readerPreferences.pageTransitionsWebtoonV2
-            .register({ usePageTransitionsV2 = it }, { imagePropertyChangedListener?.invoke() })
+            .register({ usePageTransitionsV2 = it })
 
         readerPreferences.pageTransitionsV2Speed
             .register(
@@ -235,8 +239,7 @@ class WebtoonConfig(
         append('|').append(readerPreferences.dualPageRotateToFitWebtoon.get())
         append('|').append(readerPreferences.dualPageRotateToFitInvertWebtoon.get())
         append('|').append(readerPreferences.cropBordersContinuousVertical.get())
-        append('|').append(readerPreferences.pageTransitionsWebtoon.get())
-        append('|').append(readerPreferences.pageTransitionsWebtoonV2.get())
+        // MihonSY: 两个翻页/滚动动画开关不改位图输出（见上方 register 处注释），不进指纹。
         append('|').append(readerPreferences.webtoonOriginalSize.get())
     }
 
