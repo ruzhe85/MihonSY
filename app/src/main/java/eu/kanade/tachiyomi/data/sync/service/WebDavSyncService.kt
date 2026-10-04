@@ -6,7 +6,6 @@ import eu.kanade.tachiyomi.data.backup.models.Backup
 import eu.kanade.tachiyomi.data.sync.SyncNotifier
 import eu.kanade.tachiyomi.network.await
 import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.protobuf.ProtoBuf
 import logcat.LogPriority
@@ -172,8 +171,8 @@ class WebDavSyncService(
 
             return try {
                 protoBuf.decodeFromByteArray(SyncData.serializer(), byteArray)
-            } catch (_: SerializationException) {
-                logcat(LogPriority.ERROR) { "Bad sync data received from WebDAV server" }
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR) { "Bad sync data received from WebDAV server: ${e.message}" }
                 // Return null so the next push overwrites the corrupted remote data
                 null
             }
@@ -183,7 +182,9 @@ class WebDavSyncService(
     private suspend fun pushSyncData(syncData: SyncData) {
         val backup = syncData.backup ?: return
 
-        val byteArray = protoBuf.encodeToByteArray(Backup.serializer(), backup)
+        // Encode the full SyncData (including deviceId) so the next pull can tell
+        // whether the remote was last written by this device
+        val byteArray = protoBuf.encodeToByteArray(SyncData.serializer(), syncData)
         if (byteArray.isEmpty()) {
             throw IllegalStateException(context.stringResource(MR.strings.empty_backup_error))
         }
