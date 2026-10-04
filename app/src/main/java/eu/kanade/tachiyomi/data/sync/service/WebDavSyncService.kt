@@ -152,33 +152,30 @@ class WebDavSyncService(
 
     private suspend fun pullSyncData(): SyncData? {
         val request = requestBuilder(fileUrl()).get().build()
-        val response = client.newCall(request).await()
+        client.newCall(request).await().use { response ->
+            if (response.code == HttpStatus.SC_NOT_FOUND) {
+                logcat(LogPriority.INFO) { "No sync data found on WebDAV server" }
+                return null
+            }
 
-        response.use {
-            when {
-                it.code == HttpStatus.SC_NOT_FOUND -> {
-                    logcat(LogPriority.INFO) { "No sync data found on WebDAV server" }
-                    null
+            if (!response.isSuccessful) {
+                response.body.string()
+                logcat(LogPriority.ERROR) { "Failed to download sync data: HTTP ${response.code}" }
+                throw IOException("Failed to download sync data: HTTP ${response.code}")
+            }
+
+            val byteArray = response.body.byteStream().use { stream ->
+                GZIPInputStream(stream).use { gzipStream ->
+                    gzipStream.readBytes()
                 }
-                it.isSuccessful -> {
-                    val byteArray = it.body.byteStream().use { stream ->
-                        GZIPInputStream(stream).use { gzipStream ->
-                            gzipStream.readBytes()
-                        }
-                    }
-                    try {
-                        protoBuf.decodeFromByteArray(SyncData.serializer(), byteArray)
-                    } catch (_: SerializationException) {
-                        logcat(LogPriority.ERROR) { "Bad sync data received from WebDAV server" }
-                        // Return null so the next push overwrites the corrupted remote data
-                        null
-                    }
-                }
-                else -> {
-                    it.body.string()
-                    logcat(LogPriority.ERROR) { "Failed to download sync data: HTTP ${it.code}" }
-                    throw IOException("Failed to download sync data: HTTP ${it.code}")
-                }
+            }
+
+            return try {
+                protoBuf.decodeFromByteArray(SyncData.serializer(), byteArray)
+            } catch (_: SerializationException) {
+                logcat(LogPriority.ERROR) { "Bad sync data received from WebDAV server" }
+                // Return null so the next push overwrites the corrupted remote data
+                null
             }
         }
     }
@@ -262,7 +259,7 @@ class WebDavSyncService(
                     }
                 }
             } catch (e: Exception) {
-                logcat(LogPriority.ERROR, throwable = e) { "Error occurred while deleting WebDAV sync data" }
+                logcat(LogPriority.ERROR) { "Error occurred while deleting WebDAV sync data: ${e.message}" }
                 DeleteSyncDataStatus.ERROR
             }
         }
