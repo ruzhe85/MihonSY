@@ -859,9 +859,51 @@ object SettingsDataScreen : SearchableSettings {
                         }
                     },
                 ),
+
+                // SY -->
+                getResetSyncStatePref(),
+                // SY <--
             ),
         )
     }
+
+    // SY -->
+    @Composable
+    private fun getResetSyncStatePref(): Preference.PreferenceItem.TextPreference {
+        val context = LocalContext.current
+        val syncPreferences = remember { Injekt.get<SyncPreferences>() }
+        var showDialog by remember { mutableStateOf(false) }
+
+        if (showDialog) {
+            AlertDialog(
+                onDismissRequest = { showDialog = false },
+                title = { Text(text = stringResource(SYMR.strings.pref_reset_sync_state)) },
+                text = { Text(text = stringResource(SYMR.strings.pref_reset_sync_state_summ)) },
+                dismissButton = {
+                    TextButton(onClick = { showDialog = false }) {
+                        Text(text = stringResource(MR.strings.action_cancel))
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showDialog = false
+                        syncPreferences.lastSyncTimestamp.set(0)
+                        syncPreferences.lastSyncEtag.set("")
+                        context.toast(SYMR.strings.sync_state_reset)
+                    }) {
+                        Text(text = stringResource(MR.strings.action_ok))
+                    }
+                },
+            )
+        }
+
+        return Preference.PreferenceItem.TextPreference(
+            title = stringResource(SYMR.strings.pref_reset_sync_state),
+            subtitle = stringResource(SYMR.strings.pref_reset_sync_state_summ),
+            onClick = { showDialog = true },
+        )
+    }
+    // SY <--
 
     @Composable
     private fun getSyncOptionsPref(): Preference.PreferenceItem.TextPreference {

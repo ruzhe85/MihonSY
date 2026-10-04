@@ -38,22 +38,26 @@ class BookmarkRestorer(
             bookmark to chapter.id
         }
 
+        // Deduplicate outside the transaction so its body stays await-free
+        // (same pattern as SavedSearchRestorer)
+        val toInsert = resolved.filter { (bookmark, chapterId) ->
+            val count = database.bookmarksQueries.countByChapterAndPage(
+                chapterId = chapterId,
+                page = bookmark.page.toLong(),
+            ).awaitAsOneOrNull() ?: 0L
+            count == 0L
+        }
+
         database.transaction {
-            resolved.forEach { (bookmark, chapterId) ->
-                val count = database.bookmarksQueries.countByChapterAndPage(
+            toInsert.forEach { (bookmark, chapterId) ->
+                database.bookmarksQueries.insert(
                     chapterId = chapterId,
                     page = bookmark.page.toLong(),
-                ).awaitAsOneOrNull() ?: 0L
-                if (count == 0L) {
-                    database.bookmarksQueries.insert(
-                        chapterId = chapterId,
-                        page = bookmark.page.toLong(),
-                        createdAt = bookmark.createdAt,
-                    )
-                }
+                    createdAt = bookmark.createdAt,
+                )
             }
         }
 
-        logcat(LogPriority.DEBUG) { "Restored ${resolved.size} bookmarks" }
+        logcat(LogPriority.DEBUG) { "Restored ${toInsert.size} bookmarks" }
     }
 }

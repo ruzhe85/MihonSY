@@ -70,7 +70,21 @@ class BackupRestorer(
     suspend fun restore(uri: Uri, options: RestoreOptions) {
         val startTime = System.currentTimeMillis()
 
-        restoreFromFile(uri, options)
+        // SY -->
+        try {
+            restoreFromFile(uri, options)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Record fatal restore failures into the error log instead of failing with only
+            // a transient notification that hides the cause
+            logcat(LogPriority.ERROR, e)
+            errors.add(
+                Date() to "Fatal: " +
+                    e.stackTraceToString().lineSequence().take(15).joinToString("\n"),
+            )
+        }
+        // SY <--
 
         // Invalidate download cache to ensure UI reflects any restored downloads
         if (options.libraryEntries) {

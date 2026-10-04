@@ -227,6 +227,9 @@
     <string name="pref_sync_now_group_title">Sync Actions</string>
     <string name="pref_sync_now">Sync now</string>
     <string name="pref_sync_now_subtitle">Initiate immediate synchronization of your data</string>
+    <string name="pref_reset_sync_state">Reset sync state</string>
+    <string name="pref_reset_sync_state_summ">Clear the local sync baseline (last sync time) so the next sync fully adopts the remote library. Remote data is not deleted.</string>
+    <string name="sync_state_reset">Sync state has been reset</string>
     <string name="pref_sync_service">Service</string>
     <string name="pref_sync_service_category">Sync</string>
     <string name="pref_sync_success_notification">Show sync completion notification</string>
