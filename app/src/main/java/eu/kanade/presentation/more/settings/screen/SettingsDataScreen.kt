@@ -533,6 +533,14 @@ object SettingsDataScreen : SearchableSettings {
                         ),
                         onValueChanged = { true },
                     ),
+
+                    // SY -->
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = syncPreferences.syncShowSuccessNotification,
+                        title = stringResource(SYMR.strings.pref_sync_success_notification),
+                        subtitle = stringResource(SYMR.strings.pref_sync_success_notification_summ),
+                    ),
+                    // SY <--
                 ),
             ),
         ) + getSyncServicePreferences(syncPreferences, syncService)

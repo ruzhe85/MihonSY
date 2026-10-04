@@ -16,6 +16,10 @@ class SyncNotifier(private val context: Context) {
 
     private val preferences: SecurityPreferences by injectLazy()
 
+    // SY -->
+    private val syncPreferences: eu.kanade.domain.sync.SyncPreferences by injectLazy()
+    // SY <--
+
     private val progressNotificationBuilder = context.notificationBuilder(
         Notifications.CHANNEL_BACKUP_RESTORE_PROGRESS,
     ) {
@@ -75,6 +79,10 @@ class SyncNotifier(private val context: Context) {
 
     fun showSyncSuccess(message: String?) {
         context.cancelNotification(Notifications.ID_RESTORE_PROGRESS)
+
+        // SY -->
+        if (!syncPreferences.syncShowSuccessNotification.get()) return
+        // SY <--
 
         with(completeNotificationBuilder) {
             setContentTitle(context.getString(R.string.sync_complete))

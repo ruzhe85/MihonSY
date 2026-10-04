@@ -33,6 +33,8 @@ class SyncPreferences(
     val webdavUsername: Preference<String> = preferenceStore.getString("sync_webdav_username", "")
     val webdavPassword: Preference<String> = preferenceStore.getString("sync_webdav_password", "")
     val webdavTrustAllCerts: Preference<Boolean> = preferenceStore.getBoolean("sync_webdav_trust_all", false)
+    val syncShowSuccessNotification: Preference<Boolean> =
+        preferenceStore.getBoolean("sync_show_success_notification", true)
     // SY <--
 
     fun uniqueDeviceID(): String {

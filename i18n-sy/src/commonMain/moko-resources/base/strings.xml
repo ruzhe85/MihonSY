@@ -229,6 +229,8 @@
     <string name="pref_sync_now_subtitle">Initiate immediate synchronization of your data</string>
     <string name="pref_sync_service">Service</string>
     <string name="pref_sync_service_category">Sync</string>
+    <string name="pref_sync_success_notification">Show sync completion notification</string>
+    <string name="pref_sync_success_notification_summ">Errors are still shown as notifications</string>
     <string name="pref_sync_automatic_category">Automatic Synchronization</string>
     <string name="pref_sync_interval">Synchronization frequency</string>
     <string name="pref_choose_what_to_sync">Choose what to sync</string>
