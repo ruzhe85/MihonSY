@@ -41,6 +41,9 @@ import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.util.Screen
 import eu.kanade.presentation.util.isTabletUi
 import eu.kanade.tachiyomi.ui.browse.BrowseTab
+// SY -->
+import eu.kanade.tachiyomi.ui.bookmarks.BookmarksTab
+// SY <--
 import eu.kanade.tachiyomi.ui.download.DownloadQueueScreen
 import eu.kanade.tachiyomi.ui.history.HistoryTab
 import eu.kanade.tachiyomi.ui.library.LibraryTab
@@ -79,6 +82,9 @@ object HomeScreen : Screen() {
         LibraryTab,
         UpdatesTab,
         HistoryTab,
+        // SY -->
+        BookmarksTab,
+        // SY <--
         BrowseTab,
         MoreTab,
     )
@@ -176,6 +182,9 @@ object HomeScreen : Screen() {
                             is Tab.Library -> LibraryTab
                             Tab.Updates -> UpdatesTab
                             Tab.History -> HistoryTab
+                            // SY -->
+                            Tab.Bookmarks -> BookmarksTab
+                            // SY <--
                             is Tab.Browse -> {
                                 if (it.toExtensions) {
                                     BrowseTab.showExtension()
@@ -331,6 +340,9 @@ object HomeScreen : Screen() {
         data class Library(val mangaIdToOpen: Long? = null) : Tab
         data object Updates : Tab
         data object History : Tab
+        // SY -->
+        data object Bookmarks : Tab
+        // SY <--
         data class Browse(val toExtensions: Boolean = false) : Tab
         data class More(val toDownloads: Boolean) : Tab
     }

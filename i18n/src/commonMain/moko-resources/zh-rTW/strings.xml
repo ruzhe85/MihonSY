@@ -8,6 +8,8 @@
     <string name="label_download_queue">下載佇列</string>
     <string name="label_library">書櫃</string>
     <string name="label_recent_manga">記錄</string>
+    <!-- MihonSY: 書籤 tab 標題 -->
+    <string name="label_bookmarks">書籤</string>
     <string name="label_recent_updates">更新</string>
     <string name="label_backup">備份與還原</string>
     <string name="label_migration">遷移</string>
@@ -163,6 +165,9 @@
     <string name="reader_bookmark_add_current">在當前頁加書籤（第 %1$d 頁）</string>
     <string name="reader_bookmark_remove">刪除書籤</string>
     <string name="reader_bookmark_page">第 %1$d 頁</string>
+    <!-- MihonSY: 書籤 tab -->
+    <string name="bookmarks_empty">還沒有書籤。可以在閱讀器頂欄加入。</string>
+    <string name="bookmarks_delete_confirm">要刪除這個書籤嗎？</string>
     <string name="reader_enhancement_skipped">SKIP</string>
     <string name="pref_reader_navigation">導覽</string>
     <string name="pref_read_with_volume_keys">音量按鈕</string>

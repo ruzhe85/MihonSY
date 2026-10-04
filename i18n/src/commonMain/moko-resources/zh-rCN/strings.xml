@@ -9,6 +9,8 @@
     <string name="label_download_queue">下载队列</string>
     <string name="label_library">书架</string>
     <string name="label_recent_manga">历史</string>
+    <!-- MihonSY: 书签 tab 标题 -->
+    <string name="label_bookmarks">书签</string>
     <string name="label_recent_updates">更新</string>
     <string name="label_backup">备份与还原</string>
     <string name="label_extensions">插件</string>
@@ -112,6 +114,9 @@
     <string name="reader_bookmark_add_current">在当前页加书签（第 %1$d 页）</string>
     <string name="reader_bookmark_remove">删除书签</string>
     <string name="reader_bookmark_page">第 %1$d 页</string>
+    <!-- MihonSY: 书签 tab -->
+    <string name="bookmarks_empty">还没有书签。可以在阅读器顶栏添加。</string>
+    <string name="bookmarks_delete_confirm">要删除这个书签吗？</string>
     <string name="reader_enhancement_skipped">SKIP</string>
     <string name="pref_reader_navigation">翻页</string>
     <string name="pref_read_with_volume_keys">音量键翻页</string>

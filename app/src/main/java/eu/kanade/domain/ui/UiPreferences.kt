@@ -67,6 +67,10 @@ class UiPreferences(
 
     val showNavHistory: Preference<Boolean> = preferenceStore.getBoolean("pref_show_history_button", true)
 
+    // SY --> Komiho: 书签 tab 显示开关
+    val showNavBookmarks: Preference<Boolean> = preferenceStore.getBoolean("pref_show_bookmarks_button", true)
+    // SY <--
+
     // SY <--
 
     companion object {

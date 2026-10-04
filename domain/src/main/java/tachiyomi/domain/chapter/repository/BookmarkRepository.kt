@@ -4,6 +4,9 @@ import tachiyomi.domain.chapter.model.BookmarkItem
 
 // SY --> Komiho: 按页书签存储（一本书可多条）。与 chapters.bookmark 章节级标记相互独立。
 interface BookmarkRepository {
+    /** 取全部按页书签（联表，含书名/章节/封面，按添加时间倒序），书签 tab 列表用。 */
+    suspend fun getAllBookmarks(): List<BookmarkItem>
+
     /** 取某来源下所有按页书签（联表，含书名/章节/封面）。 */
     suspend fun getBookmarksBySource(sourceId: Long): List<BookmarkItem>
 

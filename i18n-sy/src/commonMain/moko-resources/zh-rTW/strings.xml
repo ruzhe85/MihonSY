@@ -154,6 +154,7 @@
     <string name="pref_category_navbar">導覽列</string>
     <string name="pref_hide_updates_button">在導覽列顯示更新</string>
     <string name="pref_hide_history_button">在導覽列顯示歷史</string>
+    <string name="pref_hide_bookmarks_button">在導覽列顯示書籤</string>
     <string name="pref_show_bottom_bar_labels">總是顯示導覽列標籤</string>
     <!-- Library settings -->
     <string name="pref_sorting_settings">排序設定</string>

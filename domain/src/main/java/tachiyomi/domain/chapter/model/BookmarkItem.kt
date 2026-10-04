@@ -16,6 +16,10 @@ data class BookmarkItem(
     val mangaTitle: String,
     val mangaUrl: String,
     val thumbnailUrl: String?,
+    // SY --> Komiho: 书签 tab 列表用（封面加载、跳转阅读器），阅读器内列表可不传。
+    val sourceId: Long = -1L,
+    val mangaFavorite: Boolean = false,
+    // SY <--
     val lastRead: Date? = null,
 )
 // SY <--

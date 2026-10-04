@@ -11,9 +11,9 @@ class BookmarksRepositoryImpl(
     private val database: Database,
 ) : BookmarkRepository {
 
-    override suspend fun getBookmarksBySource(sourceId: Long): List<BookmarkItem> {
+    override suspend fun getAllBookmarks(): List<BookmarkItem> {
         return database.bookmarksQueries
-            .bookmarksBySource(sourceId) { id, chapterId, page, createdAt, mangaId, chapterName, chapterNumber, chapterUrl, mangaTitle, mangaUrl, thumbnailUrl, lastRead ->
+            .bookmarksAll { id, chapterId, page, createdAt, mangaId, chapterName, chapterNumber, chapterUrl, mangaTitle, mangaUrl, thumbnailUrl, sourceId, mangaFavorite, lastRead ->
                 BookmarkItem(
                     id = id,
                     chapterId = chapterId,
@@ -26,6 +26,31 @@ class BookmarksRepositoryImpl(
                     mangaTitle = mangaTitle,
                     mangaUrl = mangaUrl,
                     thumbnailUrl = thumbnailUrl,
+                    sourceId = sourceId,
+                    mangaFavorite = mangaFavorite,
+                    lastRead = lastRead,
+                )
+            }
+            .awaitAsList()
+    }
+
+    override suspend fun getBookmarksBySource(sourceId: Long): List<BookmarkItem> {
+        return database.bookmarksQueries
+            .bookmarksBySource(sourceId) { id, chapterId, page, createdAt, mangaId, chapterName, chapterNumber, chapterUrl, mangaTitle, mangaUrl, thumbnailUrl, source, favorite, lastRead ->
+                BookmarkItem(
+                    id = id,
+                    chapterId = chapterId,
+                    mangaId = mangaId,
+                    chapterName = chapterName,
+                    chapterNumber = chapterNumber,
+                    chapterUrl = chapterUrl,
+                    page = page.toInt(),
+                    createdAt = createdAt,
+                    mangaTitle = mangaTitle,
+                    mangaUrl = mangaUrl,
+                    thumbnailUrl = thumbnailUrl,
+                    sourceId = source,
+                    mangaFavorite = favorite,
                     lastRead = lastRead,
                 )
             }

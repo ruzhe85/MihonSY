@@ -30,8 +30,31 @@ SELECT COUNT(*)
 FROM bookmarks
 WHERE chapter_id = :chapterId AND page = :page;
 
--- SY --> Komiho: 书签 tab（按页书签，一本书可有多条）。联 chapters/mangas 取书名/章节/封面，
+-- SY --> Komiho: 全部按页书签（书签 tab 列表用），按添加时间倒序。联 chapters/mangas 取书名/章节/封面/来源，
 -- LEFT JOIN history 取章节最后阅读时间（书签行展示用）。
+bookmarksAll:
+SELECT
+    B._id AS id,
+    B.chapter_id AS chapterId,
+    B.page AS page,
+    B.created_at AS createdAt,
+    C.manga_id AS mangaId,
+    C.name AS chapterName,
+    C.chapter_number AS chapterNumber,
+    C.url AS chapterUrl,
+    M.title AS mangaTitle,
+    M.url AS mangaUrl,
+    M.thumbnail_url AS thumbnailUrl,
+    M.source AS sourceId,
+    M.favorite AS mangaFavorite,
+    H.last_read AS lastRead
+FROM bookmarks B
+JOIN chapters C ON B.chapter_id = C._id
+JOIN mangas M ON C.manga_id = M._id
+LEFT JOIN history H ON B.chapter_id = H.chapter_id
+ORDER BY B.created_at DESC, B._id DESC;
+-- SY <--
+-- SY --> Komiho: 某来源下的按页书签（一本书可有多条）。
 bookmarksBySource:
 SELECT
     B._id AS id,
@@ -45,6 +68,8 @@ SELECT
     M.title AS mangaTitle,
     M.url AS mangaUrl,
     M.thumbnail_url AS thumbnailUrl,
+    M.source AS sourceId,
+    M.favorite AS mangaFavorite,
     H.last_read AS lastRead
 FROM bookmarks B
 JOIN chapters C ON B.chapter_id = C._id

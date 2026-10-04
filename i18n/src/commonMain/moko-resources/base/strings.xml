@@ -30,6 +30,8 @@
     <string name="label_recent_updates">Updates</string>
     <string name="label_upcoming">Upcoming</string>
     <string name="label_recent_manga">History</string>
+    <!-- MihonSY: 书签 tab 标题 -->
+    <string name="label_bookmarks">Bookmarks</string>
     <string name="label_sources">Sources</string>
     <string name="label_backup">Backup and restore</string>
     <string name="label_data_storage">Data and storage</string>
@@ -431,6 +433,9 @@
     <string name="reader_bookmark_add_current">Add bookmark on current page (page %1$d)</string>
     <string name="reader_bookmark_remove">Remove bookmark</string>
     <string name="reader_bookmark_page">Page %1$d</string>
+    <!-- MihonSY: 书签 tab -->
+    <string name="bookmarks_empty">No bookmarks yet. Add one from the reader toolbar.</string>
+    <string name="bookmarks_delete_confirm">Remove this bookmark?</string>
     <string name="reader_enhancement_skipped">SKIP</string>
     <string name="pref_reader_navigation">Navigation</string>
     <string name="pref_read_with_volume_keys">Volume keys</string>
