@@ -30,7 +30,7 @@ object SyncLedger {
         return try {
             file.readLines().filter { it.isNotBlank() }.toSet()
         } catch (e: Exception) {
-            logcat(LogPriority.ERROR, e) { "Failed to load sync ledger" }
+            logcat(LogPriority.ERROR) { "Failed to load sync ledger: ${e.message}" }
             emptySet()
         }
     }
@@ -39,7 +39,7 @@ object SyncLedger {
         try {
             File(context.filesDir, FILE_NAME).writeText(keys.sorted().joinToString("\n"))
         } catch (e: Exception) {
-            logcat(LogPriority.ERROR, e) { "Failed to write sync ledger" }
+            logcat(LogPriority.ERROR) { "Failed to write sync ledger: ${e.message}" }
         }
     }
 }
