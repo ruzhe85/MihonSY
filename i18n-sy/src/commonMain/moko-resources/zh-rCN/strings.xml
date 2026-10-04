@@ -623,7 +623,6 @@
     <string name="pref_sync_success_notification_summ">同步出错时仍会显示错误通知</string>
     <string name="pref_reset_sync_state">重置同步状态</string>
     <string name="pref_reset_sync_state_summ">清除本地同步基线（上次同步时间），下次同步将完整拉取远端书架；不会删除远端数据。</string>
-    <string name="sync_state_reset">同步状态已重置</string>
     <string name="webdav">WebDAV</string>
     <string name="pref_webdav_url">WebDAV 地址</string>
     <string name="pref_webdav_url_summ">服务器地址，可带路径（如 https://dav.example.com/dav/mihonsy），支持 HTTP</string>
