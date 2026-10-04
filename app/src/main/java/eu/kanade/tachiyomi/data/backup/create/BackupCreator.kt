@@ -5,6 +5,9 @@ import android.net.Uri
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.backup.BackupFileValidator
+// SY -->
+import eu.kanade.tachiyomi.data.backup.create.creators.BookmarkBackupCreator
+// SY <--
 import eu.kanade.tachiyomi.data.backup.create.creators.CategoriesBackupCreator
 import eu.kanade.tachiyomi.data.backup.create.creators.ExtensionStoresBackupCreator
 import eu.kanade.tachiyomi.data.backup.create.creators.MangaBackupCreator
@@ -12,6 +15,7 @@ import eu.kanade.tachiyomi.data.backup.create.creators.PreferenceBackupCreator
 import eu.kanade.tachiyomi.data.backup.create.creators.SavedSearchBackupCreator
 import eu.kanade.tachiyomi.data.backup.create.creators.SourcesBackupCreator
 import eu.kanade.tachiyomi.data.backup.models.Backup
+import eu.kanade.tachiyomi.data.backup.models.BackupBookmark
 import eu.kanade.tachiyomi.data.backup.models.BackupCategory
 import eu.kanade.tachiyomi.data.backup.models.BackupExtensionStore
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
@@ -56,6 +60,7 @@ class BackupCreator(
     private val sourcesBackupCreator: SourcesBackupCreator = SourcesBackupCreator(),
     // SY -->
     private val savedSearchBackupCreator: SavedSearchBackupCreator = SavedSearchBackupCreator(),
+    private val bookmarkBackupCreator: BookmarkBackupCreator = BookmarkBackupCreator(),
     private val getMergedManga: GetMergedManga = Injekt.get(),
     // SY <--
 ) {
@@ -100,6 +105,7 @@ class BackupCreator(
                 backupSourcePreferences = backupSourcePreferences(options),
                 // SY -->
                 backupSavedSearches = backupSavedSearches(options),
+                backupBookmarks = backupBookmarks(options),
                 // SY <--
             )
 
@@ -172,6 +178,12 @@ class BackupCreator(
         if (!options.savedSearches) return emptyList()
 
         return savedSearchBackupCreator()
+    }
+
+    suspend fun backupBookmarks(options: BackupOptions): List<BackupBookmark> {
+        if (!options.bookmarks) return emptyList()
+
+        return bookmarkBackupCreator()
     }
     // SY <--
 

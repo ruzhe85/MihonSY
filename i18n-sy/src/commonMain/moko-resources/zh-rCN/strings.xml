@@ -618,6 +618,7 @@
     <string name="error_deleting_google_drive_lock_file">删除谷歌云端硬盘文件锁时发生错误</string>
     <string name="pref_sync_now_group_title">同步操作</string>
     <string name="pref_purge_confirmation_message">清除同步数据会从谷歌云端硬盘删除所有已同步的数据，你确定吗？</string>
+    <string name="pref_webdav_purge_confirmation_message">清除同步数据会从 WebDAV 服务器删除所有已同步的数据，你确定吗？</string>
     <string name="webdav">WebDAV</string>
     <string name="pref_webdav_url">WebDAV 地址</string>
     <string name="pref_webdav_url_summ">服务器地址，可带路径（如 https://dav.example.com/dav/mihonsy），支持 HTTP</string>

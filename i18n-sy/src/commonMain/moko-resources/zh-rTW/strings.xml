@@ -217,6 +217,7 @@
     <string name="error_before_sync_gdrive">同步前出錯：%s</string>
     <string name="pref_purge_confirmation_title">清除確認</string>
     <string name="pref_purge_confirmation_message">清除同步資料將從 Google Drive 中刪除所有同步資料。您確定要繼續嗎？</string>
+    <string name="pref_webdav_purge_confirmation_message">清除同步資料將從 WebDAV 伺服器刪除所有同步資料。您確定要繼續嗎？</string>
     <string name="webdav">WebDAV</string>
     <string name="pref_webdav_url">WebDAV 位址</string>
     <string name="pref_webdav_url_summ">伺服器位址，可含路徑（如 https://dav.example.com/dav/mihonsy），支援 HTTP</string>

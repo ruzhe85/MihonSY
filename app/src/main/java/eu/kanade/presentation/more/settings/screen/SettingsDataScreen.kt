@@ -47,6 +47,7 @@ import com.google.zxing.client.android.Intents
 import com.hippo.unifile.UniFile
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import dev.icerock.moko.resources.StringResource
 import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.screen.data.CreateBackupScreen
@@ -608,6 +609,7 @@ object SettingsDataScreen : SearchableSettings {
 
         if (showPurgeDialog) {
             PurgeConfirmationDialog(
+                messageRes = SYMR.strings.pref_purge_confirmation_message,
                 onConfirm = {
                     showPurgeDialog = false
                     scope.launch {
@@ -644,13 +646,14 @@ object SettingsDataScreen : SearchableSettings {
 
     @Composable
     private fun PurgeConfirmationDialog(
+        messageRes: StringResource,
         onConfirm: () -> Unit,
         onDismissRequest: () -> Unit,
     ) {
         AlertDialog(
             onDismissRequest = onDismissRequest,
             title = { Text(text = stringResource(SYMR.strings.pref_purge_confirmation_title)) },
-            text = { Text(text = stringResource(SYMR.strings.pref_purge_confirmation_message)) },
+            text = { Text(text = stringResource(messageRes)) },
             dismissButton = {
                 TextButton(onClick = onDismissRequest) {
                     Text(text = stringResource(MR.strings.action_cancel))
@@ -773,6 +776,7 @@ object SettingsDataScreen : SearchableSettings {
 
         if (showPurgeDialog) {
             PurgeConfirmationDialog(
+                messageRes = SYMR.strings.pref_webdav_purge_confirmation_message,
                 onConfirm = {
                     showPurgeDialog = false
                     scope.launch {

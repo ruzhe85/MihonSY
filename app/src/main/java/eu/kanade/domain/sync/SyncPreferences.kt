@@ -68,6 +68,7 @@ class SyncPreferences(
             customInfo = preferenceStore.getBoolean("customInfo", true).get(),
             readEntries = preferenceStore.getBoolean("readEntries", true).get(),
             savedSearches = preferenceStore.getBoolean("savedSearches", true).get(),
+            bookmarks = preferenceStore.getBoolean("bookmarks", true).get(),
             // SY <--
         )
     }
@@ -87,6 +88,7 @@ class SyncPreferences(
         preferenceStore.getBoolean("customInfo", true).set(syncSettings.customInfo)
         preferenceStore.getBoolean("readEntries", true).set(syncSettings.readEntries)
         preferenceStore.getBoolean("savedSearches", true).set(syncSettings.savedSearches)
+        preferenceStore.getBoolean("bookmarks", true).set(syncSettings.bookmarks)
         // SY <--
     }
 

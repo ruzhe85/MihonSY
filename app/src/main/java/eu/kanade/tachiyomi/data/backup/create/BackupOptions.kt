@@ -18,6 +18,7 @@ data class BackupOptions(
     // SY -->
     val customInfo: Boolean = true,
     val savedSearches: Boolean = true,
+    val bookmarks: Boolean = true,
     // SY <--
 ) {
 
@@ -35,11 +36,12 @@ data class BackupOptions(
         // SY -->
         customInfo,
         savedSearches,
+        bookmarks,
         // SY <--
     )
 
     fun canCreate() =
-        libraryEntries || categories || appSettings || extensionStores || sourceSettings || savedSearches
+        libraryEntries || categories || appSettings || extensionStores || sourceSettings || savedSearches || bookmarks
 
     companion object {
         val libraryOptions = listOf(
@@ -89,6 +91,11 @@ data class BackupOptions(
                 getter = BackupOptions::savedSearches,
                 setter = { options, enabled -> options.copy(savedSearches = enabled) },
             ),
+            Entry(
+                label = MR.strings.label_bookmarks,
+                getter = BackupOptions::bookmarks,
+                setter = { options, enabled -> options.copy(bookmarks = enabled) },
+            ),
             // SY <--
         )
 
@@ -130,6 +137,7 @@ data class BackupOptions(
             // SY -->
             customInfo = array[10],
             savedSearches = array[11],
+            bookmarks = array[12],
             // SY <--
         )
     }

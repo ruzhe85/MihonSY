@@ -7,9 +7,11 @@ import eu.kanade.tachiyomi.data.backup.BackupNotifier
 import eu.kanade.tachiyomi.data.backup.models.BackupCategory
 import eu.kanade.tachiyomi.data.backup.models.BackupExtensionStore
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
+import eu.kanade.tachiyomi.data.backup.models.BackupBookmark
 import eu.kanade.tachiyomi.data.backup.models.BackupPreference
 import eu.kanade.tachiyomi.data.backup.models.BackupSavedSearch
 import eu.kanade.tachiyomi.data.backup.models.BackupSourcePreferences
+import eu.kanade.tachiyomi.data.backup.restore.restorers.BookmarkRestorer
 import eu.kanade.tachiyomi.data.backup.restore.restorers.CategoriesRestorer
 import eu.kanade.tachiyomi.data.backup.restore.restorers.ExtensionStoreRestorer
 import eu.kanade.tachiyomi.data.backup.restore.restorers.MangaRestorer
@@ -52,6 +54,7 @@ class BackupRestorer(
     private val mangaRestorer: MangaRestorer = MangaRestorer(isSync),
     // SY -->
     private val savedSearchRestorer: SavedSearchRestorer = SavedSearchRestorer(),
+    private val bookmarkRestorer: BookmarkRestorer = BookmarkRestorer(),
     // SY <--
 ) {
 
@@ -108,6 +111,9 @@ class BackupRestorer(
         if (options.savedSearches) {
             restoreAmount += 1
         }
+        if (options.bookmarks) {
+            restoreAmount += 1
+        }
         // SY <--
         if (options.appSettings) {
             restoreAmount += 1
@@ -137,6 +143,12 @@ class BackupRestorer(
             if (options.libraryEntries) {
                 restoreManga(backup.backupManga, if (options.categories) backup.backupCategories else emptyList())
             }
+            // SY -->
+            // Bookmarks depend on restored manga/chapters, so this must run after restoreManga
+            if (options.bookmarks) {
+                restoreBookmarks(backup.backupBookmarks)
+            }
+            // SY <--
             if (options.extensionStores) {
                 restoreExtensionStores(backup.backupExtensionStores)
             }
@@ -166,6 +178,21 @@ class BackupRestorer(
         val progress = restoreProgress.incrementAndFetch()
         notifier.showRestoreProgress(
             context.stringResource(SYMR.strings.saved_searches),
+            progress,
+            restoreAmount,
+            isSync,
+        )
+    }
+    // SY <--
+
+    // SY -->
+    private fun CoroutineScope.restoreBookmarks(backupBookmarks: List<BackupBookmark>) = launch {
+        ensureActive()
+        bookmarkRestorer.restoreBookmarks(backupBookmarks)
+
+        val progress = restoreProgress.incrementAndFetch()
+        notifier.showRestoreProgress(
+            context.stringResource(MR.strings.label_bookmarks),
             progress,
             restoreAmount,
             isSync,

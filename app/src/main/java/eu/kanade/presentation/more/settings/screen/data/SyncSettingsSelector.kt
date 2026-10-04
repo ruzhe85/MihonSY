@@ -121,6 +121,7 @@ private class SyncSettingsSelectorModel(
                 customInfo = syncSettings.customInfo,
                 readEntries = syncSettings.readEntries,
                 savedSearches = syncSettings.savedSearches,
+                bookmarks = syncSettings.bookmarks,
                 // SY <--
             )
         }
@@ -141,6 +142,7 @@ private class SyncSettingsSelectorModel(
                 customInfo = backupOptions.customInfo,
                 readEntries = backupOptions.readEntries,
                 savedSearches = backupOptions.savedSearches,
+                bookmarks = backupOptions.bookmarks,
                 // SY <--
             )
         }

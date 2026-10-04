@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.data.sync.service
 import android.content.Context
 import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.tachiyomi.data.backup.models.Backup
+import eu.kanade.tachiyomi.data.backup.models.BackupBookmark
 import eu.kanade.tachiyomi.data.backup.models.BackupCategory
 import eu.kanade.tachiyomi.data.backup.models.BackupChapter
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
@@ -63,6 +64,10 @@ abstract class SyncService(
             localSyncData.backup?.backupSavedSearches,
             remoteSyncData.backup?.backupSavedSearches,
         )
+        val mergedBookmarksList = mergeBookmarksLists(
+            localSyncData.backup?.backupBookmarks,
+            remoteSyncData.backup?.backupBookmarks,
+        )
         // SY <--
 
         // Create the merged Backup object
@@ -75,6 +80,7 @@ abstract class SyncService(
 
             // SY -->
             backupSavedSearches = mergedSavedSearchesList,
+            backupBookmarks = mergedBookmarksList,
             // SY <--
         )
 
@@ -585,6 +591,37 @@ abstract class SyncService(
         }
 
         return mergedSearches
+    }
+    // SY -->
+    private fun mergeBookmarksLists(
+        localBookmarks: List<BackupBookmark>?,
+        remoteBookmarks: List<BackupBookmark>?,
+    ): List<BackupBookmark> {
+        val logTag = "MergeBookmarks"
+
+        // Composite key: a bookmark is identified by its source, manga, chapter and page
+        fun bookmarkCompositeKey(bookmark: BackupBookmark): String {
+            return "${bookmark.source}|${bookmark.mangaUrl}|${bookmark.chapterUrl}|${bookmark.page}"
+        }
+
+        val localBookmarkMap = localBookmarks?.associateBy { bookmarkCompositeKey(it) } ?: emptyMap()
+        val remoteBookmarkMap = remoteBookmarks?.associateBy { bookmarkCompositeKey(it) } ?: emptyMap()
+
+        logcat(LogPriority.DEBUG, logTag) {
+            "Starting bookmarks merge. Local bookmarks: ${localBookmarks?.size}, " +
+                "Remote bookmarks: ${remoteBookmarks?.size}"
+        }
+
+        // Union of both maps, keeping the local version on conflicts
+        val mergedBookmarks = (localBookmarkMap.keys + remoteBookmarkMap.keys).distinct().mapNotNull { compositeKey ->
+            localBookmarkMap[compositeKey] ?: remoteBookmarkMap[compositeKey]
+        }
+
+        logcat(LogPriority.DEBUG, logTag) {
+            "Bookmarks merge completed. Total merged bookmarks: ${mergedBookmarks.size}"
+        }
+
+        return mergedBookmarks
     }
     // SY <--
 }

@@ -78,3 +78,16 @@ LEFT JOIN history H ON B.chapter_id = H.chapter_id
 WHERE M.source = :sourceId
 ORDER BY M.title ASC, C.chapter_number ASC, B.page ASC;
 -- SY <--
+
+-- SY --> MihonSY: 备份/同步用，按来源+漫画URL+章节URL 定位（chapter_id 是本地自增 ID，跨设备无意义）。
+bookmarksForBackup:
+SELECT
+    M.source AS source,
+    M.url AS mangaUrl,
+    C.url AS chapterUrl,
+    B.page AS page,
+    B.created_at AS createdAt
+FROM bookmarks B
+JOIN chapters C ON B.chapter_id = C._id
+JOIN mangas M ON C.manga_id = M._id;
+-- SY <--

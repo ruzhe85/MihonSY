@@ -14,4 +14,8 @@ data class Backup(
     @ProtoNumber(106) var backupExtensionStores: List<BackupExtensionStore> = emptyList(),
     // SY specific values
     @ProtoNumber(600) var backupSavedSearches: List<BackupSavedSearch> = emptyList(),
+
+    // SY -->
+    @ProtoNumber(601) var backupBookmarks: List<BackupBookmark> = emptyList(),
+    // SY <--
 )

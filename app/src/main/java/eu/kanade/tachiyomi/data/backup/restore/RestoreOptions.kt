@@ -12,6 +12,7 @@ data class RestoreOptions(
     val sourceSettings: Boolean = true,
     // SY -->
     val savedSearches: Boolean = true,
+    val bookmarks: Boolean = true,
     // SY <--
 ) {
 
@@ -23,6 +24,7 @@ data class RestoreOptions(
         sourceSettings,
         // SY -->
         savedSearches,
+        bookmarks,
         // SY <--
     )
 
@@ -32,7 +34,8 @@ data class RestoreOptions(
             appSettings ||
             extensionStores ||
             sourceSettings /* SY --> */ ||
-            savedSearches /* SY <-- */
+            savedSearches ||
+            bookmarks /* SY <-- */
 
     companion object {
         val options = listOf(
@@ -67,6 +70,11 @@ data class RestoreOptions(
                 getter = RestoreOptions::savedSearches,
                 setter = { options, enabled -> options.copy(savedSearches = enabled) },
             ),
+            Entry(
+                label = MR.strings.label_bookmarks,
+                getter = RestoreOptions::bookmarks,
+                setter = { options, enabled -> options.copy(bookmarks = enabled) },
+            ),
             // SY <--
         )
 
@@ -78,6 +86,7 @@ data class RestoreOptions(
             sourceSettings = array[4],
             // SY -->
             savedSearches = array[5],
+            bookmarks = array[6],
             // SY <--
         )
     }
