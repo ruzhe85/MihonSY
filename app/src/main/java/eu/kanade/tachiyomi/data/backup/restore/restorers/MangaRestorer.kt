@@ -12,6 +12,8 @@ import eu.kanade.tachiyomi.data.backup.models.BackupManga
 import eu.kanade.tachiyomi.data.backup.models.BackupMergedMangaReference
 import eu.kanade.tachiyomi.data.backup.models.BackupTracking
 import exh.EXHMigrations
+import logcat.LogPriority
+import logcat.logcat
 import tachiyomi.data.Database
 import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.data.UpdateStrategyColumnAdapter
@@ -116,6 +118,31 @@ class MangaRestorer(
         return getMangaByUrlAndSourceId.await(backupManga.url, backupManga.source)
     }
 
+    // SY -->
+    /**
+     * Applies removals carried by tombstones. This is the counterpart of [asTombstone] on the merge
+     * side: without it a deletion decided by the merge step could never reach the local library, and
+     * the entry would come back on the following sync.
+     */
+    suspend fun restoreMangaDeletions(tombstones: List<BackupManga>) {
+        if (tombstones.isEmpty()) return
+
+        val idsToDelete = tombstones.mapNotNull { tombstone ->
+            database.mangasQueries
+                .getIdByUrlAndSource(url = tombstone.url, source = tombstone.source)
+                .awaitAsOneOrNull()
+        }
+
+        if (idsToDelete.isEmpty()) return
+
+        database.transaction {
+            idsToDelete.forEach { database.mangasQueries.deleteById(it) }
+        }
+
+        logcat(LogPriority.INFO) { "Sync removed ${idsToDelete.size} entries deleted on another device" }
+    }
+    // SY <--
+
     private suspend fun restoreExistingManga(manga: Manga, dbManga: Manga): Manga {
         return if (manga.version > dbManga.version) {
             updateManga(dbManga.copyFrom(manga).copy(id = dbManga.id))
@@ -126,7 +153,17 @@ class MangaRestorer(
 
     private fun Manga.copyFrom(newer: Manga): Manga {
         return this.copy(
-            favorite = this.favorite || newer.favorite,
+            // SY -->
+            // Favorite is a value the user toggles, so it cannot be merged with a logical OR:
+            // that made an un-favorite on one device silently revert on every other device.
+            // Last-writer-wins on the favorite timestamp instead.
+            favorite = if ((newer.favoriteModifiedAt ?: 0L) >= (this.favoriteModifiedAt ?: 0L)) {
+                newer.favorite
+            } else {
+                this.favorite
+            },
+            favoriteModifiedAt = maxOf(newer.favoriteModifiedAt ?: 0L, this.favoriteModifiedAt ?: 0L).takeIf { it > 0L },
+            // SY <--
             // SY -->
             ogTitle = newer.ogTitle,
             ogAuthor = newer.ogAuthor,
@@ -188,7 +225,26 @@ class MangaRestorer(
         val dbChaptersByUrl = getChaptersByMangaId.await(manga.id)
             .associateBy { it.url }
 
-        val (existingChapters, newChapters) = backupChapters
+        // SY -->
+        // Tombstoned chapters are removals, not updates: drop the local row and keep them out of
+        // the insert/update path below so a deletion is not immediately undone.
+        val liveChapters: List<BackupChapter>
+        if (isSync) {
+            val removedIds = backupChapters
+                .filter { it.deletedAt > 0L }
+                .mapNotNull { dbChaptersByUrl[it.url]?.id }
+            if (removedIds.isNotEmpty()) {
+                database.transaction {
+                    database.chaptersQueries.removeChaptersWithIds(removedIds)
+                }
+            }
+            liveChapters = backupChapters.filter { it.deletedAt <= 0L }
+        } else {
+            liveChapters = backupChapters
+        }
+        // SY <--
+
+        val (existingChapters, newChapters) = liveChapters
             .mapNotNull { backupChapter ->
                 val chapter = backupChapter.toChapterImpl().copy(mangaId = manga.id)
                 val dbChapter = dbChaptersByUrl[chapter.url]
@@ -202,7 +258,7 @@ class MangaRestorer(
                             null // Same state; skip
                         }
                     }
-                    else -> updateChapterBasedOnSyncState(chapter, dbChapter)
+                    else -> updateChapterBasedOnSyncState(chapter, dbChapter, backupChapter)
                 }
             }
             .partition { it.id > 0 }
@@ -211,15 +267,30 @@ class MangaRestorer(
         updateExistingChapters(existingChapters)
     }
 
-    private fun updateChapterBasedOnSyncState(chapter: Chapter, dbChapter: Chapter): Chapter {
+    private fun updateChapterBasedOnSyncState(
+        chapter: Chapter,
+        dbChapter: Chapter,
+        backupChapter: BackupChapter,
+    ): Chapter {
         return if (isSync) {
+            // SY -->
+            // The database bumps a chapter's last_modified_at whenever the reader touches it, so it
+            // stands in for "when this device last changed the chapter". Each of the three mutable
+            // fields is then resolved on its own timestamp; merging them with OR/assignment made an
+            // un-read or un-bookmark on one device revert on every sync.
+            val localChangedAt = dbChapter.lastModifiedAt
             chapter.copy(
                 id = dbChapter.id,
-                bookmark = chapter.bookmark || dbChapter.bookmark,
-                read = chapter.read,
-                lastPageRead = chapter.lastPageRead,
+                read = if (backupChapter.readAt >= localChangedAt) chapter.read else dbChapter.read,
+                lastPageRead = if (backupChapter.progressAt >= localChangedAt) {
+                    chapter.lastPageRead
+                } else {
+                    dbChapter.lastPageRead
+                },
+                bookmark = if (backupChapter.bookmarkAt >= localChangedAt) chapter.bookmark else dbChapter.bookmark,
                 sourceOrder = chapter.sourceOrder,
             )
+            // SY <--
         } else {
             chapter.copyFrom(dbChapter).let {
                 when {

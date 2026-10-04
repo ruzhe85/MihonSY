@@ -16,6 +16,9 @@ class BackupCategory(
     @ProtoNumber(601) var version: Long = 0,
     @ProtoNumber(602) var uid: Long = 0,
     @ProtoNumber(603) var lastModifiedAt: Long = 0,
+    // SY --> Multi-device sync: tombstone for "category deleted on this device"
+    @ProtoNumber(604) var deletedAt: Long = 0,
+    // SY <--
 ) {
     fun toCategory(id: Long) = Category(
         id = id,

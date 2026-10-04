@@ -62,6 +62,14 @@ class WebDavSyncService(
 
     private val remoteFileName = "${appName}_sync.proto.gz"
 
+    // SY -->
+    /** Guards against a remote that is being rewritten continuously by other devices. */
+    private val maxPushAttempts = 3
+
+    /** RFC 7232 precondition failure, returned when the remote changed under us. */
+    private val HTTP_PRECONDITION_FAILED = 412
+    // SY <--
+
     private val client: OkHttpClient by lazy { buildClient() }
 
     @Suppress("CustomX509TrustManager", "TrustAllX509TrustManager")
@@ -116,28 +124,44 @@ class WebDavSyncService(
 
     override suspend fun doSync(syncData: SyncData): Backup? {
         try {
-            val remoteSData = pullSyncData()
+            // SY -->
+            // Pull, merge and push under optimistic locking. With several devices syncing by hand
+            // it is routine for two of them to interleave, and an unconditional PUT silently drops
+            // whichever device wrote first. A 412 means someone else won the race, so the merge is
+            // redone against their data instead.
+            var attempt = 0
+            while (true) {
+                val pulled = pullSyncData()
 
-            if (remoteSData != null) {
-                val localDeviceId = syncPreferences.uniqueDeviceID()
-                val lastSyncDeviceId = remoteSData.deviceId
+                if (pulled == null) {
+                    // Remote is absent, so there is nothing to merge with yet. The push is still
+                    // conditional: if another device created the file in the meantime, its content
+                    // has to be merged rather than overwritten.
+                    if (pushSyncData(syncData, null)) {
+                        return syncData.backup
+                    }
+                } else {
+                    val remoteSData = pulled.data
+                    val mergedSyncData = mergeSyncData(syncData, remoteSData)
 
-                logcat(LogPriority.DEBUG, "SyncService") {
-                    "Local device ID: $localDeviceId, Last sync device ID: $lastSyncDeviceId"
+                    if (pushSyncData(mergedSyncData, pulled.etag)) {
+                        return mergedSyncData.backup
+                    }
                 }
 
-                // SY -->
-                // Merge even when the remote was last written by this device: overwriting with
-                // the local data alone would discard other devices' entries that were merged
-                // into the remote but not yet restored locally
-                val mergedSyncData = mergeSyncData(syncData, remoteSData)
-                pushSyncData(mergedSyncData)
-                return mergedSyncData.backup
-                // SY <--
+                attempt++
+                if (attempt >= maxPushAttempts) {
+                    logcat(LogPriority.ERROR, "SyncService") {
+                        "Giving up after $attempt attempts: the remote keeps changing under us"
+                    }
+                    notifier.showSyncError("Remote changed too often, please sync again")
+                    return null
+                }
+                logcat(LogPriority.INFO, "SyncService") {
+                    "Remote changed during sync, retrying (attempt $attempt)"
+                }
             }
-
-            pushSyncData(syncData)
-            return syncData.backup
+            // SY <--
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -147,7 +171,9 @@ class WebDavSyncService(
         }
     }
 
-    private suspend fun pullSyncData(): SyncData? {
+    private data class PullResult(val data: SyncData, val etag: String?)
+
+    private suspend fun pullSyncData(): PullResult? {
         val request = requestBuilder(fileUrl()).get().build()
         client.newCall(request).await().use { response ->
             if (response.code == HttpStatus.SC_NOT_FOUND) {
@@ -161,24 +187,35 @@ class WebDavSyncService(
                 throw IOException("Failed to download sync data: HTTP ${response.code}")
             }
 
+            val etag = response.header("ETag")?.takeIf { it.isNotBlank() && it != "*" }
+                ?: response.header("Last-Modified")?.takeIf { it.isNotBlank() }
+
             val byteArray = response.body.byteStream().use { stream ->
                 GZIPInputStream(stream).use { gzipStream ->
                     gzipStream.readBytes()
                 }
             }
 
-            return try {
+            val decoded = try {
                 protoBuf.decodeFromByteArray(SyncData.serializer(), byteArray)
             } catch (e: Exception) {
-                logcat(LogPriority.ERROR) { "Bad sync data received from WebDAV server: ${e.message}" }
-                // Return null so the next push overwrites the corrupted remote data
-                null
+                // SY -->
+                // Overwriting here would destroy a remote we merely failed to parse, so the sync
+                // fails loudly instead and leaves the remote untouched.
+                logcat(LogPriority.ERROR, "SyncService") {
+                    "Bad sync data received from WebDAV server: ${e.message}"
+                }
+                throw IOException("Remote sync data could not be read: ${e.message}", e)
+                // SY <--
             }
+
+            return PullResult(decoded, etag)
         }
     }
 
-    private suspend fun pushSyncData(syncData: SyncData) {
-        val backup = syncData.backup ?: return
+    /** Returns false when the remote was modified concurrently and the merge has to be redone. */
+    private suspend fun pushSyncData(syncData: SyncData, etag: String?): Boolean {
+        val backup = syncData.backup ?: return false
 
         // Encode the full SyncData (including deviceId) so the next pull can tell
         // whether the remote was last written by this device
@@ -187,7 +224,7 @@ class WebDavSyncService(
             throw IllegalStateException(context.stringResource(MR.strings.empty_backup_error))
         }
 
-        withIOContext {
+        val conflicted = withIOContext {
             val gzipped = ByteArrayOutputStream().also { bos ->
                 GZIPOutputStream(bos).use { it.write(byteArray) }
             }.toByteArray()
@@ -195,16 +232,40 @@ class WebDavSyncService(
             ensureDirectoryExists()
 
             val body = gzipped.toRequestBody("application/octet-stream".toMediaType())
-            val request = requestBuilder(fileUrl()).put(body).build()
+            val builder = requestBuilder(fileUrl()).put(body)
+            // SY -->
+            // Only overwrite the exact revision that was merged against, and only create the file if
+            // it is still absent. Without this, two devices syncing at the same time silently
+            // discard whichever wrote first.
+            if (etag != null) {
+                builder.header("If-Match", etag)
+            } else {
+                builder.header("If-None-Match", "*")
+            }
+            // SY <--
+            val request = builder.build()
+
+            var conflict = false
             client.newCall(request).await().use {
-                if (!it.isSuccessful) {
-                    it.body.string()
-                    logcat(LogPriority.ERROR) { "Failed to upload sync data: HTTP ${it.code}" }
-                    throw IOException("Failed to upload sync data: HTTP ${it.code}")
+                when {
+                    // SY -->
+                    // 412 Precondition Failed: the revision we merged against is gone
+                    it.code == HTTP_PRECONDITION_FAILED -> conflict = true
+                    // SY <--
+                    !it.isSuccessful -> {
+                        it.body.string()
+                        logcat(LogPriority.ERROR) { "Failed to upload sync data: HTTP ${it.code}" }
+                        throw IOException("Failed to upload sync data: HTTP ${it.code}")
+                    }
                 }
             }
+            conflict
         }
+
+        if (conflicted) return false
+
         logcat(LogPriority.DEBUG) { "WebDAV sync data uploaded" }
+        return true
     }
 
     /**

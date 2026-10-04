@@ -18,6 +18,9 @@ import eu.kanade.tachiyomi.data.backup.restore.restorers.MangaRestorer
 import eu.kanade.tachiyomi.data.backup.restore.restorers.PreferenceRestorer
 import eu.kanade.tachiyomi.data.backup.restore.restorers.SavedSearchRestorer
 import eu.kanade.tachiyomi.data.download.DownloadCache
+// SY -->
+import eu.kanade.tachiyomi.data.sync.SyncLedger
+// SY <--
 import eu.kanade.tachiyomi.util.system.createFileInCacheDir
 import exh.source.MERGED_SOURCE_ID
 import kotlinx.coroutines.CancellationException
@@ -31,6 +34,9 @@ import tachiyomi.core.common.util.system.logcat
 import tachiyomi.data.Database
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.sy.SYMR
+// SY -->
+import tachiyomi.domain.category.interactor.GetCategories
+// SY <--
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
@@ -50,6 +56,9 @@ class BackupRestorer(
 
     private val database: Database = Injekt.get(),
     private val categoriesRestorer: CategoriesRestorer = CategoriesRestorer(),
+    // SY -->
+    private val getCategories: GetCategories = Injekt.get(),
+    // SY <--
     private val preferenceRestorer: PreferenceRestorer = PreferenceRestorer(context),
     private val extensionStoreRestorer: ExtensionStoreRestorer = ExtensionStoreRestorer(),
     private val mangaRestorer: MangaRestorer = MangaRestorer(isSync),
@@ -98,6 +107,15 @@ class BackupRestorer(
 
         val time = System.currentTimeMillis() - startTime
 
+        // SY -->
+        // The ledger records what this device owns once the merge has actually landed. Writing it
+        // when the sync merely queued the restore recorded the pre-restore library, which made
+        // every freshly pulled entry look "never owned" and let deletions be undone.
+        if (isSync) {
+            writeSyncLedger()
+        }
+        // SY <--
+
         val logFile = writeErrorLog()
 
         notifier.showRestoreComplete(
@@ -140,9 +158,19 @@ class BackupRestorer(
             restoreAmount += 1
         }
 
+        // SY -->
+        // Removals first, and outside the concurrent block below: a tombstoned entry has to be gone
+        // before the restore that carries its own deletion gets a chance to re-insert it.
+        if (isSync && options.libraryEntries) {
+            applyMangaDeletions(backup.backupManga)
+        }
+        // SY <--
+
         coroutineScope {
             if (options.categories) {
-                restoreCategories(backup.backupCategories)
+                // SY -->
+                restoreCategories(backup.backupCategories, isSync)
+                // SY <--
             }
             // SY -->
             if (options.savedSearches) {
@@ -155,26 +183,60 @@ class BackupRestorer(
             if (options.sourceSettings) {
                 restoreSourcePreferences(backup.backupSourcePreferences)
             }
-            if (options.libraryEntries) {
-                restoreManga(backup.backupManga, if (options.categories) backup.backupCategories else emptyList())
-            }
-            // SY -->
-            // Bookmarks depend on restored manga/chapters, so this must run after restoreManga
-            if (options.bookmarks) {
-                restoreBookmarks(backup.backupBookmarks)
-            }
-            // SY <--
             if (options.extensionStores) {
                 restoreExtensionStores(backup.backupExtensionStores)
             }
-
-            // TODO: optionally trigger online library + tracker update
         }
+
+        // SY -->
+        // Library entries run after the removals, and bookmarks after the library entries because a
+        // bookmark is located through its chapter. Both used to sit in the concurrent block above,
+        // where a bookmark could be resolved before its chapter existed and be silently dropped.
+        if (options.libraryEntries) {
+            coroutineScope {
+                restoreManga(
+                    backup.backupManga.filterNot { it.deletedAt > 0L },
+                    if (options.categories) backup.backupCategories else emptyList(),
+                )
+            }
+        }
+        if (options.bookmarks) {
+            coroutineScope {
+                restoreBookmarks(backup.backupBookmarks, isSync)
+            }
+        }
+        // SY <--
+
+        // TODO: optionally trigger online library + tracker update
     }
 
-    private fun CoroutineScope.restoreCategories(backupCategories: List<BackupCategory>) = launch {
+    // SY -->
+    private suspend fun writeSyncLedger() {
+        val entries = SyncLedger.capture(database, getCategories)
+        SyncLedger.write(context, entries)
+    }
+    // SY <--
+
+    // SY -->
+    private suspend fun applyMangaDeletions(backupMangas: List<BackupManga>) {
+        val tombstones = backupMangas.filter { it.deletedAt > 0L }
+        if (tombstones.isEmpty()) return
+
+        try {
+            mangaRestorer.restoreMangaDeletions(tombstones)
+        } catch (e: Exception) {
+            errors.add(Date() to "Sync deletions: ${e.message}")
+        }
+    }
+    // SY <--
+
+    // SY -->
+    private fun CoroutineScope.restoreCategories(
+        backupCategories: List<BackupCategory>,
+        applyDeletions: Boolean,
+    ) = launch {
         ensureActive()
-        categoriesRestorer(backupCategories)
+        categoriesRestorer(backupCategories, applyDeletions)
 
         val progress = restoreProgress.incrementAndFetch()
         notifier.showRestoreProgress(
@@ -201,9 +263,12 @@ class BackupRestorer(
     // SY <--
 
     // SY -->
-    private fun CoroutineScope.restoreBookmarks(backupBookmarks: List<BackupBookmark>) = launch {
+    private fun CoroutineScope.restoreBookmarks(
+        backupBookmarks: List<BackupBookmark>,
+        applyDeletions: Boolean,
+    ) = launch {
         ensureActive()
-        bookmarkRestorer.restoreBookmarks(backupBookmarks)
+        bookmarkRestorer.restoreBookmarks(backupBookmarks, applyDeletions)
 
         val progress = restoreProgress.incrementAndFetch()
         notifier.showRestoreProgress(

@@ -589,6 +589,9 @@
     <string name="pref_sync_now_subtitle">立即开始同步数据</string>
     <string name="pref_sync_interval">同步频率</string>
     <string name="pref_choose_what_to_sync">选择要同步的内容</string>
+    <!-- SY -->
+    <string name="pref_sync_sections_mismatch">其他设备同步的内容与本机不同。请在每台设备上选择相同的项目，否则合并时可能丢失数据。</string>
+    <!-- SY -->
     <string name="last_synchronization">最后同步：%1$s</string>
     <string name="google_drive">谷歌云端硬盘</string>
     <string name="pref_google_drive_sign_in">登录</string>

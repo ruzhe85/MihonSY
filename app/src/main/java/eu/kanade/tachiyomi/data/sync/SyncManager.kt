@@ -4,17 +4,24 @@ import android.content.Context
 import android.net.Uri
 import app.cash.sqldelight.async.coroutines.awaitAsList
 import eu.kanade.domain.sync.SyncPreferences
+// SY -->
+import eu.kanade.domain.sync.models.SyncSettings
+// SY <--
 import eu.kanade.tachiyomi.data.backup.create.BackupCreator
 import eu.kanade.tachiyomi.data.backup.create.BackupOptions
 import eu.kanade.tachiyomi.data.backup.models.Backup
 import eu.kanade.tachiyomi.data.backup.models.BackupChapter
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
+import eu.kanade.tachiyomi.data.backup.models.BackupPreference
+import eu.kanade.tachiyomi.data.backup.models.StringPreferenceValue
 import eu.kanade.tachiyomi.data.backup.restore.BackupRestoreJob
 import eu.kanade.tachiyomi.data.backup.restore.RestoreOptions
 import eu.kanade.tachiyomi.data.backup.restore.restorers.MangaRestorer
+// SY -->
 import eu.kanade.tachiyomi.data.sync.service.GoogleDriveSyncService
 import eu.kanade.tachiyomi.data.sync.service.SyncData
 import eu.kanade.tachiyomi.data.sync.service.SyncYomiSyncService
+// SY <--
 
 // SY -->
 import eu.kanade.tachiyomi.data.sync.service.WebDavSyncService
@@ -113,7 +120,16 @@ class SyncManager(
             backupManga = backupManga,
             backupCategories = backupCreator.backupCategories(backupOptions),
             backupSources = backupCreator.backupSources(backupManga),
-            backupPreferences = backupCreator.backupAppPreferences(backupOptions),
+            backupPreferences = backupCreator.backupAppPreferences(backupOptions) +
+                // SY -->
+                // Publish which sections this device syncs so the others can detect a disagreement.
+                // The entry is stripped again before it reaches the restore.
+                BackupPreference(
+                    SYNC_SETTINGS_KEY,
+                    StringPreferenceValue(syncPreferences.encodeSyncSettings(syncOptions)),
+                ),
+            // SY <--
+
             backupSourcePreferences = backupCreator.backupSourcePreferences(backupOptions),
             backupExtensionStores = backupCreator.backupExtensionStores(backupOptions),
 
@@ -125,10 +141,20 @@ class SyncManager(
         logcat(LogPriority.DEBUG) { "End create backup" }
 
         // Create the SyncData object
+        // SY -->
+        // The merge resolves entries in place, so it is handed a private copy. Without this the
+        // local backup would come back already merged and every "did the remote change anything"
+        // comparison below would compare the merged objects against themselves, silently reporting
+        // "no changes" and skipping the restore.
+        val syncBackup = ProtoBuf.decodeFromByteArray(
+            Backup.serializer(),
+            ProtoBuf.encodeToByteArray(Backup.serializer(), backup),
+        )
         val syncData = SyncData(
             deviceId = syncPreferences.uniqueDeviceID(),
-            backup = backup,
+            backup = syncBackup,
         )
+        // SY <--
 
         // Handle sync based on the selected service
         val syncService = when (val syncService = SyncService.fromInt(syncPreferences.syncService.get())) {
@@ -158,7 +184,7 @@ class SyncManager(
         }
 
         // SY -->
-        syncService?.ledgerKeys = SyncLedger.load(context)
+        syncService?.ledger = SyncLedger.load(context)
         // SY <--
 
         val remoteBackup = syncService?.doSync(syncData)
@@ -168,6 +194,12 @@ class SyncManager(
             // should we call showSyncError?
             return
         }
+
+        // SY -->
+        // The clock must survive a restart even when no restore follows, otherwise a device whose
+        // wall clock is slow could produce timestamps that lose to values it has not seen yet.
+        SyncClock.flush(context)
+        // SY <--
 
         if (remoteBackup === syncData.backup) {
             // nothing changed
@@ -182,11 +214,23 @@ class SyncManager(
             return
         }
 
-        // Stop the sync early if the remote backup is null or empty
-        if (remoteBackup.backupManga.isEmpty() && remoteBackup.backupCategories.isEmpty() && remoteBackup.backupSources.isEmpty()) {
+        // SY -->
+        // Only bail out when every single enabled section came back empty. Checking just manga,
+        // categories and sources reported "no data on remote" for users who sync only bookmarks or
+        // searches, which also meant the baseline was never advanced for them.
+        val enabledSections = listOf(
+            syncOptions.libraryEntries to remoteBackup.backupManga,
+            syncOptions.categories to remoteBackup.backupCategories,
+            syncOptions.savedSearches to remoteBackup.backupSavedSearches,
+            syncOptions.bookmarks to remoteBackup.backupBookmarks,
+        )
+        val hasAnyEnabledSection = enabledSections.any { (enabled, _) -> enabled }
+        val hasAnyContent = enabledSections.any { (enabled, value) -> enabled && value.isNotEmpty() }
+        if (hasAnyEnabledSection && !hasAnyContent) {
             notifier.showSyncError("No data found on remote server.")
             return
         }
+        // SY <--
 
         // SY -->
         // Removed upstream "first sync skips restore" early return: it prevented a device
@@ -197,11 +241,33 @@ class SyncManager(
         val (filteredFavorites, nonFavorites) = filterFavoritesAndNonFavorites(remoteBackup)
         updateNonFavorites(nonFavorites)
 
+        // SY -->
+        // Tombstones are removals decided by the merge and must reach the restore job, otherwise the
+        // deleted entries are recreated locally. Categories are excluded from the pre-delete below
+        // because their tombstones are applied by the restorer itself.
+        val deletionTombstones = remoteBackup.backupManga.filter { it.deletedAt > 0L }
+        // SY <--
+
+        // SY -->
+        // Reading progress of entries outside the library never reaches the restore through the
+        // favorites branch, so a device that read a book without adding it would keep that progress
+        // to itself. Entries the remote has and this device has never seen are restored so progress,
+        // history and bookmarks converge too.
+        val readOnlyAdditions = filterReadOnlyAdditions(remoteBackup)
+        // SY <--
+
+        // SY -->
+        reportSyncSettingsMismatch(remoteBackup.backupPreferences, syncOptions)
+        // The marker is metadata for the sync settings screen, not an app preference, so it must
+        // not be written into the shared preferences by the restore.
+        val restorablePreferences = remoteBackup.backupPreferences.filterNot { it.key == SYNC_SETTINGS_KEY }
+        // SY <--
+
         val newSyncData = backup.copy(
-            backupManga = filteredFavorites,
+            backupManga = filteredFavorites + readOnlyAdditions + deletionTombstones,
             backupCategories = remoteBackup.backupCategories,
             backupSources = remoteBackup.backupSources,
-            backupPreferences = remoteBackup.backupPreferences,
+            backupPreferences = restorablePreferences,
             backupSourcePreferences = remoteBackup.backupSourcePreferences,
             backupExtensionStores = remoteBackup.backupExtensionStores,
 
@@ -211,7 +277,11 @@ class SyncManager(
             // SY <--
         )
 
-        val hasMangaChanges = filteredFavorites.isNotEmpty()
+        // SY -->
+        val hasMangaChanges = filteredFavorites.isNotEmpty() ||
+            readOnlyAdditions.isNotEmpty() ||
+            deletionTombstones.isNotEmpty()
+        // SY <--
         val hasCategoryChanges = remoteBackup.backupCategories != backup.backupCategories
         val hasSourceChanges = remoteBackup.backupSources != backup.backupSources
         val hasPreferenceChanges = remoteBackup.backupPreferences != backup.backupPreferences
@@ -241,21 +311,10 @@ class SyncManager(
             return
         }
 
-        if (syncOptions.categories) {
-            val mergedUids = newSyncData.backupCategories.map { it.uid }.toSet()
-            val mergedNames = newSyncData.backupCategories.map { it.name }.toSet()
-            val localCategories = getCategories.await().filterNot { it.id == 0L } // Exclude system category
-            val categoriesToDelete = localCategories.filter {
-                it.uid !in mergedUids && it.name !in mergedNames
-            }
-            if (categoriesToDelete.isNotEmpty()) {
-                database.transaction {
-                    categoriesToDelete.forEach {
-                        database.categoriesQueries.delete(it.id)
-                    }
-                }
-            }
-        }
+        // SY -->
+        // Removals are decided by tombstones now, so a local category missing from the merged set
+        // is no longer evidence of a deletion and must not be dropped here.
+        // SY <--
 
         val backupUri = writeSyncDataToCache(context, newSyncData)
         logcat(LogPriority.DEBUG) { "Got Backup Uri: $backupUri" }
@@ -284,22 +343,47 @@ class SyncManager(
         }
 
         // SY -->
-        // The push already happened; record the current library keys so future merges can
-        // tell local deletions apart from never-seen remote entries
-        writeSyncLedger()
+        // The push already happened. The ledger is deliberately NOT written here: the restore above
+        // runs asynchronously, so the library at this instant does not yet contain what was just
+        // pulled. It is written by the restorer once the database actually reflects the merge.
         // SY <--
     }
 
     // SY -->
     private suspend fun writeSyncLedger() {
-        val keys = buildSet {
-            getAllMangaFromDB().filter { it.favorite }.forEach { add(SyncLedger.mangaKey(it.source, it.url)) }
-            getCategories.await()
-                .filter { it.id != 0L }
-                .forEach { add(SyncLedger.categoryKey(it.name)) }
+        val entries = SyncLedger.capture(database, getCategories)
+        SyncLedger.write(context, entries)
+        logcat(LogPriority.DEBUG) { "Sync ledger updated with ${entries.size} keys" }
+    }
+
+    /**
+     * Records whether the devices agree on which sections are synced. A device that syncs fewer
+     * sections would otherwise silently truncate the others' data on every merge, so a mismatch is
+     * surfaced in the sync settings instead of being resolved automatically.
+     */
+    private fun reportSyncSettingsMismatch(remotePreferences: List<BackupPreference>, local: SyncSettings) {
+        val remoteEncoded = remotePreferences
+            .firstOrNull { it.key == SYNC_SETTINGS_KEY }
+            ?.let { (it.value as? StringPreferenceValue)?.value }
+
+        // Remote predates this marker, so there is nothing to compare against
+        if (remoteEncoded == null) return
+
+        val remote = syncPreferences.decodeSyncSettings(remoteEncoded)
+        val mismatch = remote != null && remote != local
+
+        if (mismatch) {
+            logcat(LogPriority.WARN) {
+                "Sync section mismatch: remote=$remoteEncoded local=${syncPreferences.encodeSyncSettings(local)}"
+            }
         }
-        SyncLedger.write(context, keys)
-        logcat(LogPriority.DEBUG) { "Sync ledger updated with ${keys.size} keys" }
+
+        syncPreferences.remoteSyncSettings.set(if (mismatch) remoteEncoded else "")
+    }
+
+    private companion object {
+        /** Pseudo preference key carrying the sync section selection inside the synced payload. */
+        const val SYNC_SETTINGS_KEY = "__sync_settings__"
     }
     // SY <--
 
@@ -344,6 +428,16 @@ class SyncManager(
         if (localManga.version != remoteManga.version) {
             return true
         }
+
+        // SY -->
+        // Being added to or removed from the library is a change in its own right. Without this the
+        // restore was never triggered for it and the favorite flag stayed as it was locally.
+        if (localManga.favorite != remoteManga.favorite &&
+            (remoteManga.favoriteModifiedAt ?: 0L) >= (localManga.favoriteModifiedAt ?: 0L)
+        ) {
+            return true
+        }
+        // SY <--
 
         if (localCategories.toSet() != remoteManga.categories.toSet()) {
             return true
@@ -393,6 +487,11 @@ class SyncManager(
             logcat(LogPriority.DEBUG, logTag) { "Starting to filter favorites and non-favorites from backup data." }
 
             backup.backupManga.forEach { remoteManga ->
+                // SY -->
+                // Tombstones are removals, handled by the restore job. Letting them fall into the
+                // non-favorite branch would only clear the favorite flag and leave the entry behind.
+                if (remoteManga.deletedAt > 0L) return@forEach
+                // SY <--
                 val compositeKey = Pair(remoteManga.source, remoteManga.url)
                 val localManga = localMangaMap[compositeKey]
                 when {
@@ -424,6 +523,30 @@ class SyncManager(
         return Pair(favorites, nonFavorites)
     }
 
+    // SY -->
+    /**
+     * Remote entries this device has never seen that carry reading state, so their progress, history
+     * and bookmarks are restored as well. Entries the device already has are left to the favorites
+     * branch, which only restores what actually differs.
+     */
+    private suspend fun filterReadOnlyAdditions(remoteBackup: Backup): List<BackupManga> {
+        val localKeys = getAllMangaFromDB()
+            .map { it.source to it.url }
+            .toSet()
+
+        return remoteBackup.backupManga.filter { manga ->
+            !manga.favorite &&
+                manga.deletedAt <= 0L &&
+                (manga.source to manga.url) !in localKeys &&
+                (
+                    manga.chapters.any { it.read || it.lastPageRead > 0L || it.bookmark } ||
+                        manga.history.isNotEmpty() ||
+                        manga.tracking.isNotEmpty()
+                    )
+        }
+    }
+    // SY <--
+
     /**
      * Updates the non-favorite manga in the local database with their favorite status from the backup.
      * @param nonFavorites the list of non-favorite BackupManga objects from the backup.
@@ -436,10 +559,16 @@ class SyncManager(
         nonFavorites.forEach { nonFavorite ->
             val key = Pair(nonFavorite.source, nonFavorite.url)
             localMangaMap[key]?.let { localManga ->
-                if (localManga.favorite != nonFavorite.favorite) {
+                // SY -->
+                // Being removed from the library is a change like any other and is resolved by
+                // timestamp, so an older removal on the remote cannot undo a newer local addition.
+                if (localManga.favorite != nonFavorite.favorite &&
+                    (nonFavorite.favoriteModifiedAt ?: 0L) >= (localManga.favoriteModifiedAt ?: 0L)
+                ) {
                     val updatedManga = localManga.copy(favorite = nonFavorite.favorite)
                     mangaRestorer.updateManga(updatedManga)
                 }
+                // SY <--
             }
         }
     }

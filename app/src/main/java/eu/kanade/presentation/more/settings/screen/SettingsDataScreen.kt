@@ -575,13 +575,28 @@ object SettingsDataScreen : SearchableSettings {
             // SY <--
         }
 
+        // SY -->
+        val syncSectionsMismatch = syncPreferences.remoteSyncSettings.get().isNotBlank()
+        // SY <--
+
         return if (syncServiceType != SyncManager.SyncService.NONE) {
             preferences + Preference.PreferenceItem.TextPreference(
                 title = stringResource(SYMR.strings.pref_choose_what_to_sync),
                 onClick = {
                     navigator.push(SyncSettingsSelector())
                 },
-            )
+            ) + if (syncSectionsMismatch) {
+                // SY -->
+                // Detected during the last sync: another device syncs a different set of sections,
+                // so the merged result would drop whatever this device does not sync.
+                listOf(
+                    Preference.PreferenceItem.InfoPreference(
+                        title = stringResource(SYMR.strings.pref_sync_sections_mismatch),
+                    ),
+                )
+            } else {
+                emptyList()
+            }
         } else {
             preferences
         }

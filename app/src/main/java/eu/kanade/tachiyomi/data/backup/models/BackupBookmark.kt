@@ -13,6 +13,10 @@ data class BackupBookmark(
     @ProtoNumber(3) val chapterUrl: String = "",
     @ProtoNumber(4) val page: Int = 0,
     @ProtoNumber(5) val createdAt: Long = 0,
+    // SY --> Multi-device sync: tombstone for "bookmark deleted on this device", otherwise the
+    // union merge would resurrect it on every sync
+    @ProtoNumber(6) val deletedAt: Long = 0,
+    // SY <--
 )
 
 val backupBookmarkMapper =

@@ -26,6 +26,14 @@ class BackupChapter(
     @ProtoNumber(11) var lastModifiedAt: Long = 0,
     @ProtoNumber(12) var version: Long = 0,
     @ProtoNumber(13) var memo: ByteArray = JsonObjectEmptyBytes,
+
+    // SY --> Multi-device sync: per-field timestamps so reading progress can be merged field by
+    // field instead of picking one whole chapter version, and a tombstone for removals.
+    @ProtoNumber(14) var deletedAt: Long = 0,
+    @ProtoNumber(15) var readAt: Long = 0,
+    @ProtoNumber(16) var bookmarkAt: Long = 0,
+    @ProtoNumber(17) var progressAt: Long = 0,
+    // SY <--
 ) {
     fun toChapterImpl(): Chapter {
         return Chapter.create().copy(
@@ -79,5 +87,14 @@ val backupChapterMapper = {
         lastModifiedAt = lastModifiedAt,
         version = version,
         memo = MemoColumnAdapter.encode(memo),
+        // SY --> Per-field timestamps for last-writer-wins merging.
+        // The chapters table keeps a single last_modified_at (in seconds, written by a trigger on
+        // any update), which the reader bumps whenever it touches the chapter, so it stands in for
+        // the time of the last change to each of the three mutable fields. That is what lets an
+        // un-read or un-bookmark on one device survive the merge instead of being absorbed by an OR.
+        readAt = lastModifiedAt,
+        bookmarkAt = lastModifiedAt,
+        progressAt = lastModifiedAt,
+        // SY <--
     )
 }

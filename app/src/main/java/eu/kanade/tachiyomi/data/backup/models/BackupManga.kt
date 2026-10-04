@@ -53,6 +53,13 @@ class BackupManga(
     @ProtoNumber(602) var customStatus: Int = 0,
     @ProtoNumber(603) var customThumbnailUrl: String? = null,
 
+    // SY --> Multi-device sync: tombstone left behind when an entry is removed on this device.
+    // Without it the next device cannot tell an intentional deletion from an entry it never
+    // had. Tombstones are kept forever so a device that was offline for a long time never
+    // resurrects removed entries.
+    @ProtoNumber(604) var deletedAt: Long = 0,
+    // SY <--
+
     // J2K specific values
     @ProtoNumber(800) var customTitle: String? = null,
     @ProtoNumber(801) var customArtist: String? = null,

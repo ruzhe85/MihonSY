@@ -14,7 +14,7 @@ class CategoriesRestorer(
     private val libraryPreferences: LibraryPreferences = Injekt.get(),
 ) {
 
-    suspend operator fun invoke(backupCategories: List<BackupCategory>) {
+    suspend operator fun invoke(backupCategories: List<BackupCategory>, applyDeletions: Boolean = false) {
         if (backupCategories.isNotEmpty()) {
             val dbCategories = getCategories.await()
             val dbCategoriesByName = dbCategories.associateBy { it.name }
@@ -24,8 +24,25 @@ class CategoriesRestorer(
 
             var nextOrder = dbCategories.maxOfOrNull { it.order }?.plus(1) ?: 0
 
+            // SY -->
+            // Tombstoned categories are removals. During a manual restore the existing behavior of
+            // leaving the local categories alone is kept; during a sync they must actually go away,
+            // otherwise the deletion never reaches this device.
+            val removedIds = if (applyDeletions) {
+                backupCategories
+                    .filter { it.deletedAt > 0L }
+                    .mapNotNull { tombstone -> dbCategoriesByName[tombstone.name]?.id }
+            } else {
+                emptyList()
+            }
+            val removedNames = backupCategories.filter { it.deletedAt > 0L }.map { it.name }.toSet()
+            // SY <--
+
             val categories = backupCategories
                 .sortedBy { it.order }
+                // SY -->
+                .filterNot { it.name in removedNames }
+                // SY <--
                 // SY -->
                 .map { backupCategory ->
                     var dbCategory = if (backupCategory.uid != 0L) {
@@ -66,6 +83,12 @@ class CategoriesRestorer(
             // SY <--
 
             // SY -->
+            if (removedIds.isNotEmpty()) {
+                database.transaction {
+                    removedIds.forEach { database.categoriesQueries.delete(it) }
+                }
+            }
+
             database.categoriesQueries.resetIsSyncing()
             // SY <--
 

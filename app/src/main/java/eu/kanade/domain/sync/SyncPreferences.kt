@@ -35,6 +35,44 @@ class SyncPreferences(
     val webdavTrustAllCerts: Preference<Boolean> = preferenceStore.getBoolean("sync_webdav_trust_all", false)
     val syncShowSuccessNotification: Preference<Boolean> =
         preferenceStore.getBoolean("sync_show_success_notification", true)
+
+    /**
+     * Sync sections the other devices are using, as seen during the last sync. Non-empty and
+     * different from the local selection means the devices do not agree on what to sync, which
+     * makes merges unpredictable. Only reported to the user, never applied automatically.
+     */
+    val remoteSyncSettings: Preference<String> = preferenceStore.getString("sync_remote_settings", "")
+    // SY <--
+
+    // SY -->
+    fun encodeSyncSettings(settings: SyncSettings): String = listOf(
+        settings.libraryEntries,
+        settings.categories,
+        settings.chapters,
+        settings.tracking,
+        settings.history,
+        settings.appSettings,
+        settings.sourceSettings,
+        settings.savedSearches,
+        settings.bookmarks,
+    ).joinToString(",") { if (it) "1" else "0" }
+
+    fun decodeSyncSettings(value: String): SyncSettings? {
+        val parts = value.split(",")
+        if (parts.size != 9) return null
+        val flags = parts.map { it.trim() == "1" }
+        return SyncSettings(
+            libraryEntries = flags[0],
+            categories = flags[1],
+            chapters = flags[2],
+            tracking = flags[3],
+            history = flags[4],
+            appSettings = flags[5],
+            sourceSettings = flags[6],
+            savedSearches = flags[7],
+            bookmarks = flags[8],
+        )
+    }
     // SY <--
 
     fun uniqueDeviceID(): String {

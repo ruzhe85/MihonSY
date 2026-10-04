@@ -201,6 +201,9 @@
     <string name="pref_sync_automatic_category">自動同步</string>
     <string name="pref_sync_interval">同步頻率</string>
     <string name="pref_choose_what_to_sync">選擇要同步的內容</string>
+    <!-- SY -->
+    <string name="pref_sync_sections_mismatch">其他裝置同步的內容與本機不同。請在每台裝置上選擇相同的項目，否則合併時可能遺失資料。</string>
+    <!-- SY -->
     <string name="syncyomi">SyncYomi</string>
     <string name="last_synchronization">上次同步時間：%1$s</string>
     <string name="google_drive">Google Drive</string>
