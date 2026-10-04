@@ -69,6 +69,10 @@ import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.data.sync.SyncManager
 import eu.kanade.tachiyomi.data.sync.service.GoogleDriveService
 import eu.kanade.tachiyomi.data.sync.service.GoogleDriveSyncService
+
+// SY -->
+import eu.kanade.tachiyomi.data.sync.service.WebDavSyncService
+// SY <--
 import eu.kanade.tachiyomi.util.system.DeviceUtil
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.Dispatchers
@@ -521,6 +525,10 @@ object SettingsDataScreen : SearchableSettings {
                             SyncManager.SyncService.NONE.value to stringResource(MR.strings.off),
                             SyncManager.SyncService.SYNCYOMI.value to stringResource(SYMR.strings.syncyomi),
                             SyncManager.SyncService.GOOGLE_DRIVE.value to stringResource(SYMR.strings.google_drive),
+
+                            // SY -->
+                            SyncManager.SyncService.WEBDAV.value to stringResource(SYMR.strings.webdav),
+                            // SY <--
                         ),
                         onValueChanged = { true },
                     ),
@@ -552,6 +560,10 @@ object SettingsDataScreen : SearchableSettings {
             SyncManager.SyncService.NONE -> emptyList()
             SyncManager.SyncService.SYNCYOMI -> getSelfHostPreferences(syncPreferences)
             SyncManager.SyncService.GOOGLE_DRIVE -> getGoogleDrivePreferences()
+
+            // SY -->
+            SyncManager.SyncService.WEBDAV -> getWebDavPreferences(syncPreferences)
+            // SY <--
         }
 
         return if (syncServiceType != SyncManager.SyncService.NONE) {
@@ -714,6 +726,87 @@ object SettingsDataScreen : SearchableSettings {
             },
         )
     }
+
+    // SY -->
+    @Composable
+    private fun getWebDavPreferences(syncPreferences: SyncPreferences): List<Preference> {
+        val context = LocalContext.current
+
+        return listOf(
+            Preference.PreferenceItem.EditTextPreference(
+                title = stringResource(SYMR.strings.pref_webdav_url),
+                subtitle = stringResource(SYMR.strings.pref_webdav_url_summ),
+                preference = syncPreferences.webdavUrl,
+                onValueChanged = { newValue ->
+                    // Trim spaces at the beginning and end, then remove trailing slash if present
+                    syncPreferences.webdavUrl.set(newValue.trim().trimEnd { it == '/' })
+                    true
+                },
+            ),
+            Preference.PreferenceItem.EditTextPreference(
+                title = stringResource(SYMR.strings.pref_webdav_username),
+                subtitle = stringResource(SYMR.strings.pref_webdav_username_summ),
+                preference = syncPreferences.webdavUsername,
+                onValueChanged = { true },
+            ),
+            Preference.PreferenceItem.EditTextPreference(
+                title = stringResource(SYMR.strings.pref_webdav_password),
+                subtitle = stringResource(SYMR.strings.pref_webdav_password_summ),
+                preference = syncPreferences.webdavPassword,
+                onValueChanged = { true },
+            ),
+            Preference.PreferenceItem.SwitchPreference(
+                preference = syncPreferences.webdavTrustAllCerts,
+                title = stringResource(SYMR.strings.pref_webdav_trust_all_certs),
+                subtitle = stringResource(SYMR.strings.pref_webdav_trust_all_certs_summ),
+            ),
+            getWebDavPurge(),
+        )
+    }
+
+    @Composable
+    private fun getWebDavPurge(): Preference.PreferenceItem.TextPreference {
+        val scope = rememberCoroutineScope()
+        val context = LocalContext.current
+        val webDavSync = remember { WebDavSyncService(context) }
+        var showPurgeDialog by remember { mutableStateOf(false) }
+
+        if (showPurgeDialog) {
+            PurgeConfirmationDialog(
+                onConfirm = {
+                    showPurgeDialog = false
+                    scope.launch {
+                        val result = webDavSync.deleteSyncData()
+                        when (result) {
+                            WebDavSyncService.DeleteSyncDataStatus.NOT_INITIALIZED -> context.toast(
+                                SYMR.strings.webdav_not_configured,
+                                duration = 5000,
+                            )
+                            WebDavSyncService.DeleteSyncDataStatus.NO_FILES -> context.toast(
+                                SYMR.strings.webdav_sync_data_not_found,
+                                duration = 5000,
+                            )
+                            WebDavSyncService.DeleteSyncDataStatus.SUCCESS -> context.toast(
+                                SYMR.strings.webdav_sync_data_purged,
+                                duration = 5000,
+                            )
+                            WebDavSyncService.DeleteSyncDataStatus.ERROR -> context.toast(
+                                SYMR.strings.webdav_sync_data_purge_error,
+                                duration = 10000,
+                            )
+                        }
+                    }
+                },
+                onDismissRequest = { showPurgeDialog = false },
+            )
+        }
+
+        return Preference.PreferenceItem.TextPreference(
+            title = stringResource(SYMR.strings.pref_webdav_purge_sync_data),
+            onClick = { showPurgeDialog = true },
+        )
+    }
+    // SY <--
 
     @Composable
     private fun getSyncNowPref(): Preference.PreferenceGroup {
