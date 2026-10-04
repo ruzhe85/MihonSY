@@ -100,7 +100,7 @@ object SyncLedger {
                 .filter { it.id != 0L }
                 .forEach { put(categoryKey(it.name), it.lastModifiedAt) }
 
-            database.bookmarksQueries.bookmarksForBackup(::backupBookmarkMapper)
+            database.bookmarksQueries.bookmarksForBackup(backupBookmarkMapper)
                 .awaitAsList()
                 .forEach { put(bookmarkKey(it.source, it.mangaUrl, it.chapterUrl, it.page), it.createdAt) }
         }
