@@ -921,7 +921,9 @@ class ReaderViewModel @JvmOverloads constructor(
     private fun recreateViewerForAutoMode() {
         val currChapters = state.value.viewerChapters ?: return
         val currChapter = currChapters.currChapter
-        currChapter.requestedPage = currChapter.chapter.last_page_read
+        // MihonSY: 不重置 requestedPage——它随翻页/onPageSelected 实时维护（loadChapter 也会按
+        // intent page 设好）。旧实现这里强制回退到 last_page_read，会把「从书签跳页/刚进入时」
+        // 的位置冲掉，自动条漫判定一命中就跳回第一页或上次阅读页。
         // Komiho 诊断：viewer 重建 = 可见页全部重算（增强不留缓存），值得在日志里留痕。
         android.util.Log.d(
             KOMIHA_AUTOWEBTOON_TAG,
