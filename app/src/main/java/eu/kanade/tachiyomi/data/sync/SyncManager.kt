@@ -157,6 +157,10 @@ class SyncManager(
             }
         }
 
+        // SY -->
+        syncService?.ledgerKeys = SyncLedger.load(context)
+        // SY <--
+
         val remoteBackup = syncService?.doSync(syncData)
 
         if (remoteBackup == null) {
@@ -169,6 +173,11 @@ class SyncManager(
             // nothing changed
             logcat(LogPriority.DEBUG) { "Skip restore due to remote was overwrite from local" }
             syncPreferences.lastSyncTimestamp.set(Date().time)
+
+            // SY -->
+            writeSyncLedger()
+            // SY <--
+
             notifier.showSyncSuccess("Sync completed successfully")
             return
         }
@@ -223,6 +232,11 @@ class SyncManager(
         ) {
             // update the sync timestamp
             syncPreferences.lastSyncTimestamp.set(Date().time)
+
+            // SY -->
+            writeSyncLedger()
+            // SY <--
+
             notifier.showSyncSuccess("Sync completed successfully")
             return
         }
@@ -268,7 +282,26 @@ class SyncManager(
         } else {
             logcat(LogPriority.ERROR) { "Failed to write sync data to file" }
         }
+
+        // SY -->
+        // The push already happened; record the current library keys so future merges can
+        // tell local deletions apart from never-seen remote entries
+        writeSyncLedger()
+        // SY <--
     }
+
+    // SY -->
+    private suspend fun writeSyncLedger() {
+        val keys = buildSet {
+            getAllMangaFromDB().filter { it.favorite }.forEach { add(SyncLedger.mangaKey(it.source, it.url)) }
+            getCategories.await()
+                .filter { it.id != 0L }
+                .forEach { add(SyncLedger.categoryKey(it.name)) }
+        }
+        SyncLedger.write(context, keys)
+        logcat(LogPriority.DEBUG) { "Sync ledger updated with ${keys.size} keys" }
+    }
+    // SY <--
 
     private fun writeSyncDataToCache(context: Context, backup: Backup): Uri? {
         val cacheFile = File(context.cacheDir, "tachiyomi_sync_data.proto.gz")

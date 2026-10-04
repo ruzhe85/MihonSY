@@ -11,6 +11,7 @@ import eu.kanade.tachiyomi.data.backup.models.BackupPreference
 import eu.kanade.tachiyomi.data.backup.models.BackupSavedSearch
 import eu.kanade.tachiyomi.data.backup.models.BackupSource
 import eu.kanade.tachiyomi.data.backup.models.BackupSourcePreferences
+import eu.kanade.tachiyomi.data.sync.SyncLedger
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import logcat.LogPriority
@@ -30,6 +31,15 @@ abstract class SyncService(
     val syncPreferences: SyncPreferences,
 ) {
     abstract suspend fun doSync(syncData: SyncData): Backup?
+
+    // SY -->
+    /**
+     * Keys this device had at its last successful sync. Remote entries missing locally whose key
+     * is not in the ledger are new remote additions and must be adopted even when their
+     * lastModifiedAt is older than the local baseline.
+     */
+    var ledgerKeys: Set<String> = emptySet()
+    // SY <--
 
     /**
      * Merges the local and remote sync data into a single JSON string.
@@ -159,13 +169,19 @@ abstract class SyncService(
                     }
                 }
                 local == null && remote != null -> {
-                    if (lastSyncTime == 0L || remote.lastModifiedAt > lastSyncTime) {
+                    // SY -->
+                    // Keep if modified after baseline, or if this device never had it
+                    // (absent from ledger = new remote entry, not a local deletion)
+                    if (lastSyncTime == 0L || remote.lastModifiedAt > lastSyncTime ||
+                        SyncLedger.mangaKey(remote.source, remote.url) !in ledgerKeys
+                    ) {
                         updateCategories(remote, remoteCategoriesMapByOrder)
                         remote
                     } else {
                         logcat(LogPriority.DEBUG, logTag) { "Dropping deleted remote manga: ${remote.title}." }
                         null
                     }
+                    // SY <--
                 }
                 local != null && remote != null -> {
                     // Compare versions to decide which manga to keep
@@ -355,12 +371,17 @@ abstract class SyncService(
                 }
             } else {
                 val remoteModifiedTimeMillis = remote.lastModifiedAt.seconds.inWholeMilliseconds
-                if (lastSyncTime == 0L || remoteModifiedTimeMillis > lastSyncTime) {
+                // SY -->
+                // Keep if modified after baseline, or if this device never had it
+                if (lastSyncTime == 0L || remoteModifiedTimeMillis > lastSyncTime ||
+                    SyncLedger.categoryKey(remote.name) !in ledgerKeys
+                ) {
                     logcat(LogPriority.DEBUG, logTag) { "Adding new remote category: ${remote.name} (UID: ${remote.uid})" }
                     result.add(remote)
                 } else {
                     logcat(LogPriority.DEBUG, logTag) { "Dropping deleted remote category: ${remote.name} (UID: ${remote.uid})" }
                 }
+                // SY <--
             }
         }
 
