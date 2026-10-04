@@ -6,6 +6,11 @@ import androidx.core.app.NotificationCompat
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.core.security.SecurityPreferences
+
+// SY -->
+import eu.kanade.domain.sync.SyncPreferences
+// SY <--
+
 import eu.kanade.tachiyomi.data.notification.NotificationReceiver
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.util.storage.getUriCompat
@@ -23,6 +28,10 @@ import java.util.concurrent.TimeUnit
 class BackupNotifier(private val context: Context) {
 
     private val preferences: SecurityPreferences by injectLazy()
+
+    // SY -->
+    private val syncPreferences: SyncPreferences by injectLazy()
+    // SY <--
 
     private val progressNotificationBuilder = context.notificationBuilder(
         Notifications.CHANNEL_BACKUP_RESTORE_PROGRESS,
@@ -146,6 +155,12 @@ class BackupNotifier(private val context: Context) {
         }
 
         context.cancelNotification(Notifications.ID_RESTORE_PROGRESS)
+
+        // SY -->
+        // The "library sync complete" notification at the end of a sync restore
+        // honors the same toggle as the SyncNotifier success notification
+        if (sync && !syncPreferences.syncShowSuccessNotification.get()) return
+        // SY <--
 
         val timeString = context.stringResource(
             MR.strings.restore_duration,

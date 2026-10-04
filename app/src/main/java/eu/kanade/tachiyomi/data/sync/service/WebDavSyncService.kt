@@ -126,16 +126,14 @@ class WebDavSyncService(
                     "Local device ID: $localDeviceId, Last sync device ID: $lastSyncDeviceId"
                 }
 
-                // check if the last sync was done by the same device if so overwrite the remote data with the local data
-                return if (lastSyncDeviceId == localDeviceId) {
-                    pushSyncData(syncData)
-                    syncData.backup
-                } else {
-                    // Merge the local and remote sync data
-                    val mergedSyncData = mergeSyncData(syncData, remoteSData)
-                    pushSyncData(mergedSyncData)
-                    mergedSyncData.backup
-                }
+                // SY -->
+                // Merge even when the remote was last written by this device: overwriting with
+                // the local data alone would discard other devices' entries that were merged
+                // into the remote but not yet restored locally
+                val mergedSyncData = mergeSyncData(syncData, remoteSData)
+                pushSyncData(mergedSyncData)
+                return mergedSyncData.backup
+                // SY <--
             }
 
             pushSyncData(syncData)

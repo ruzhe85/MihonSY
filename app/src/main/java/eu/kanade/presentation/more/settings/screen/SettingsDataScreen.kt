@@ -613,6 +613,11 @@ object SettingsDataScreen : SearchableSettings {
         val scope = rememberCoroutineScope()
         val context = LocalContext.current
         val googleDriveSync = remember { GoogleDriveSyncService(context) }
+
+        // SY -->
+        val syncPreferences = remember { Injekt.get<SyncPreferences>() }
+        // SY <--
+
         var showPurgeDialog by remember { mutableStateOf(false) }
 
         if (showPurgeDialog) {
@@ -631,10 +636,18 @@ object SettingsDataScreen : SearchableSettings {
                                 SYMR.strings.google_drive_sync_data_not_found,
                                 duration = 5000,
                             )
-                            GoogleDriveSyncService.DeleteSyncDataStatus.SUCCESS -> context.toast(
-                                SYMR.strings.google_drive_sync_data_purged,
-                                duration = 5000,
-                            )
+                            GoogleDriveSyncService.DeleteSyncDataStatus.SUCCESS -> {
+                                // SY -->
+                                // Reset the local sync baseline so the next sync adopts the
+                                // remote library as a fresh first sync
+                                syncPreferences.lastSyncTimestamp.set(0)
+                                syncPreferences.lastSyncEtag.set("")
+                                // SY <--
+                                context.toast(
+                                    SYMR.strings.google_drive_sync_data_purged,
+                                    duration = 5000,
+                                )
+                            }
                             GoogleDriveSyncService.DeleteSyncDataStatus.ERROR -> context.toast(
                                 SYMR.strings.google_drive_sync_data_purge_error,
                                 duration = 10000,
@@ -771,12 +784,12 @@ object SettingsDataScreen : SearchableSettings {
                 title = stringResource(SYMR.strings.pref_webdav_trust_all_certs),
                 subtitle = stringResource(SYMR.strings.pref_webdav_trust_all_certs_summ),
             ),
-            getWebDavPurge(),
+            getWebDavPurge(syncPreferences),
         )
     }
 
     @Composable
-    private fun getWebDavPurge(): Preference.PreferenceItem.TextPreference {
+    private fun getWebDavPurge(syncPreferences: SyncPreferences): Preference.PreferenceItem.TextPreference {
         val scope = rememberCoroutineScope()
         val context = LocalContext.current
         val webDavSync = remember { WebDavSyncService(context) }
@@ -798,10 +811,18 @@ object SettingsDataScreen : SearchableSettings {
                                 SYMR.strings.webdav_sync_data_not_found,
                                 duration = 5000,
                             )
-                            WebDavSyncService.DeleteSyncDataStatus.SUCCESS -> context.toast(
-                                SYMR.strings.webdav_sync_data_purged,
-                                duration = 5000,
-                            )
+                            WebDavSyncService.DeleteSyncDataStatus.SUCCESS -> {
+                                // SY -->
+                                // Reset the local sync baseline so the next sync adopts the
+                                // remote library as a fresh first sync
+                                syncPreferences.lastSyncTimestamp.set(0)
+                                syncPreferences.lastSyncEtag.set("")
+                                // SY <--
+                                context.toast(
+                                    SYMR.strings.webdav_sync_data_purged,
+                                    duration = 5000,
+                                )
+                            }
                             WebDavSyncService.DeleteSyncDataStatus.ERROR -> context.toast(
                                 SYMR.strings.webdav_sync_data_purge_error,
                                 duration = 10000,
