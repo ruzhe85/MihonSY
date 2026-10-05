@@ -1,6 +1,7 @@
 package eu.kanade.domain.sync
 
 import eu.kanade.domain.sync.models.SyncSettings
+import eu.kanade.tachiyomi.data.backup.create.BackupOptions
 import eu.kanade.tachiyomi.data.sync.models.SyncTriggerOptions
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
@@ -45,33 +46,67 @@ class SyncPreferences(
     // SY <--
 
     // SY -->
-    fun encodeSyncSettings(settings: SyncSettings): String = listOf(
-        settings.libraryEntries,
-        settings.categories,
-        settings.chapters,
-        settings.tracking,
-        settings.history,
-        settings.appSettings,
-        settings.sourceSettings,
-        settings.savedSearches,
-        settings.bookmarks,
-    ).joinToString(",") { if (it) "1" else "0" }
+    /**
+     * Section selection as a fixed-width flag string, in the order [BackupOptions.asBooleanArray]
+     * defines, which covers every section. Reusing that order means a newly added sync section can
+     * no longer silently drop out of this encoding (an earlier hand-written list missed four).
+     */
+    fun encodeSyncSettings(settings: SyncSettings): String =
+        settings.toBackupOptions().asBooleanArray().joinToString(",") { if (it) "1" else "0" }
 
     fun decodeSyncSettings(value: String): SyncSettings? {
-        val parts = value.split(",")
-        if (parts.size != 9) return null
-        val flags = parts.map { it.trim() == "1" }
-        return SyncSettings(
-            libraryEntries = flags[0],
-            categories = flags[1],
-            chapters = flags[2],
-            tracking = flags[3],
-            history = flags[4],
-            appSettings = flags[5],
-            sourceSettings = flags[6],
-            savedSearches = flags[7],
-            bookmarks = flags[8],
-        )
+        if (value.isBlank()) return null
+
+        val defaults = BackupOptions().asBooleanArray()
+        val flags = value.split(",").map { it.trim() == "1" }
+
+        // Payloads written before the encoding covered every section carry fewer flags; a short tail
+        // falls back to the defaults instead of failing to parse.
+        val filled = BooleanArray(defaults.size) { index ->
+            flags.getOrElse(index) { defaults[index] }
+        }
+        return BackupOptions.fromBooleanArray(filled).toSyncSettings()
+    }
+
+    /**
+     * Indexes of [BackupOptions.asBooleanArray] that belong to the library group, derived from the
+     * very list the settings screen renders, so a new section cannot be classified wrongly.
+     */
+    private val librarySectionIndices: Set<Int> by lazy {
+        val defaults = BackupOptions().asBooleanArray()
+        defaults.indices.filterTo(mutableSetOf()) { index ->
+            val probe = BackupOptions.fromBooleanArray(
+                BooleanArray(defaults.size) { it == index },
+            )
+            BackupOptions.libraryOptions.any { it.getter(probe) }
+        }
+    }
+
+    /**
+     * Library sections are unioned: a device that missed a checkbox must not silently drop data the
+     * others still keep. Settings sections follow this device's own selection.
+     */
+    fun mergeSyncSections(local: SyncSettings, remote: SyncSettings): SyncSettings {
+        val localFlags = local.toBackupOptions().asBooleanArray()
+        val remoteFlags = remote.toBackupOptions().asBooleanArray()
+
+        val merged = BooleanArray(localFlags.size) { index ->
+            if (index in librarySectionIndices) {
+                localFlags[index] || remoteFlags[index]
+            } else {
+                localFlags[index]
+            }
+        }
+        return BackupOptions.fromBooleanArray(merged).toSyncSettings()
+    }
+
+    /** True when the two selections disagree on a settings section (library ones are unioned). */
+    fun settingsSectionsDiffer(local: SyncSettings, remote: SyncSettings): Boolean {
+        val localFlags = local.toBackupOptions().asBooleanArray()
+        val remoteFlags = remote.toBackupOptions().asBooleanArray()
+        return localFlags.indices.any { index ->
+            index !in librarySectionIndices && localFlags[index] != remoteFlags[index]
+        }
     }
     // SY <--
 
@@ -163,3 +198,41 @@ class SyncPreferences(
             .set(syncTriggerOptions.syncOnAppResume)
     }
 }
+// SY -->
+
+/**
+ * The two types carry the same thirteen flags; these conversions exist so the sync section encoding
+ * can lean on [BackupOptions.asBooleanArray] instead of maintaining a parallel list of field names.
+ */
+fun SyncSettings.toBackupOptions(): BackupOptions = BackupOptions(
+    libraryEntries = libraryEntries,
+    categories = categories,
+    chapters = chapters,
+    tracking = tracking,
+    history = history,
+    readEntries = readEntries,
+    appSettings = appSettings,
+    extensionStores = extensionStores,
+    sourceSettings = sourceSettings,
+    privateSettings = privateSettings,
+    customInfo = customInfo,
+    savedSearches = savedSearches,
+    bookmarks = bookmarks,
+)
+
+fun BackupOptions.toSyncSettings(): SyncSettings = SyncSettings(
+    libraryEntries = libraryEntries,
+    categories = categories,
+    chapters = chapters,
+    tracking = tracking,
+    history = history,
+    appSettings = appSettings,
+    extensionStores = extensionStores,
+    sourceSettings = sourceSettings,
+    privateSettings = privateSettings,
+    customInfo = customInfo,
+    readEntries = readEntries,
+    savedSearches = savedSearches,
+    bookmarks = bookmarks,
+)
+// SY <--

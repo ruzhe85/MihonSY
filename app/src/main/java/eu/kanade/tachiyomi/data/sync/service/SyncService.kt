@@ -68,7 +68,23 @@ abstract class SyncService(
         val localSettings = syncPreferences.getSyncSettings()
         val remoteSettings = parseSyncSettings(remoteBackup?.backupPreferences)
 
-        remoteSyncSettingsMismatch = if (remoteSettings != null && remoteSettings != localSettings) {
+        // Library sections are unioned so a device that missed a checkbox cannot silently drop data
+        // the others still keep. The widened selection is persisted and takes effect from the next
+        // sync on, because the payload for this run has already been built.
+        if (remoteSettings != null) {
+            val mergedSections = syncPreferences.mergeSyncSections(localSettings, remoteSettings)
+            if (mergedSections != localSettings) {
+                logcat(LogPriority.INFO, "SyncService") {
+                    "Library sections widened to match the other device"
+                }
+                syncPreferences.setSyncSettings(mergedSections)
+            }
+        }
+
+        // Only settings sections are worth reporting: library ones are reconciled automatically
+        remoteSyncSettingsMismatch = if (remoteSettings != null &&
+            syncPreferences.settingsSectionsDiffer(localSettings, remoteSettings)
+        ) {
             syncPreferences.encodeSyncSettings(remoteSettings)
         } else {
             ""

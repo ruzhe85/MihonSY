@@ -11,6 +11,8 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.domain.sync.models.SyncSettings
+import eu.kanade.domain.sync.toBackupOptions
+import eu.kanade.domain.sync.toSyncSettings
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.data.backup.create.BackupOptions
@@ -105,46 +107,13 @@ private class SyncSettingsSelectorModel(
     data class State(
         val options: BackupOptions = BackupOptions(),
     ) companion object {
-        private fun syncOptionsToBackupOptions(syncSettings: SyncSettings): BackupOptions {
-            return BackupOptions(
-                libraryEntries = syncSettings.libraryEntries,
-                categories = syncSettings.categories,
-                chapters = syncSettings.chapters,
-                tracking = syncSettings.tracking,
-                history = syncSettings.history,
-                appSettings = syncSettings.appSettings,
-                extensionStores = syncSettings.extensionStores,
-                sourceSettings = syncSettings.sourceSettings,
-                privateSettings = syncSettings.privateSettings,
+        // SY -->
+        // Shared with the sync section encoding so the field lists cannot drift apart
+        private fun syncOptionsToBackupOptions(syncSettings: SyncSettings): BackupOptions =
+            syncSettings.toBackupOptions()
 
-                // SY -->
-                customInfo = syncSettings.customInfo,
-                readEntries = syncSettings.readEntries,
-                savedSearches = syncSettings.savedSearches,
-                bookmarks = syncSettings.bookmarks,
-                // SY <--
-            )
-        }
-
-        private fun backupOptionsToSyncOptions(backupOptions: BackupOptions): SyncSettings {
-            return SyncSettings(
-                libraryEntries = backupOptions.libraryEntries,
-                categories = backupOptions.categories,
-                chapters = backupOptions.chapters,
-                tracking = backupOptions.tracking,
-                history = backupOptions.history,
-                appSettings = backupOptions.appSettings,
-                extensionStores = backupOptions.extensionStores,
-                sourceSettings = backupOptions.sourceSettings,
-                privateSettings = backupOptions.privateSettings,
-
-                // SY -->
-                customInfo = backupOptions.customInfo,
-                readEntries = backupOptions.readEntries,
-                savedSearches = backupOptions.savedSearches,
-                bookmarks = backupOptions.bookmarks,
-                // SY <--
-            )
-        }
+        private fun backupOptionsToSyncOptions(backupOptions: BackupOptions): SyncSettings =
+            backupOptions.toSyncSettings()
+        // SY <--
     }
 }
