@@ -590,7 +590,10 @@
     <string name="pref_sync_interval">同步频率</string>
     <string name="pref_choose_what_to_sync">选择要同步的内容</string>
     <!-- SY -->
-    <string name="pref_sync_sections_mismatch">其他设备同步的内容与本机不同。请在每台设备上选择相同的项目，否则合并时可能丢失数据。</string>
+    <string name="pref_sync_sections_mismatch">其他设备的设置类同步项与本机不同。若希望设置保持一致，请在每台设备上选择相同的项目。</string>
+    <string name="pref_sync_result_never">尚未同步过</string>
+    <string name="pref_sync_result_in_sync">已与远端一致</string>
+    <string name="pref_sync_result_applied">应用了 %d 项远端更新</string>
     <!-- SY -->
     <string name="last_synchronization">最后同步：%1$s</string>
     <string name="google_drive">谷歌云端硬盘</string>

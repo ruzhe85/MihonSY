@@ -200,6 +200,13 @@ class SyncManager(
         }
 
         // SY -->
+        // Record what this sync accomplished, so the settings screen can show whether the devices
+        // actually converged instead of leaving it to guesswork.
+        syncPreferences.syncLastAppliedCount.set(syncService?.lastAppliedCount ?: 0)
+        syncPreferences.syncLastCompletedAt.set(Date().time)
+        // SY <--
+
+        // SY -->
         // The clock must survive a restart even when no restore follows, otherwise a device whose
         // wall clock is slow could produce timestamps that lose to values it has not seen yet.
         SyncClock.flush(context)

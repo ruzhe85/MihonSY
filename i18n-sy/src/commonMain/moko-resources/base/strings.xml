@@ -237,7 +237,10 @@
     <string name="pref_sync_interval">Synchronization frequency</string>
     <string name="pref_choose_what_to_sync">Choose what to sync</string>
     <!-- SY -->
-    <string name="pref_sync_sections_mismatch">The other device syncs different content. Make the same selection on every device, otherwise merged data can be dropped.</string>
+    <string name="pref_sync_sections_mismatch">The other device syncs different settings. Pick the same settings on every device to keep them identical.</string>
+    <string name="pref_sync_result_never">Not synced yet</string>
+    <string name="pref_sync_result_in_sync">In sync with the remote</string>
+    <string name="pref_sync_result_applied">Applied %d remote changes</string>
     <!-- SY -->
     <string name="syncyomi">SyncYomi</string>
     <string name="scan_qr_code">Scan a QR code</string>

@@ -577,6 +577,15 @@ object SettingsDataScreen : SearchableSettings {
 
         // SY -->
         val syncSectionsMismatch = syncPreferences.remoteSyncSettings.get().isNotBlank()
+
+        // Result of the last full sync. "Nothing applied" is the only meaningful confirmation that
+        // the devices converged, so it is shown rather than left to guesswork.
+        val lastAppliedCount = syncPreferences.syncLastAppliedCount.get()
+        val syncResult = when {
+            lastAppliedCount < 0 -> stringResource(SYMR.strings.pref_sync_result_never)
+            lastAppliedCount == 0 -> stringResource(SYMR.strings.pref_sync_result_in_sync)
+            else -> stringResource(SYMR.strings.pref_sync_result_applied, lastAppliedCount)
+        }
         // SY <--
 
         return if (syncServiceType != SyncManager.SyncService.NONE) {
@@ -585,17 +594,19 @@ object SettingsDataScreen : SearchableSettings {
                 onClick = {
                     navigator.push(SyncSettingsSelector())
                 },
-            ) + if (syncSectionsMismatch) {
+            ) + buildList {
                 // SY -->
-                // Detected during the last sync: another device syncs a different set of sections,
-                // so the merged result would drop whatever this device does not sync.
-                listOf(
-                    Preference.PreferenceItem.InfoPreference(
-                        title = stringResource(SYMR.strings.pref_sync_sections_mismatch),
-                    ),
-                )
-            } else {
-                emptyList()
+                add(Preference.PreferenceItem.InfoPreference(syncResult))
+
+                if (syncSectionsMismatch) {
+                    // Detected during the last sync: the settings sections differ between devices
+                    add(
+                        Preference.PreferenceItem.InfoPreference(
+                            stringResource(SYMR.strings.pref_sync_sections_mismatch),
+                        ),
+                    )
+                }
+                // SY <--
             }
         } else {
             preferences

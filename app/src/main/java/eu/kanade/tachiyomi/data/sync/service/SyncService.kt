@@ -54,11 +54,24 @@ abstract class SyncService(
      * the local marker and would always compare it against itself.
      */
     var remoteSyncSettingsMismatch: String = ""
+
+    /**
+     * Remote-only entries the merge of this run had to apply locally. Together with the completion
+     * time this is what the settings screen reports as the sync result: 0 means the two sides
+     * already agreed, which is the only meaningful way to confirm several devices converged.
+     */
+    var lastAppliedCount: Int = 0
     // SY <--
 
     protected fun mergeSyncData(localSyncData: SyncData, remoteSyncData: SyncData): SyncData {
         val localBackup = localSyncData.backup
         val remoteBackup = remoteSyncData.backup
+
+        // SY -->
+        // Measured before merging: the merge folds the remote side into the local entries in place,
+        // so afterwards there would be no difference left to count.
+        lastAppliedCount = countRemoteOnlyEntries(localBackup, remoteBackup)
+        // SY <--
 
         // SY -->
         // Which sections each side is actually syncing. A section that is switched off is left out
@@ -162,6 +175,30 @@ abstract class SyncService(
             backup = mergedBackup,
         )
     }
+
+    // SY -->
+    /**
+     * How much of the remote payload this device did not have yet, across the sections that
+     * represent actual content. Used purely for the sync result shown in the settings screen.
+     */
+    private fun countRemoteOnlyEntries(local: Backup?, remote: Backup?): Int {
+        if (remote == null) return 0
+
+        val localManga = local?.backupManga.orEmpty().map { "${it.source}|${it.url}" }.toSet()
+        val localCategories = local?.backupCategories.orEmpty().map { it.name }.toSet()
+        val localBookmarks = local?.backupBookmarks.orEmpty()
+            .map { "${it.source}|${it.mangaUrl}|${it.chapterUrl}|${it.page}" }
+            .toSet()
+
+        val manga = remote.backupManga.count { "${it.source}|${it.url}" !in localManga }
+        val categories = remote.backupCategories.count { it.name !in localCategories }
+        val bookmarks = remote.backupBookmarks.count {
+            "${it.source}|${it.mangaUrl}|${it.chapterUrl}|${it.page}" !in localBookmarks
+        }
+
+        return manga + categories + bookmarks
+    }
+    // SY <--
 
     // SY -->
 

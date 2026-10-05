@@ -202,7 +202,10 @@
     <string name="pref_sync_interval">同步頻率</string>
     <string name="pref_choose_what_to_sync">選擇要同步的內容</string>
     <!-- SY -->
-    <string name="pref_sync_sections_mismatch">其他裝置同步的內容與本機不同。請在每台裝置上選擇相同的項目，否則合併時可能遺失資料。</string>
+    <string name="pref_sync_sections_mismatch">其他裝置的設定類同步項與本機不同。若希望設定保持一致，請在每台裝置上選擇相同的項目。</string>
+    <string name="pref_sync_result_never">尚未同步過</string>
+    <string name="pref_sync_result_in_sync">已與遠端一致</string>
+    <string name="pref_sync_result_applied">套用了 %d 項遠端更新</string>
     <!-- SY -->
     <string name="syncyomi">SyncYomi</string>
     <string name="last_synchronization">上次同步時間：%1$s</string>

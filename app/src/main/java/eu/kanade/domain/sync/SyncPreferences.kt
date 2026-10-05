@@ -43,6 +43,15 @@ class SyncPreferences(
      * makes merges unpredictable. Only reported to the user, never applied automatically.
      */
     val remoteSyncSettings: Preference<String> = preferenceStore.getString("sync_remote_settings", "")
+
+    /**
+     * Remote-only entries the last full sync had to apply locally. 0 means both sides already
+     * agreed; the initial -1 means no sync has completed yet.
+     */
+    val syncLastAppliedCount: Preference<Int> = preferenceStore.getInt("sync_last_applied_count", -1)
+
+    /** Epoch millis of the last completed full sync, 0 when it never ran. */
+    val syncLastCompletedAt: Preference<Long> = preferenceStore.getLong("sync_last_completed_at", 0L)
     // SY <--
 
     // SY -->
