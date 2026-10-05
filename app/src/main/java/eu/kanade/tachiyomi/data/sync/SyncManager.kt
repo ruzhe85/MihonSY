@@ -137,6 +137,13 @@ class SyncManager(
         )
         logcat(LogPriority.DEBUG) { "End create backup" }
 
+        // SY -->
+        // Fold the progress channel into this payload before it is sent: entries it knows to be
+        // newer are applied here, and this payload's entries are written back into it, so the two
+        // views converge no matter which one was used since the last full sync.
+        ProgressSyncManager(context).mergeWithFullBackup(backup)
+        // SY <--
+
         // Create the SyncData object
         // SY -->
         // The merge resolves entries in place, so it is handed a private copy. Without this the

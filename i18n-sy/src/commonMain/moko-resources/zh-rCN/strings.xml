@@ -641,7 +641,7 @@
     <string name="webdav_sync_data_purge_error">清除 WebDAV 同步数据时出错</string>
     <string name="webdav_not_configured">尚未配置 WebDAV</string>
     <string name="webdav_invalid_url">WebDAV 地址无效：%1$s</string>
-    <string name="sync_on_chapter_read">章节阅读后同步</string>
+    <string name="sync_on_chapter_read">退出阅读器时同步</string>
     <string name="sync_on_app_resume">后台转到前台时同步</string>
     <string name="sync_library">同步书架</string>
     <string name="parodies">戏仿</string>

@@ -27,6 +27,7 @@ import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.saver.Image
 import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.saver.Location
+import eu.kanade.tachiyomi.data.sync.ProgressSyncManager
 import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
@@ -168,6 +169,16 @@ class ReaderViewModel @JvmOverloads constructor(
 
     private val eventChannel = Channel<Event>()
     val eventFlow = eventChannel.receiveAsFlow()
+
+    // SY -->
+    /**
+     * Lightweight progress channel. Opening a chapter only needs the page another device left off
+     * at, which does not justify a whole backup + upload + restore round trip.
+     */
+    private val progressSyncManager: ProgressSyncManager by lazy {
+        ProgressSyncManager(Injekt.get<Application>())
+    }
+    // SY <--
 
     /**
      * The manga loaded in the reader. It can be null when instantiated for a short time.
@@ -337,6 +348,15 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     override fun onCleared() {
+        // SY -->
+        // Leaving the reader is what "sync after reading" means: run the full sync once nobody is
+        // waiting on the reader any more. WorkManager only needs a Context, which matters because
+        // viewModelScope has already been cancelled by the time onCleared runs.
+        if (syncPreferences.isSyncEnabled() && syncPreferences.getSyncTriggerOptions().syncOnChapterRead) {
+            SyncDataJob.startNow(Injekt.get<Application>())
+        }
+        // SY <--
+
         val currentChapters = state.value.viewerChapters
         if (currentChapters != null) {
             currentChapters.unref()
@@ -480,6 +500,31 @@ class ReaderViewModel @JvmOverloads constructor(
         page: Int? = null,
         // SY <--
     ): ViewerChapters {
+        // SY -->
+        // Before the chapter is loaded, two things happen:
+        //  1. the previous chapter's progress is flushed to the lightweight channel (forced,
+        //     because leaving a chapter is exactly when its last page matters);
+        //  2. unless a specific page was requested, the page another device left off at is pulled
+        //     in and applied, so the reader opens where it was last read anywhere.
+        getCurrentChapter()?.let { current ->
+            current.chapter.id?.let { id ->
+                viewModelScope.launchNonCancellable {
+                    progressSyncManager.recordLocalProgress(id, force = true)
+                }
+            }
+        }
+
+        if (page == null) {
+            manga?.let { currentManga ->
+                progressSyncManager.applyRemoteProgress(currentManga.id, chapter.chapter.url)?.let { applied ->
+                    chapter.chapter.last_page_read = applied.lastPageRead
+                    chapter.chapter.read = applied.read
+                    chapter.requestedPage = applied.lastPageRead.toInt()
+                }
+            }
+        }
+        // SY <--
+
         loader.loadChapter(chapter /* SY --> */, page/* SY <-- */)
 
         val chapterPos = chapterList.indexOf(chapter)
@@ -1053,8 +1098,6 @@ class ReaderViewModel @JvmOverloads constructor(
         hasExtraPage: Boolean, /* SY <-- */
     ) {
         val pageIndex = page.index
-        val syncTriggerOpt = syncPreferences.getSyncTriggerOptions()
-        val isSyncEnabled = syncPreferences.isSyncEnabled()
 
         mutableState.update {
             it.copy(currentPage = pageIndex + 1)
@@ -1063,6 +1106,15 @@ class ReaderViewModel @JvmOverloads constructor(
         chapterPageIndex = pageIndex
 
         if (!incognitoMode && page.status !is Page.State.Error) {
+            // SY -->
+            // Remember what the database held, so the write below can be skipped when nothing
+            // actually changed. Every UPDATE refreshes chapters.last_modified_at, and progress
+            // merging uses that timestamp to decide which side wins, so a no-op write would make
+            // this device look newer than it is and overwrite another device's real progress.
+            val previousPageRead = readerChapter.chapter.last_page_read
+            val previousRead = readerChapter.chapter.read
+            // SY <--
+
             readerChapter.chapter.last_page_read = pageIndex
 
             // MihonSY: while reading, sync partial page progress to Komga (throttled).
@@ -1077,25 +1129,30 @@ class ReaderViewModel @JvmOverloads constructor(
             ) {
                 // SY <--
                 updateChapterProgressOnComplete(readerChapter)
-
-                // Check if syncing is enabled for chapter read:
-                if (isSyncEnabled && syncTriggerOpt.syncOnChapterRead) {
-                    SyncDataJob.startNow(Injekt.get<Application>())
-                }
+                // SY -->
+                // "Sync after reading" now fires when the reader is left (onCleared) instead of once
+                // per finished chapter, and "sync on chapter open" is served by the lightweight
+                // progress channel inside loadChapter.
+                // SY <--
             }
 
-            updateChapter.await(
-                ChapterUpdate(
-                    id = readerChapter.chapter.id!!,
-                    read = readerChapter.chapter.read,
-                    lastPageRead = readerChapter.chapter.last_page_read.toLong(),
-                ),
-            )
-
             // SY -->
-            // Check if syncing is enabled for chapter open:
-            if (isSyncEnabled && syncTriggerOpt.syncOnChapterOpen && readerChapter.chapter.last_page_read == 0) {
-                SyncDataJob.startNow(Injekt.get<Application>())
+            if (previousPageRead != readerChapter.chapter.last_page_read ||
+                previousRead != readerChapter.chapter.read
+            ) {
+                updateChapter.await(
+                    ChapterUpdate(
+                        id = readerChapter.chapter.id!!,
+                        read = readerChapter.chapter.read,
+                        lastPageRead = readerChapter.chapter.last_page_read.toLong(),
+                    ),
+                )
+            }
+
+            // Report to the lightweight progress channel. Throttled inside, so most page turns cost
+            // nothing more than a comparison.
+            readerChapter.chapter.id?.let { id ->
+                progressSyncManager.recordLocalProgress(id)
             }
             // SY <--
         }

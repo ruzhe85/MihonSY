@@ -242,7 +242,7 @@
     <string name="webdav_invalid_url">WebDAV 位址無效：%1$s</string>
     <string name="pref_sync_options">建立同步觸發條件</string>
     <string name="pref_sync_options_summ">可用於設定同步觸發條件</string>
-    <string name="sync_on_chapter_read">閱讀章節時同步</string>
+    <string name="sync_on_chapter_read">離開閱讀器時同步</string>
     <string name="sync_on_chapter_open">打開章節時同步</string>
     <string name="sync_on_app_start">啟動應用時同步</string>
     <string name="sync_on_app_resume">重返應用時同步</string>

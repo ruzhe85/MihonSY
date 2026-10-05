@@ -3,7 +3,9 @@ package eu.kanade.tachiyomi.data.sync.service
 import android.content.Context
 import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.tachiyomi.data.backup.models.Backup
+import eu.kanade.tachiyomi.data.sync.ProgressSnapshot
 import eu.kanade.tachiyomi.data.sync.SyncNotifier
+import eu.kanade.tachiyomi.data.sync.SyncProgress
 import eu.kanade.tachiyomi.network.await
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
@@ -300,6 +302,113 @@ class WebDavSyncService(
             }
         }
     }
+
+    // SY -->
+    private val progressFileName = "${appName}_progress.proto.gz"
+
+    /**
+     * Timeout for the progress channel. It carries a few dozen KB and is used while the reader is
+     * waiting, so it has to fail fast instead of inheriting the leisurely full-sync timeouts.
+     */
+    private val interactiveTimeoutSeconds = 5L
+
+    private val interactiveClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .connectTimeout(interactiveTimeoutSeconds, TimeUnit.SECONDS)
+            .readTimeout(interactiveTimeoutSeconds, TimeUnit.SECONDS)
+            .writeTimeout(interactiveTimeoutSeconds, TimeUnit.SECONDS)
+            .build()
+    }
+
+    private fun progressFileUrl(): HttpUrl {
+        return requireRemoteUrl().newBuilder()
+            .addPathSegment(progressFileName)
+            .build()
+    }
+
+    /**
+     * Reads the progress file. Returns null when it is absent or unreachable: the reader then falls
+     * back to local data, because a missing progress channel must never surface as an error while
+     * reading.
+     */
+    suspend fun pullProgress(): ProgressSnapshot? {
+        return try {
+            val request = requestBuilder(progressFileUrl()).get().build()
+            interactiveClient.newCall(request).await().use { response ->
+                if (response.code == HttpStatus.SC_NOT_FOUND) return null
+
+                if (!response.isSuccessful) {
+                    logcat(LogPriority.ERROR) { "Failed to download progress: HTTP ${response.code}" }
+                    return null
+                }
+
+                val etag = response.header("ETag")?.takeIf { it.isNotBlank() && it != "*" }
+                    ?: response.header("Last-Modified")?.takeIf { it.isNotBlank() }
+
+                val byteArray = response.body.byteStream().use { stream ->
+                    GZIPInputStream(stream).use { gzipStream ->
+                        gzipStream.readBytes()
+                    }
+                }
+
+                val progress = try {
+                    protoBuf.decodeFromByteArray(SyncProgress.serializer(), byteArray)
+                } catch (e: Exception) {
+                    logcat(LogPriority.ERROR) { "Bad progress payload received: ${e.message}" }
+                    return null
+                }
+
+                ProgressSnapshot(progress, etag)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logcat(LogPriority.DEBUG) { "Progress pull failed: ${e.message}" }
+            null
+        }
+    }
+
+    /** Returns false when the remote moved under us or the write failed. */
+    suspend fun pushProgress(progress: SyncProgress, etag: String?): Boolean {
+        val byteArray = protoBuf.encodeToByteArray(SyncProgress.serializer(), progress)
+        return try {
+            withIOContext {
+                val gzipped = ByteArrayOutputStream().also { bos ->
+                    GZIPOutputStream(bos).use { it.write(byteArray) }
+                }.toByteArray()
+
+                ensureDirectoryExists()
+
+                val body = gzipped.toRequestBody("application/octet-stream".toMediaType())
+                val builder = requestBuilder(progressFileUrl()).put(body)
+                if (etag != null) {
+                    builder.header("If-Match", etag)
+                } else {
+                    builder.header("If-None-Match", "*")
+                }
+
+                var uploaded = false
+                interactiveClient.newCall(builder.build()).await().use {
+                    when {
+                        it.code == HTTP_PRECONDITION_FAILED -> logcat(LogPriority.INFO) {
+                            "Progress file changed under us; leaving it to the next sync"
+                        }
+                        !it.isSuccessful -> logcat(LogPriority.ERROR) {
+                            "Failed to upload progress: HTTP ${it.code}"
+                        }
+                        else -> uploaded = true
+                    }
+                }
+                uploaded
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logcat(LogPriority.DEBUG) { "Progress push failed: ${e.message}" }
+            false
+        }
+    }
+    // SY <--
 
     suspend fun deleteSyncData(): DeleteSyncDataStatus {
         return withIOContext {
