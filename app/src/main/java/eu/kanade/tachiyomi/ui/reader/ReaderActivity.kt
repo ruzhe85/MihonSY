@@ -567,7 +567,11 @@ class ReaderActivity : BaseActivity() {
 
     override fun onPause() {
         lifecycleScope.launchNonCancellable {
-            viewModel.updateHistory()
+            // SY -->
+            // Leaving the reader is where reading stopped, so the history entry is pushed right away
+            // rather than waiting out the channel's throttle window.
+            viewModel.updateHistory(forceChannelPush = true)
+            // SY <--
             // SY -->
             // The screen going off is a common way to stop reading, so the last page is pushed now
             // instead of waiting for the throttled report on the next page turn.

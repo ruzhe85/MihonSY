@@ -1320,8 +1320,13 @@ class ReaderViewModel @JvmOverloads constructor(
 
     /**
      * Saves the chapter last read history if incognito mode isn't on.
+     *
+     * [forceChannelPush] is set when the reader is being left: that is the moment the user expects the
+     * other devices to learn where reading stopped, so the channel must not hold the entry back for a
+     * throttle window. Chapter switches keep the throttled push, because flipping through chapters is
+     * exactly what the throttle is there for.
      */
-    suspend fun updateHistory() {
+    suspend fun updateHistory(forceChannelPush: Boolean = false) {
         getCurrentChapter()?.let { readerChapter ->
             if (incognitoMode) return@let
 
@@ -1332,13 +1337,14 @@ class ReaderViewModel @JvmOverloads constructor(
             upsertHistory.await(HistoryUpdate(chapterId, endTime, sessionReadDuration))
             // SY -->
             // The history channel carries one entry per manga, so the other devices move this manga to
-            // the top of their history with the chapter that was just read. The push is throttled
-            // internally; an entry that cannot go out yet is still recorded and leaves with the next.
+            // the top of their history with the chapter that was just read. A throttled push that does
+            // not go out is still recorded and leaves with the next one.
             manga?.let { currentManga ->
                 historySyncManager.recordLocalRead(
                     mangaId = currentManga.id,
                     chapterUrl = readerChapter.chapter.url,
                     readAtSeconds = endTime.time / 1000L,
+                    force = forceChannelPush,
                 )
             }
             // SY <--
