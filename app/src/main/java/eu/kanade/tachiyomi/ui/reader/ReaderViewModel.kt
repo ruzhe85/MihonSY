@@ -713,10 +713,22 @@ class ReaderViewModel @JvmOverloads constructor(
     /**
      * MihonSY: 比例检测命中的章节 URL——自动条漫只对「这一章」内存生效，
      * 绝不写入 manga.readingMode（持久记忆只由用户手动切换模式更新）。
-     * 换章后失效，新章重新检测，同系列混排条漫/页漫可按章独立判断。
+     * 换章后本章标记失效；新章仍会重新检测，但本书若已被判为条漫则直接继承
+     * （见 [autoWebtoonMangaId]），同系列混排条漫/页漫仍可按章复核退回。
      */
     @Volatile
     private var autoWebtoonEffectiveChapter: String? = null
+
+    /**
+     * Komiho:「这本书是条漫」的**会话内**记忆（不写 manga.readingMode）。
+     *
+     * 任意一章被比例探测命中后记下本书 id，之后**其余章节直接按条漫解析**
+     * （见 [getMangaReadingMode]）—— 不再逐章重判，也就不再每章翻转一次 viewer
+     * 并顺带弹一次模式提示。复核仍保留：新章开头几页全部量完且都不是长条时撤销这条记忆、
+     * 退回页漫（见 [revertAutoWebtoonMangaMemoryIfNeeded]），混排系列不会被粘死。
+     */
+    @Volatile
+    private var autoWebtoonMangaId: Long? = null
 
     /** Chapter URL the current check session belongs to; reset on chapter change. */
     private var autoWebtoonCheckChapter: String? = null
@@ -739,8 +751,9 @@ class ReaderViewModel @JvmOverloads constructor(
      * the first page, we inspect the first [AUTO_WEBTOON_PAGES_TO_CHECK] pages as the reader
      * passes through them: if ANY of them is a tall strip (ratio above
      * [AUTO_WEBTOON_MIN_ASPECT_RATIO]) the chapter is a webtoon and the reader switches to
-     * webtoon mode for this chapter only (in-memory; the saved manga mode is never touched).
-     * Only when all of them turn out normal-sized does the check give up.
+     * webtoon mode (in-memory; the saved manga mode is never touched). 命中后同时记下
+     * 「这本书是条漫」（[autoWebtoonMangaId]），本书其余章节直接按条漫起、免逐章翻转。
+     * Only when all of them turn out normal-sized does the check give up（那时若本条记忆存在会撤销）。
      *
      * Triggered from TWO places (MihonSY):
      *  1. [onPageSelected] — fallback, fires on page turns.
@@ -761,7 +774,9 @@ class ReaderViewModel @JvmOverloads constructor(
         // 避免读到上一章时被下一章的预载结果提前重建 viewer。
         if (page.chapter != getCurrentChapter()) return
         // Skip if tag/source based detection already resolved to webtoon
-        if (getMangaReadingMode() == ReadingMode.WEBTOON.flagValue) return
+        // Komiho: 「本书是条漫」的会话记忆**不**在此跳过 —— 继承来的章节仍要复核，
+        // 量完发现开头几页都不是长条就撤销记忆退回页漫（见本函数里 conclude 的调用处）。
+        if (isWebtoonByTagOrDefault(manga)) return
 
         val chapterPages = page.chapter.pages ?: return
         val checkCount = minOf(AUTO_WEBTOON_PAGES_TO_CHECK, chapterPages.size)
@@ -805,7 +820,11 @@ class ReaderViewModel @JvmOverloads constructor(
                 applyAutoWebtoonForCurrentChapter(chapterUrl)
                 return@launchIO
             }
-            if (concludeAutoWebtoonCheckIfAllEarlyChecked(checkCount)) return@launchIO
+            if (concludeAutoWebtoonCheckIfAllEarlyChecked(checkCount)) {
+                // Komiho: 复核不过 ⇒ 撤销「本书是条漫」的会话记忆并退回页漫（混排系列）。
+                revertAutoWebtoonMangaMemoryIfNeeded()
+                return@launchIO
+            }
             if (autoWebtoonRetriesLeft > 0) {
                 // Some early pages are still downloading. Retry shortly so a strip that
                 // becomes ready after the cover (without the user scrolling) is still
@@ -842,8 +861,11 @@ class ReaderViewModel @JvmOverloads constructor(
         val manga = manga ?: return false
         // 只对「没有显式模式」的书生效：手动选择的模式优先，自动检测永不覆盖。
         if (ReadingMode.fromPreference(manga.readingMode.toInt()) != ReadingMode.DEFAULT) return false
-        // 标签/全局推断已经判定条漫（Komga 的 readingDirection、或 tags 里的 webtoon/long strip）⇒ 无需再探
-        if (getMangaReadingMode() == ReadingMode.WEBTOON.flagValue) return false
+        // 标签/来源推断、或全局默认就是条漫（Komga 的 readingDirection、tags 里的 webtoon/long strip）
+        // ⇒ 无需再探，也不该被复核撤销。
+        if (isWebtoonByTagOrDefault(manga)) return false
+        // 本章的探测已经命中过 ⇒ 已定案。
+        if (autoWebtoonEffectiveChapter == chapter.chapter.url) return false
         val chapterPages = chapter.pages ?: return false
         val chapterUrl = chapter.chapter.url
         if (autoWebtoonCheckChapter != chapterUrl) {
@@ -881,13 +903,16 @@ class ReaderViewModel @JvmOverloads constructor(
                         "switching to webtoon mode (before first feed)"
                 }
                 markAutoWebtoonForChapter(chapterUrl)
+            } else if (concludeAutoWebtoonCheckIfAllEarlyChecked(checkCount)) {
+                android.util.Log.d(
+                    KOMIHA_AUTOWEBTOON_TAG,
+                    "pre-resolve: none of the first $checkCount pages is tall -> keep page mode",
+                )
+                // Komiho: 头几页都不是长条 ⇒ 撤销「本书是条漫」的记忆；若模式因此变了，
+                // 返回 true 让调用方**在喂章节前**重建（此刻 viewer 手里还没有页，重建零成本）。
+                revertAutoWebtoonMangaMemoryIfNeeded(rebuild = false)
             } else {
-                if (concludeAutoWebtoonCheckIfAllEarlyChecked(checkCount)) {
-                    android.util.Log.d(
-                        KOMIHA_AUTOWEBTOON_TAG,
-                        "pre-resolve: none of the first $checkCount pages is tall -> keep page mode",
-                    )
-                }
+                // 判定不了（预算用尽 / 早期页还没量完）：保留「本书是条漫」的记忆即可，无需重建。
                 false
             }
         }
@@ -930,15 +955,54 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     /**
-     * 把 [chapterUrl] 记为「本章自动条漫」，返回**模式是否真的变了**（调用方据此决定是否重建 viewer）。
-     * 只改内存状态（[autoWebtoonEffectiveChapter]），不写 manga.readingMode。
+     * 把 [chapterUrl] 记为「本章自动条漫」，并把本书记为「会话内条漫」（[autoWebtoonMangaId]，
+     * 后续章节免重判），返回**模式是否真的变了**（调用方据此决定是否重建 viewer）。
+     * 只改内存状态，不写 manga.readingMode。
      */
     private fun markAutoWebtoonForChapter(chapterUrl: String): Boolean {
         val previousMode = getMangaReadingMode()
         autoWebtoonAspectDone = true
         autoWebtoonEffectiveChapter = chapterUrl
-        // 已经是条漫（全局默认 / 标签推断）时只是记账，模式不变 ⇒ 不需要重建
+        // Komiho: 探测命中 ⇒ 按书记下「这本书是条漫」（会话内），后续章节直接按条漫起。
+        autoWebtoonMangaId = manga?.id
+        // 已经是条漫（全局默认 / 标签推断 / 本书记忆）时只是记账，模式不变 ⇒ 不需要重建
         return getMangaReadingMode() != previousMode
+    }
+
+    /**
+     * Komiho: 与「自动条漫」两根内存标记**无关**的判定是否已经给出条漫 ——
+     * 全局默认阅读模式就是条漫，或标签/来源推断（`defaultReaderType`）指向条漫。
+     *
+     * 这类书不需要再做比例探测，也不该被复核撤销（复核只服务于自动探测出来的结果）。
+     */
+    private fun isWebtoonByTagOrDefault(manga: Manga): Boolean {
+        if (readerPreferences.defaultReadingMode.get() == ReadingMode.WEBTOON.flagValue) return true
+        val type = manga.mangaType(sourceName = sourceManager.get(manga.source)?.name)
+        return manga.defaultReaderType(type) == ReadingMode.WEBTOON.flagValue
+    }
+
+    /**
+     * Komiho: 复核不过 —— 本章开头几页全部量完且都不是长条 ⇒ 撤销「本书是条漫」的会话记忆，
+     * 退回标签/默认推断的模式（混排系列：条漫章后面跟着页漫章）。
+     *
+     * [rebuild] = true 时自己发重建事件（喂章节**之后**才得出结论的那条路）；
+     * = false 时只改状态并返回「模式是否变化」，由 [preResolveAutoWebtoon] 在喂章节前重建。
+     */
+    private fun revertAutoWebtoonMangaMemoryIfNeeded(rebuild: Boolean = true): Boolean {
+        val mangaId = manga?.id ?: return false
+        if (autoWebtoonMangaId != mangaId) return false
+        val previousMode = getMangaReadingMode()
+        autoWebtoonMangaId = null
+        autoWebtoonEffectiveChapter = null
+        val changed = getMangaReadingMode() != previousMode
+        if (!changed) return false
+        logcat { "MihonSY auto-webtoon: book-level memory revoked, back to page mode" }
+        android.util.Log.d(
+            KOMIHA_AUTOWEBTOON_TAG,
+            "revert: book-level memory revoked (early pages are not tall)",
+        )
+        if (rebuild) recreateViewerForAutoMode()
+        return true
     }
 
     /**
@@ -1393,6 +1457,14 @@ class ReaderViewModel @JvmOverloads constructor(
         val readingMode = ReadingMode.fromPreference(manga.readingMode.toInt())
         // SY -->
         return when {
+            // Komiho:「这本书是条漫」的会话记忆 —— 本书任意一章探测命中后，其余章节直接按条漫解析。
+            // 少了这一条，换章会回落默认模式，然后新章重新探到长条再切一次（每章一次 viewer 翻转 +
+            // 一次模式提示）；有了它，后续章节一开始就是条漫，探测照跑但不再改变模式。
+            resolveDefault && readingMode == ReadingMode.DEFAULT &&
+                readerPreferences.useAutoWebtoon.get() &&
+                autoWebtoonMangaId == manga.id -> {
+                ReadingMode.WEBTOON.flagValue
+            }
             // MihonSY: 比例检测命中的当前章——内存级 effective 模式优先于标签/全局推断，
             // 仅当该章仍是激活章时生效（换章后自然失效，由新章重新检测）。
             resolveDefault && readingMode == ReadingMode.DEFAULT &&
@@ -1416,6 +1488,10 @@ class ReaderViewModel @JvmOverloads constructor(
      */
     fun setMangaReadingMode(readingMode: ReadingMode) {
         val manga = manga ?: return
+        // Komiho: 手动选择永远优先，并清掉自动条漫的内存标记 —— 以后把模式改回「默认」时
+        // 重新从零探测，而不是沿用这次残留的「本书是条漫」记忆。
+        autoWebtoonMangaId = null
+        autoWebtoonEffectiveChapter = null
         runBlocking(Dispatchers.IO) {
             setMangaViewerFlags.awaitSetReadingMode(manga.id, readingMode.flagValue.toLong())
             val currChapters = state.value.viewerChapters
