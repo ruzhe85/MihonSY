@@ -73,6 +73,10 @@ class ChapterRepositoryImpl(
                     sourceOrder = chapterUpdate.sourceOrder,
                     dateFetch = chapterUpdate.dateFetch,
                     dateUpload = chapterUpdate.dateUpload,
+                    // SY -->
+                    // Ordinary updates let the database stamp the timestamp itself
+                    lastModifiedAt = null,
+                    // SY <--
                     chapterId = chapterUpdate.id,
                     version = chapterUpdate.version,
                     isSyncing = 0,

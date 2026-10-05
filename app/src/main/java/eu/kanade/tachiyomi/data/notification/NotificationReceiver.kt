@@ -10,6 +10,7 @@ import androidx.core.net.toUri
 import eu.kanade.tachiyomi.data.backup.restore.BackupRestoreJob
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.library.LibraryUpdateJob
+import eu.kanade.tachiyomi.data.sync.ProgressClock
 import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.data.updater.AppUpdateDownloadJob
 import eu.kanade.tachiyomi.ui.main.MainActivity
@@ -213,7 +214,13 @@ class NotificationReceiver : BroadcastReceiver() {
         val sourceManager: SourceManager = Injekt.get()
 
         launchIO {
-            val toUpdate = chapterUrls.mapNotNull { getChapter.await(it, mangaId) }
+            val chapters = chapterUrls.mapNotNull { getChapter.await(it, mangaId) }
+            // SY -->
+            // Only the chapters that were actually unread are a progress change; marking an already
+            // read chapter again must not make this device look newer than another device.
+            val newlyRead = chapters.filterNot { it.read }
+            // SY <--
+            val toUpdate = chapters
                 .map {
                     val chapter = it.copy(read = true)
                     if (downloadPreferences.removeAfterMarkedAsRead.get()) {
@@ -228,6 +235,9 @@ class NotificationReceiver : BroadcastReceiver() {
                     chapter.toChapterUpdate()
                 }
             updateChapter.awaitAll(toUpdate)
+            // SY -->
+            ProgressClock.stampProgressByMangaId(mangaId, newlyRead)
+            // SY <--
         }
     }
 

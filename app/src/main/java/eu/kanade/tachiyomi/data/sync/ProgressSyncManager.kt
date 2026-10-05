@@ -124,9 +124,11 @@ class ProgressSyncManager(
      * Returns the applied entry, or null when nothing changed. Never throws and never blocks for
      * long: a missing or unreachable progress file simply means the reader uses local data.
      */
-    suspend fun applyRemoteProgress(mangaId: Long, chapterUrl: String): ProgressEntry? {
+    suspend fun applyRemoteProgress(mangaId: Long, chapterUrl: String, force: Boolean = false): ProgressEntry? {
         if (!isAvailable() || chapterUrl.isBlank()) return null
-        if (!takePullSlot()) return null
+        // Coming back to the foreground has to see the newest page right away, so the reader is
+        // allowed to skip the throttle that keeps ordinary chapter opens cheap.
+        if (!force && !takePullSlot()) return null
 
         val fetched = pullQuietly() ?: return null
         val remoteEntry = fetched.progress.entries.firstOrNull { it.chapterUrl == chapterUrl }
@@ -137,15 +139,26 @@ class ProgressSyncManager(
         val chapter = database.chaptersQueries
             .getChapterByUrlAndMangaId(chapterUrl = chapterUrl, mangaId = mangaId, mapper = ::mapChapter)
             .awaitAsOneOrNull() ?: return null
+        val manga = database.mangasQueries
+            .getMangaById(mangaId, ::mapManga)
+            .awaitAsOneOrNull() ?: return null
 
-        // Both sides are in seconds here
-        if (remoteEntry.updatedAt <= chapter.lastModifiedAt) return null
+        // Both sides are in seconds here. The local side is the reading clock, not the chapter row's
+        // timestamp: bookmark edits and restores refresh that one as well.
+        val localUpdatedAt = ProgressClock.progressAt(manga, chapter).takeIf { it > 0L }
+            ?: chapter.lastModifiedAt
+        if (remoteEntry.updatedAt <= localUpdatedAt) return null
 
         val page = remoteEntry.lastPageRead
         val read = remoteEntry.read || chapter.read
-        if (page == chapter.lastPageRead && read == chapter.read) return null
+        if (page == chapter.lastPageRead && read == chapter.read) {
+            // Nothing to write, but the clock still has to learn the newer timestamp
+            ProgressClock.observeProgress(manga, chapter, remoteEntry.updatedAt)
+            return null
+        }
 
         writeChapterProgress(chapter.id, read = read, lastPageRead = page)
+        ProgressClock.observeProgress(manga, chapter, remoteEntry.updatedAt)
         logcat(LogPriority.DEBUG) { "Applied remote progress for $chapterUrl (page=$page, read=$read)" }
 
         // Hand back exactly what landed so the caller can refresh its in-memory copy
@@ -173,7 +186,11 @@ class ProgressSyncManager(
             chapterUrl = chapter.url,
             lastPageRead = chapter.last_page_read,
             read = chapter.read,
-            updatedAt = chapter.last_modified_at,
+            // The reading clock only moves when the progress itself changed; the chapter row's own
+            // timestamp also moves for bookmark edits and restores. Falling back to it keeps the
+            // behaviour for chapters this change has never stamped.
+            updatedAt = ProgressClock.progressAt(manga, chapter).takeIf { it > 0L }
+                ?: chapter.last_modified_at,
         )
 
         mutex.withLock {
@@ -309,7 +326,8 @@ class ProgressSyncManager(
                     chapterUrl = chapter.url,
                     lastPageRead = chapter.lastPageRead,
                     read = chapter.read,
-                    updatedAt = chapter.lastModifiedAt,
+                    // The payload was stamped by the export from the same reading clock
+                    updatedAt = chapter.progressAt,
                 )
             }
         }
@@ -328,6 +346,9 @@ class ProgressSyncManager(
             backup.backupManga.forEach { manga ->
                 manga.chapters.forEach { chapter ->
                     val winner = winners["${manga.source}|${manga.url}|${chapter.url}"] ?: return@forEach
+                    // The payload has to carry the timestamp of whichever side won, otherwise the
+                    // value it just adopted would look stale to the very next merge.
+                    chapter.progressAt = winner.updatedAt
                     if (winner.lastPageRead != chapter.lastPageRead || winner.read != chapter.read) {
                         chapter.lastPageRead = winner.lastPageRead
                         chapter.read = winner.read
@@ -371,6 +392,8 @@ class ProgressSyncManager(
             sourceOrder = null,
             dateFetch = null,
             dateUpload = null,
+            // Applying another device's progress is not a local edit, so the row keeps its timestamp
+            lastModifiedAt = null,
             chapterId = chapterId,
             version = row.version,
             isSyncing = 1,

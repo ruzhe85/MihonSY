@@ -568,6 +568,11 @@ class ReaderActivity : BaseActivity() {
     override fun onPause() {
         lifecycleScope.launchNonCancellable {
             viewModel.updateHistory()
+            // SY -->
+            // The screen going off is a common way to stop reading, so the last page is pushed now
+            // instead of waiting for the throttled report on the next page turn.
+            viewModel.commitProgress()
+            // SY <--
         }
         super.onPause()
     }
@@ -580,6 +585,13 @@ class ReaderActivity : BaseActivity() {
         super.onResume()
         viewModel.restartReadTimer()
         setMenuVisibility(viewModel.state.value.menuVisible)
+        // SY -->
+        // Coming back to the foreground has to pick up progress made on another device, otherwise
+        // this reader would keep showing (and later push) a page that was already left behind.
+        lifecycleScope.launchIO {
+            viewModel.refreshProgressFromRemote()
+        }
+        // SY <--
     }
 
     /**

@@ -17,6 +17,7 @@ import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.library.LibraryUpdateJob
+import eu.kanade.tachiyomi.data.sync.ProgressClock
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.lang.toLocalDate
 import exh.source.EH_SOURCE_ID
@@ -279,10 +280,20 @@ class UpdatesScreenModel(
      */
     fun bookmarkUpdates(updates: List<UpdatesItem>, bookmark: Boolean) {
         screenModelScope.launchIO {
-            updates
-                .filterNot { it.update.bookmark == bookmark }
+            // SY -->
+            // Only the chapters that actually changed advance the bookmark clock, so a no-op bulk
+            // toggle cannot make this device look newer than the one that really edited it.
+            val changed = updates.filterNot { it.update.bookmark == bookmark }
+            changed
                 .map { ChapterUpdate(id = it.update.chapterId, bookmark = bookmark) }
                 .let { updateChapter.awaitAll(it) }
+            changed
+                .groupBy { it.update.mangaId }
+                .forEach { (mangaId, items) ->
+                    val chapters = items.mapNotNull { getChapter.await(it.update.chapterId) }
+                    ProgressClock.stampBookmarkByMangaId(mangaId, chapters)
+                }
+            // SY <--
         }
         toggleAllSelection(false)
     }

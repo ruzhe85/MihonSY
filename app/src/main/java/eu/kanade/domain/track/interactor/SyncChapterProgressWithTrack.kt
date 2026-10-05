@@ -1,6 +1,9 @@
 package eu.kanade.domain.track.interactor
 
 import eu.kanade.domain.track.model.toDbTrack
+// SY -->
+import eu.kanade.tachiyomi.data.sync.ProgressClock
+// SY <--
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.Tracker
 import eu.kanade.tachiyomi.data.track.komga.Komga
@@ -39,9 +42,9 @@ class SyncChapterProgressWithTrack(
         // page each in-progress book is), so sync per-book instead of the "continuous prefix"
         // model used by other trackers. "Newer wins" decides the direction per chapter/book.
         if (tracker is Komga) {
-            syncFromKomga(tracker, remoteTrack, sortedChapters)
+            syncFromKomga(mangaId, tracker, remoteTrack, sortedChapters)
         } else {
-            syncFromContinuousRead(remoteTrack, tracker, sortedChapters)
+            syncFromContinuousRead(mangaId, remoteTrack, tracker, sortedChapters)
         }
     }
 
@@ -50,13 +53,17 @@ class SyncChapterProgressWithTrack(
      * push back the max of local/remote last chapter read.
      */
     private suspend fun syncFromContinuousRead(
+        mangaId: Long,
         remoteTrack: Track,
         tracker: Tracker,
         sortedChapters: List<Chapter>,
     ) {
-        val chapterUpdates = sortedChapters
+        // SY -->
+        // Only the chapters that were actually unread are a progress change worth stamping.
+        val chaptersToMarkRead = sortedChapters
             .filter { chapter -> chapter.chapterNumber <= remoteTrack.lastChapterRead && !chapter.read }
-            .map { it.copy(read = true).toChapterUpdate() }
+        val chapterUpdates = chaptersToMarkRead.map { it.copy(read = true).toChapterUpdate() }
+        // SY <--
 
         // only take into account continuous reading
         val localLastRead = sortedChapters.takeWhile { it.read }.lastOrNull()?.chapterNumber ?: 0F
@@ -66,6 +73,9 @@ class SyncChapterProgressWithTrack(
         try {
             tracker.update(updatedTrack.toDbTrack())
             updateChapter.awaitAll(chapterUpdates)
+            // SY -->
+            ProgressClock.stampProgressByMangaId(mangaId, chaptersToMarkRead)
+            // SY <--
             insertTrack.await(updatedTrack)
         } catch (e: Throwable) {
             logcat(LogPriority.WARN, e)
@@ -83,6 +93,7 @@ class SyncChapterProgressWithTrack(
      *   page progress are pushed as page progress.
      */
     private suspend fun syncFromKomga(
+        mangaId: Long,
         komga: Komga,
         remoteTrack: Track,
         sortedChapters: List<Chapter>,
@@ -138,10 +149,21 @@ class SyncChapterProgressWithTrack(
             }
         }
 
+        // SY -->
+        // A Komga pull rewrites the local progress, so those chapters have to advance the reading
+        // clock; otherwise the pulled page would look stale to the next merge.
+        val changedChapterIds = chapterUpdates.map { it.id }.toSet()
+        // SY <--
         try {
             if (chapterUpdates.isNotEmpty()) {
                 updateChapter.awaitAll(chapterUpdates)
             }
+            // SY -->
+            ProgressClock.stampProgressByMangaId(
+                mangaId,
+                sortedChapters.filter { it.id in changedChapterIds },
+            )
+            // SY <--
             // Keep the local track in sync with what Komga now reports.
             insertTrack.await(remoteTrack)
         } catch (e: Throwable) {

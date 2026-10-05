@@ -11,6 +11,7 @@ import eu.kanade.tachiyomi.data.backup.models.BackupHistory
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
 import eu.kanade.tachiyomi.data.backup.models.BackupMergedMangaReference
 import eu.kanade.tachiyomi.data.backup.models.BackupTracking
+import eu.kanade.tachiyomi.data.sync.ProgressClock
 import exh.EXHMigrations
 import logcat.LogPriority
 import logcat.logcat
@@ -144,10 +145,15 @@ class MangaRestorer(
     // SY <--
 
     private suspend fun restoreExistingManga(manga: Manga, dbManga: Manga): Manga {
+        // SY -->
+        // The payload carries the merged timestamp of both sides; keeping the newer of the two makes
+        // sure the value written below is the merge result rather than whichever branch was copied.
+        val mergedLastModifiedAt = maxOf(manga.lastModifiedAt, dbManga.lastModifiedAt)
+        // SY <--
         return if (manga.version > dbManga.version) {
-            updateManga(dbManga.copyFrom(manga).copy(id = dbManga.id))
+            updateManga(dbManga.copyFrom(manga).copy(id = dbManga.id, lastModifiedAt = mergedLastModifiedAt))
         } else {
-            updateManga(manga.copyFrom(dbManga).copy(id = dbManga.id))
+            updateManga(manga.copyFrom(dbManga).copy(id = dbManga.id, lastModifiedAt = mergedLastModifiedAt))
         }
     }
 
@@ -205,6 +211,12 @@ class MangaRestorer(
             dateAdded = manga.dateAdded,
             mangaId = manga.id,
             updateStrategy = manga.updateStrategy.let(UpdateStrategyColumnAdapter::encode),
+            // SY -->
+            // The guarded trigger no longer stamps restored rows, so the merged timestamp the
+            // payload carries is written explicitly; otherwise this device would keep claiming the
+            // entry is older than it is and a deletion from another device could win over an edit.
+            lastModifiedAt = manga.lastModifiedAt,
+            // SY <--
             version = manga.version,
             isSyncing = 1,
             notes = manga.notes,
@@ -258,36 +270,50 @@ class MangaRestorer(
                             null // Same state; skip
                         }
                     }
-                    else -> updateChapterBasedOnSyncState(chapter, dbChapter, backupChapter)
+                    else -> updateChapterBasedOnSyncState(manga, chapter, dbChapter, backupChapter)
                 }
             }
             .partition { it.id > 0 }
 
         insertNewChapters(newChapters)
         updateExistingChapters(existingChapters)
+
+        // SY -->
+        // The merged payload decides the per-field timestamps, so the local clock is told about them:
+        // otherwise this device would keep its older stamp and the next merge could revert the values
+        // that were just restored.
+        liveChapters.forEach { chapter ->
+            ProgressClock.observeProgress(manga.source, manga.url, chapter.url, chapter.progressAt)
+            ProgressClock.observeBookmark(manga.source, manga.url, chapter.url, chapter.bookmarkAt)
+        }
+        // SY <--
     }
 
     private fun updateChapterBasedOnSyncState(
+        manga: Manga,
         chapter: Chapter,
         dbChapter: Chapter,
         backupChapter: BackupChapter,
     ): Chapter {
         return if (isSync) {
             // SY -->
-            // The database bumps a chapter's last_modified_at whenever the reader touches it, so it
-            // stands in for "when this device last changed the chapter". Each of the three mutable
-            // fields is then resolved on its own timestamp; merging them with OR/assignment made an
-            // un-read or un-bookmark on one device revert on every sync.
-            val localChangedAt = dbChapter.lastModifiedAt
+            // Each of the three mutable fields is resolved on its own reading clock, not on the
+            // chapter row's last_modified_at: that one is refreshed by bookmark edits and by restores
+            // as well, which would let a stale local value survive the merge. Falling back to the row
+            // timestamp covers chapters this change has never stamped.
+            val localProgressAt = ProgressClock.progressAt(manga, dbChapter).takeIf { it > 0L }
+                ?: dbChapter.lastModifiedAt
+            val localBookmarkAt = ProgressClock.bookmarkAt(manga, dbChapter).takeIf { it > 0L }
+                ?: dbChapter.lastModifiedAt
             chapter.copy(
                 id = dbChapter.id,
-                read = if (backupChapter.readAt >= localChangedAt) chapter.read else dbChapter.read,
-                lastPageRead = if (backupChapter.progressAt >= localChangedAt) {
+                read = if (backupChapter.readAt >= localProgressAt) chapter.read else dbChapter.read,
+                lastPageRead = if (backupChapter.progressAt >= localProgressAt) {
                     chapter.lastPageRead
                 } else {
                     dbChapter.lastPageRead
                 },
-                bookmark = if (backupChapter.bookmarkAt >= localChangedAt) chapter.bookmark else dbChapter.bookmark,
+                bookmark = if (backupChapter.bookmarkAt >= localBookmarkAt) chapter.bookmark else dbChapter.bookmark,
                 sourceOrder = chapter.sourceOrder,
             )
             // SY <--
@@ -346,6 +372,11 @@ class MangaRestorer(
                     sourceOrder = if (isSync) chapter.sourceOrder else null,
                     dateFetch = null,
                     dateUpload = null,
+                    // SY -->
+                    // The guarded trigger no longer stamps restored rows, so the merged chapter
+                    // timestamp has to be written explicitly.
+                    lastModifiedAt = chapter.lastModifiedAt,
+                    // SY <--
                     chapterId = chapter.id,
                     version = chapter.version,
                     isSyncing = 1,

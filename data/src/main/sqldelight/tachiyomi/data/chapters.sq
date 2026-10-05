@@ -27,9 +27,13 @@ CREATE INDEX chapters_manga_id_index ON chapters(manga_id);
 CREATE INDEX chapters_unread_by_manga_index ON chapters(manga_id, read) WHERE read = 0;
 CREATE INDEX idx_chapters_url ON chapters(url);
 
+-- A sync restore writes rows with is_syncing = 1 and must not make them look freshly edited, so
+-- the timestamp is only stamped for ordinary updates. Both old and new are checked because the
+-- is_syncing reset that follows a restore updates that column alone.
 CREATE TRIGGER update_last_modified_at_chapters
 AFTER UPDATE ON chapters
 FOR EACH ROW
+WHEN new.is_syncing = 0 AND old.is_syncing = 0
 BEGIN
   UPDATE chapters
   SET last_modified_at = strftime('%s', 'now')
@@ -147,6 +151,7 @@ SET manga_id = coalesce(:mangaId, manga_id),
     source_order = coalesce(:sourceOrder, source_order),
     date_fetch = coalesce(:dateFetch, date_fetch),
     date_upload = coalesce(:dateUpload, date_upload),
+    last_modified_at = coalesce(:lastModifiedAt, last_modified_at),
     version = coalesce(:version, version),
     is_syncing = coalesce(:isSyncing, is_syncing),
     memo = coalesce(:memo, memo)

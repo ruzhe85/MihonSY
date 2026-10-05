@@ -414,7 +414,12 @@ abstract class SyncService(
                         }
                         winner.asChapterTombstone(ledgerKeyOf(url))
                     } else {
-                        mergeChapterPair(local, remoteChapter)
+                        mergeChapterPair(
+                            local = local,
+                            remote = remoteChapter,
+                            progressKey = SyncClock.progressKey(manga.source, manga.url, url),
+                            bookmarkKey = SyncClock.bookmarkKey(manga.source, manga.url, url),
+                        )
                     }
                 }
 
@@ -432,7 +437,18 @@ abstract class SyncService(
         }
     }
 
-    private fun mergeChapterPair(local: BackupChapter, remote: BackupChapter): BackupChapter {
+    private fun mergeChapterPair(
+        local: BackupChapter,
+        remote: BackupChapter,
+        progressKey: String,
+        bookmarkKey: String,
+    ): BackupChapter {
+        // SY -->
+        // Absorb the timestamps this merge resolved against, so a later local write on either field
+        // is guaranteed to land after them even when this device's wall clock is behind.
+        SyncClock.observe(context, progressKey, remote.progressAt)
+        SyncClock.observe(context, bookmarkKey, remote.bookmarkAt)
+        // SY <--
         val base = if (local.version >= remote.version) local else remote
 
         base.read = when {

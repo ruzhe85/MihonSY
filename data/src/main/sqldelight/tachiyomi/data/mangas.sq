@@ -46,9 +46,12 @@ BEGIN
   WHERE _id = new._id;
 END;
 
+-- See chapters.sq: a sync restore must not make a row look freshly edited, so the timestamp is
+-- only stamped for ordinary updates, in both directions of is_syncing.
 CREATE TRIGGER update_last_modified_at_mangas
 AFTER UPDATE ON mangas
 FOR EACH ROW
+WHEN new.is_syncing = 0 AND old.is_syncing = 0
 BEGIN
   UPDATE mangas
   SET last_modified_at = strftime('%s', 'now')
@@ -225,6 +228,7 @@ UPDATE mangas SET
     date_added = coalesce(:dateAdded, date_added),
     update_strategy = coalesce(:updateStrategy, update_strategy),
     calculate_interval = coalesce(:calculateInterval, calculate_interval),
+    last_modified_at = coalesce(:lastModifiedAt, last_modified_at),
     version = coalesce(:version, version),
     is_syncing = coalesce(:isSyncing, is_syncing),
     notes = coalesce(:notes, notes),

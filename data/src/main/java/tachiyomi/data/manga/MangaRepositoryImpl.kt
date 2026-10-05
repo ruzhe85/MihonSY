@@ -202,6 +202,10 @@ class MangaRepositoryImpl(
                     dateAdded = value.dateAdded,
                     mangaId = value.id,
                     updateStrategy = value.updateStrategy?.let(UpdateStrategyColumnAdapter::encode),
+                    // SY -->
+                    // Ordinary updates let the database stamp the timestamp itself
+                    lastModifiedAt = null,
+                    // SY <--
                     version = value.version,
                     isSyncing = 0,
                     notes = value.notes,

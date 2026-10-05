@@ -91,6 +91,41 @@ object SyncClock {
         }
     }
 
+    /**
+     * Seeds [key] with [seed] when it has no value yet, and returns the value in use.
+     *
+     * Backups used to timestamp reading progress with the chapter row's `last_modified_at`, which
+     * any write refreshes. Adopting that value once keeps the first sync after this change behaving
+     * exactly like the previous release, instead of making every chapter look freshly read.
+     */
+    fun adopt(context: Context, key: String, seed: Long): Long {
+        ensureLoaded(context)
+        synchronized(lock) {
+            val existing = seen[key]
+            if (existing != null) return existing
+            val ts = seed.coerceAtLeast(0L)
+            seen[key] = ts
+            return ts
+        }
+    }
+
+    /** Value in use for [key], or 0 when it has never been stamped. */
+    fun peek(context: Context, key: String): Long {
+        ensureLoaded(context)
+        return synchronized(lock) { seen[key] ?: 0L }
+    }
+
+    // SY -->
+    /**
+     * Keys for the two reading actions a chapter carries. They are stamped only when the value
+     * actually changes, so a bookmark edit or a restore can no longer make stale progress look
+     * newer than another device's real one.
+     */
+    fun progressKey(source: Long, mangaUrl: String, chapterUrl: String) = "cp:$source|$mangaUrl|$chapterUrl"
+
+    fun bookmarkKey(source: Long, mangaUrl: String, chapterUrl: String) = "cb:$source|$mangaUrl|$chapterUrl"
+    // SY <--
+
     /** Records a timestamp produced elsewhere so later local writes still land after it. */
     fun observe(context: Context, key: String, ts: Long) {
         if (ts <= 0L) return

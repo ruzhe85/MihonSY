@@ -27,6 +27,7 @@ import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.saver.Image
 import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.saver.Location
+import eu.kanade.tachiyomi.data.sync.ProgressClock
 import eu.kanade.tachiyomi.data.sync.ProgressSyncManager
 import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.source.model.Page
@@ -349,6 +350,10 @@ class ReaderViewModel @JvmOverloads constructor(
 
     override fun onCleared() {
         // SY -->
+        // Persist the reading clock: viewModelScope is already cancelled here, so this has to be a
+        // plain call, and a process killed right after leaving the reader must not lose the stamps
+        // produced while reading.
+        runCatching { ProgressClock.flush() }
         // Leaving the reader is what "sync after reading" means: run the full sync once nobody is
         // waiting on the reader any more. WorkManager only needs a Context, which matters because
         // viewModelScope has already been cancelled by the time onCleared runs.
@@ -1147,6 +1152,9 @@ class ReaderViewModel @JvmOverloads constructor(
                         lastPageRead = readerChapter.chapter.last_page_read.toLong(),
                     ),
                 )
+                // Only a real change advances the reading clock. The chapter row's own timestamp
+                // cannot be used for this: bookmark edits and sync restores refresh it as well.
+                manga?.let { ProgressClock.stampProgress(it, readerChapter.chapter) }
             }
 
             // Report to the lightweight progress channel. Throttled inside, so most page turns cost
@@ -1163,15 +1171,14 @@ class ReaderViewModel @JvmOverloads constructor(
         // SY -->
         if (manga?.isEhBasedManga() == true) {
             viewModelScope.launchNonCancellable {
-                val chapterUpdates = unfilteredChapterList
-                    .filter { it.sourceOrder > readerChapter.chapter.source_order }
-                    .map { chapter ->
-                        ChapterUpdate(
-                            id = chapter.id,
-                            read = true,
-                        )
-                    }
-                updateChapter.awaitAll(chapterUpdates)
+                // Re-marking an already read chapter is not a progress change, so it is filtered
+                // out and kept from advancing the reading clock.
+                val chaptersToMarkRead = unfilteredChapterList
+                    .filter { !it.read && it.sourceOrder > readerChapter.chapter.source_order }
+                updateChapter.awaitAll(
+                    chaptersToMarkRead.map { ChapterUpdate(id = it.id, read = true) },
+                )
+                manga?.let { ProgressClock.stampProgress(it, chaptersToMarkRead) }
             }
         }
         // SY <--
@@ -1184,21 +1191,17 @@ class ReaderViewModel @JvmOverloads constructor(
         if (!markDuplicateAsRead) return
 
         val duplicateUnreadChapters = unfilteredChapterList
-            .mapNotNull { chapter ->
-                if (
-                    !chapter.read &&
+            .filter { chapter ->
+                !chapter.read &&
                     chapter.isRecognizedNumber &&
                     chapter.chapterNumber.toFloat() == readerChapter.chapter.chapter_number
-                ) {
-                    ChapterUpdate(id = chapter.id, read = true)
-                } else {
-                    null
-                }
             }
-        updateChapter.awaitAll(duplicateUnreadChapters)
+        updateChapter.awaitAll(
+            duplicateUnreadChapters.map { ChapterUpdate(id = it.id, read = true) },
+        )
+        manga?.let { ProgressClock.stampProgress(it, duplicateUnreadChapters) }
         // SY -->
-        duplicateUnreadChapters.forEach { chapterUpdate ->
-            val chapter = unfilteredChapterList.first { it.id == chapterUpdate.id }
+        duplicateUnreadChapters.forEach { chapter ->
             deleteChapterIfNeeded(ReaderChapter(chapter))
         }
         // SY <--
@@ -1223,6 +1226,45 @@ class ReaderViewModel @JvmOverloads constructor(
             chapterReadStartTime = null
         }
     }
+
+    // SY -->
+    /**
+     * Pulls the newest progress for the chapter being read, bypassing the ordinary pull throttle.
+     *
+     * Called when the reader comes back to the foreground: this device may have been sitting on a
+     * stale page while another one read further, and continuing from that stale page would overwrite
+     * the newer progress on the next sync.
+     */
+    suspend fun refreshProgressFromRemote() {
+        val readerChapter = getCurrentChapter() ?: return
+        val currentManga = manga ?: return
+        val chapter = readerChapter.chapter
+
+        val applied = progressSyncManager
+            .applyRemoteProgress(currentManga.id, chapter.url, force = true)
+            ?: return
+
+        chapter.last_page_read = applied.lastPageRead.toInt()
+        chapter.read = applied.read
+        readerChapter.requestedPage = applied.lastPageRead.toInt()
+        // Needs `send` rather than `trySend`: the channel is rendezvous, so a trySend with no parked
+        // receiver is silently dropped and the viewer would keep showing the stale page.
+        eventChannel.send(Event.RecreateViewer)
+        logcat(LogPriority.DEBUG) {
+            "Reader resumed on a newer page from another device: ${applied.lastPageRead}"
+        }
+    }
+
+    /**
+     * Flushes the current chapter's progress onto the lightweight channel. Forced, because the
+     * screen going off or the reader being closed is exactly when the last page matters.
+     */
+    suspend fun commitProgress() {
+        getCurrentChapter()?.chapter?.id?.let { id ->
+            progressSyncManager.recordLocalProgress(id, force = true)
+        }
+    }
+    // SY <--
 
     /**
      * Called from the activity to load and set the next chapter as active.
@@ -1321,6 +1363,9 @@ class ReaderViewModel @JvmOverloads constructor(
     // SY -->
     fun toggleBookmark(chapterId: Long, bookmarked: Boolean) {
         val chapter = chapterList.find { it.chapter.id == chapterId }?.chapter ?: return
+        // Only a real change is worth a clock stamp: the chapter row's own timestamp is refreshed
+        // by any write, so stamping a no-op toggle would let this device win the next merge.
+        val changed = chapter.bookmark != bookmarked
         chapter.bookmark = bookmarked
         viewModelScope.launchNonCancellable {
             updateChapter.await(
@@ -1330,6 +1375,9 @@ class ReaderViewModel @JvmOverloads constructor(
                     bookmarkPage = if (bookmarked) chapter.last_page_read.toLong() else 0L,
                 ),
             )
+            if (changed) {
+                manga?.let { ProgressClock.stampBookmark(it, chapter) }
+            }
         }
     }
     // SY <--

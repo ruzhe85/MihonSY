@@ -39,6 +39,7 @@ import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.model.Download
+import eu.kanade.tachiyomi.data.sync.ProgressClock
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.source.PagePreviewSource
@@ -1326,10 +1327,16 @@ class MangaScreenModel(
      */
     fun bookmarkChapters(chapters: List<Chapter>, bookmarked: Boolean) {
         screenModelScope.launchIO {
-            chapters
-                .filterNot { it.bookmark == bookmarked }
+            // SY -->
+            // Only the chapters that actually changed advance the bookmark clock. The chapter row's
+            // own timestamp is refreshed by any write, so stamping a no-op toggle would make this
+            // device look like the most recent editor and undo another device's bookmark.
+            val changed = chapters.filterNot { it.bookmark == bookmarked }
+            changed
                 .map { ChapterUpdate(id = it.id, bookmark = bookmarked) }
                 .let { updateChapter.awaitAll(it) }
+            successState?.manga?.let { ProgressClock.stampBookmark(it, changed) }
+            // SY <--
         }
         toggleAllSelection(false)
     }

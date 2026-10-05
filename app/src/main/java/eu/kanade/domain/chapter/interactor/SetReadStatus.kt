@@ -1,6 +1,9 @@
 package eu.kanade.domain.chapter.interactor
 
 import eu.kanade.domain.download.interactor.DeleteDownload
+// SY -->
+import eu.kanade.tachiyomi.data.sync.ProgressClock
+// SY <--
 import exh.source.MERGED_SOURCE_ID
 import logcat.LogPriority
 import tachiyomi.core.common.util.lang.withNonCancellableContext
@@ -50,6 +53,17 @@ class SetReadStatus(
             logcat(LogPriority.ERROR, e)
             return@withNonCancellableContext Result.InternalError(e)
         }
+
+        // SY -->
+        // Marking chapters read (or unread) is a real progress change, so the reading clock is
+        // advanced for the chapters that actually changed. The filter above is what keeps that
+        // honest: re-marking an already read chapter must not make this device look newer than it is.
+        chaptersToUpdate
+            .groupBy { it.mangaId }
+            .forEach { (mangaId, chapters) ->
+                ProgressClock.stampProgressByMangaId(mangaId, chapters)
+            }
+        // SY <--
 
         if (read && downloadPreferences.removeAfterMarkedAsRead.get()) {
             chaptersToUpdate

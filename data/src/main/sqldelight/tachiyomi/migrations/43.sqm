@@ -1,0 +1,27 @@
+-- A sync restore writes mangas and chapters with is_syncing = 1. Letting the trigger refresh
+-- last_modified_at for those rows made freshly restored data look like a brand new local edit: it
+-- could bring deleted entries back, and it let whichever device restored most recently win the
+-- following merge. The version triggers already skip is_syncing rows; these now do too.
+-- Both old and new are checked so the is_syncing reset that follows a restore, which is an UPDATE
+-- of that column alone, does not bump the timestamp either.
+DROP TRIGGER IF EXISTS update_last_modified_at_chapters;
+CREATE TRIGGER update_last_modified_at_chapters
+AFTER UPDATE ON chapters
+FOR EACH ROW
+WHEN new.is_syncing = 0 AND old.is_syncing = 0
+BEGIN
+  UPDATE chapters
+  SET last_modified_at = strftime('%s', 'now')
+  WHERE _id = new._id;
+END;
+
+DROP TRIGGER IF EXISTS update_last_modified_at_mangas;
+CREATE TRIGGER update_last_modified_at_mangas
+AFTER UPDATE ON mangas
+FOR EACH ROW
+WHEN new.is_syncing = 0 AND old.is_syncing = 0
+BEGIN
+  UPDATE mangas
+  SET last_modified_at = strftime('%s', 'now')
+  WHERE _id = new._id;
+END;

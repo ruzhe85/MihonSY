@@ -16,6 +16,7 @@ import exh.source.MERGED_SOURCE_ID
 import exh.source.getMainSource
 import tachiyomi.data.Database
 import tachiyomi.data.MemoColumnAdapter
+import eu.kanade.tachiyomi.data.sync.ProgressClock
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.history.interactor.GetHistory
 import tachiyomi.domain.manga.interactor.GetCustomMangaInfo
@@ -75,13 +76,35 @@ class MangaBackupCreator(
 
         if (options.chapters) {
             // Backup all the chapters
-            database.chaptersQueries
+            val backupChapters = database.chaptersQueries
                 .getChaptersByMangaId(
                     mangaId = manga.id,
                     applyScanlatorFilter = 0, // false
                     mapper = backupChapterMapper,
                 )
                 .awaitAsList()
+            // SY -->
+            // The row's own last_modified_at is refreshed by any write, so the per-field timestamps
+            // come from the reading clock instead: it only advances when the value actually changed.
+            // A chapter the clock has never seen adopts the row timestamp, which keeps the first
+            // sync after this change behaving exactly like the previous release.
+            backupChapters.forEach { chapter ->
+                chapter.progressAt = ProgressClock.exportedProgressAt(
+                    source = manga.source,
+                    mangaUrl = manga.url,
+                    chapterUrl = chapter.url,
+                    seed = chapter.lastModifiedAt,
+                )
+                chapter.readAt = chapter.progressAt
+                chapter.bookmarkAt = ProgressClock.exportedBookmarkAt(
+                    source = manga.source,
+                    mangaUrl = manga.url,
+                    chapterUrl = chapter.url,
+                    seed = chapter.lastModifiedAt,
+                )
+            }
+            // SY <--
+            backupChapters
                 .takeUnless(List<BackupChapter>::isEmpty)
                 ?.let { mangaObject.chapters = it }
         }
