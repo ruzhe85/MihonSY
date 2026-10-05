@@ -1154,7 +1154,9 @@ class ReaderViewModel @JvmOverloads constructor(
                 )
                 // Only a real change advances the reading clock. The chapter row's own timestamp
                 // cannot be used for this: bookmark edits and sync restores refresh it as well.
-                manga?.let { ProgressClock.stampProgress(it, readerChapter.chapter) }
+                manga?.let {
+                    ProgressClock.stampProgress(it.source, it.url, readerChapter.chapter.url)
+                }
             }
 
             // Report to the lightweight progress channel. Throttled inside, so most page turns cost
@@ -1376,7 +1378,7 @@ class ReaderViewModel @JvmOverloads constructor(
                 ),
             )
             if (changed) {
-                manga?.let { ProgressClock.stampBookmark(it, chapter) }
+                manga?.let { ProgressClock.stampBookmark(it.source, it.url, chapter.url) }
             }
         }
     }

@@ -52,6 +52,17 @@ object ProgressClock {
     fun stampBookmark(manga: Manga, chapters: Collection<Chapter>): Long =
         chapters.maxOfOrNull { stampBookmark(manga, it) } ?: 0L
 
+    // Overloads taking the identity directly: the reader works with the legacy chapter model and
+    // the progress channel reads raw rows, so neither can hand over the domain model.
+    fun stampProgress(source: Long, mangaUrl: String, chapterUrl: String): Long =
+        SyncClock.next(context, SyncClock.progressKey(source, mangaUrl, chapterUrl))
+
+    fun stampBookmark(source: Long, mangaUrl: String, chapterUrl: String): Long =
+        SyncClock.next(context, SyncClock.bookmarkKey(source, mangaUrl, chapterUrl))
+
+    fun progressAt(source: Long, mangaUrl: String, chapterUrl: String): Long =
+        SyncClock.peek(context, SyncClock.progressKey(source, mangaUrl, chapterUrl))
+
     /**
      * Records a timestamp that was decided elsewhere (a progress pulled from another device, or a
      * merged value written by a restore), so this device's next write lands after it and the merged

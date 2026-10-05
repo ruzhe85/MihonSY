@@ -189,7 +189,8 @@ class ProgressSyncManager(
             // The reading clock only moves when the progress itself changed; the chapter row's own
             // timestamp also moves for bookmark edits and restores. Falling back to it keeps the
             // behaviour for chapters this change has never stamped.
-            updatedAt = ProgressClock.progressAt(manga, chapter).takeIf { it > 0L }
+            updatedAt = ProgressClock.progressAt(manga.source, manga.url, chapter.url)
+                .takeIf { it > 0L }
                 ?: chapter.last_modified_at,
         )
 
