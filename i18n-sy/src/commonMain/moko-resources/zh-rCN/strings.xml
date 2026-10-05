@@ -588,6 +588,8 @@
     <string name="pref_sync_now">立即同步</string>
     <string name="pref_sync_now_subtitle">立即开始同步数据</string>
     <string name="pref_sync_interval">同步频率</string>
+    <!-- SY：该频率只约束全量同步，阅读进度/历史/书签始终实时 -->
+    <string name="pref_sync_interval_summ">%s · 只限制全量同步；阅读进度、历史与书签始终实时</string>
     <string name="pref_choose_what_to_sync">选择要同步的内容</string>
     <!-- SY -->
     <string name="pref_sync_sections_mismatch">其他设备的设置类同步项与本机不同。若希望设置保持一致，请在每台设备上选择相同的项目。</string>

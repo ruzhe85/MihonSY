@@ -235,6 +235,8 @@
     <string name="pref_sync_success_notification_summ">Errors are still shown as notifications</string>
     <string name="pref_sync_automatic_category">Automatic Synchronization</string>
     <string name="pref_sync_interval">Synchronization frequency</string>
+    <!-- SY: only full syncs obey this frequency; reading data has its own live channels -->
+    <string name="pref_sync_interval_summ">%s · full syncs are limited to this; progress, history and bookmarks stay live</string>
     <string name="pref_choose_what_to_sync">Choose what to sync</string>
     <!-- SY -->
     <string name="pref_sync_sections_mismatch">The other device syncs different settings. Pick the same settings on every device to keep them identical.</string>

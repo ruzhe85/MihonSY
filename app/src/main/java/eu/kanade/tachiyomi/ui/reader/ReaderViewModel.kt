@@ -369,11 +369,13 @@ class ReaderViewModel @JvmOverloads constructor(
         // plain call, and a process killed right after leaving the reader must not lose the stamps
         // produced while reading.
         runCatching { ProgressClock.flush() }
-        // Leaving the reader is what "sync after reading" means: run the full sync once nobody is
-        // waiting on the reader any more. WorkManager only needs a Context, which matters because
-        // viewModelScope has already been cancelled by the time onCleared runs.
+        // Leaving the reader is what "sync after reading" means. Progress and history already went
+        // out through their own channels when the reader paused, so this only hands the full sync to
+        // the sync frequency: it runs when that frequency has elapsed, and is skipped when it has
+        // not. WorkManager only needs a Context, which matters because viewModelScope is already
+        // cancelled by the time onCleared runs.
         if (syncPreferences.isSyncEnabled() && syncPreferences.getSyncTriggerOptions().syncOnChapterRead) {
-            SyncDataJob.startNow(Injekt.get<Application>())
+            SyncDataJob.startIfDue(Injekt.get<Application>())
         }
         // SY <--
 
@@ -534,13 +536,19 @@ class ReaderViewModel @JvmOverloads constructor(
             }
         }
 
+        // "Sync on chapter open" now means exactly this: pull the page another device left off at and
+        // the bookmarks of this chapter, ignoring the throttle. With it off the pulls stay throttled,
+        // which is what the reader did before this option had any effect at all.
+        val forcePull = syncPreferences.getSyncTriggerOptions().syncOnChapterOpen
+
         if (page == null) {
             manga?.let { currentManga ->
-                progressSyncManager.applyRemoteProgress(currentManga.id, chapter.chapter.url)?.let { applied ->
-                    chapter.chapter.last_page_read = applied.lastPageRead.toInt()
-                    chapter.chapter.read = applied.read
-                    chapter.requestedPage = applied.lastPageRead.toInt()
-                }
+                val applied = progressSyncManager
+                    .applyRemoteProgress(currentManga.id, chapter.chapter.url, force = forcePull)
+                    ?: return@let
+                chapter.chapter.last_page_read = applied.lastPageRead.toInt()
+                chapter.chapter.read = applied.read
+                chapter.requestedPage = applied.lastPageRead.toInt()
             }
         }
 
@@ -548,7 +556,7 @@ class ReaderViewModel @JvmOverloads constructor(
         // so they are pulled alongside the progress instead of waiting for a full sync. Launched
         // separately: the chapter must not wait for the network to start loading.
         viewModelScope.launchNonCancellable {
-            bookmarkSyncManager.pullAndApply()
+            bookmarkSyncManager.pullAndApply(force = forcePull)
         }
         // SY <--
 

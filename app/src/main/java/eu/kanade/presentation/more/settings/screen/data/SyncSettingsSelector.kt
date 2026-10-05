@@ -100,7 +100,9 @@ private class SyncSettingsSelectorModel(
     }
 
     fun syncNow(context: Context) {
-        SyncDataJob.startNow(context)
+        // SY --> User initiated, so the sync frequency must not hold it back
+        SyncDataJob.startNow(context, manual = true)
+        // SY <--
     }
 
     @Immutable

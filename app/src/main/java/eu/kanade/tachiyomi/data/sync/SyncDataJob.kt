@@ -39,6 +39,16 @@ class SyncDataJob(private val context: Context, workerParams: WorkerParameters) 
             if (context.workManager.isRunning(TAG_MANUAL)) {
                 return Result.retry()
             }
+            // SY -->
+            // The timer and the event triggers share one anchor: when a full sync already happened
+            // inside this period there is nothing left for this run to add. Without the check the
+            // timer would still fire on its own schedule right after an event-triggered run and
+            // double the frequency the user asked for.
+            if (!isFullSyncDue()) {
+                logcat(LogPriority.DEBUG) { "Skipping scheduled sync: still within the sync frequency" }
+                return Result.success()
+            }
+            // SY <--
         }
 
         setForegroundSafely()
@@ -75,6 +85,56 @@ class SyncDataJob(private val context: Context, workerParams: WorkerParameters) 
         fun isRunning(context: Context): Boolean {
             return context.workManager.isRunning(TAG_JOB)
         }
+
+        // SY -->
+        /**
+         * True when a full sync is allowed to run under the synchronization frequency.
+         *
+         * That frequency is reused as the minimum interval between full syncs, so raising it also
+         * calms down the event triggers instead of only the timer. Manual runs never ask here.
+         *
+         * Everything is throttled only for WebDAV: it is the only service with the lightweight
+         * channels, and holding a full sync back on the others would leave those triggers with
+         * nothing to do at all. A frequency of 0 keeps the previous behaviour too — the user turned
+         * the timer off, not the triggers.
+         */
+        fun isFullSyncDue(): Boolean {
+            val syncPreferences = Injekt.get<SyncPreferences>()
+            if (!isWebdav(syncPreferences)) return true
+
+            val interval = syncPreferences.syncInterval.get()
+            if (interval <= 0) return true
+
+            val last = syncPreferences.syncLastCompletedAt.get()
+            // 0 means no full sync ever completed on this device, which must not be held back
+            return last <= 0L || System.currentTimeMillis() - last >= interval.toLong() * 60_000L
+        }
+
+        /**
+         * Runs a full sync for an automatic trigger, unless the sync frequency says it is too early.
+         *
+         * Returns true when the sync was queued, so a caller holding a pending change can drop it:
+         * anything that stayed throttled has to keep waiting for the next opportunity.
+         */
+        fun startIfDue(context: Context): Boolean {
+            val syncPreferences = Injekt.get<SyncPreferences>()
+            if (!syncPreferences.isSyncEnabled()) return false
+
+            // A run that is already in flight may have been built before the change happened
+            if (isRunning(context)) return false
+
+            if (!isFullSyncDue()) {
+                logcat(LogPriority.DEBUG) { "Holding the full sync back: still within the sync frequency" }
+                return false
+            }
+
+            startNow(context)
+            return true
+        }
+
+        private fun isWebdav(syncPreferences: SyncPreferences): Boolean =
+            SyncManager.SyncService.fromInt(syncPreferences.syncService.get()) == SyncManager.SyncService.WEBDAV
+        // SY <--
 
         fun setupTask(context: Context, prefInterval: Int? = null) {
             val syncPreferences = Injekt.get<SyncPreferences>()

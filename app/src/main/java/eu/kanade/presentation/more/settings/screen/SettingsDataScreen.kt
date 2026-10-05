@@ -953,6 +953,10 @@ object SettingsDataScreen : SearchableSettings {
                 Preference.PreferenceItem.ListPreference(
                     preference = syncIntervalPref,
                     title = stringResource(SYMR.strings.pref_sync_interval),
+                    // SY -->
+                    // The frequency limits full syncs only; reading data has its own always-on channels
+                    subtitle = stringResource(SYMR.strings.pref_sync_interval_summ),
+                    // SY <--
                     entries = mapOf(
                         0 to stringResource(MR.strings.off),
                         30 to stringResource(SYMR.strings.update_30min),

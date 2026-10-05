@@ -52,6 +52,13 @@ class SyncPreferences(
 
     /** Epoch millis of the last completed full sync, 0 when it never ran. */
     val syncLastCompletedAt: Preference<Long> = preferenceStore.getLong("sync_last_completed_at", 0L)
+
+    /**
+     * Set when something that only a full sync can carry changed: library membership, categories,
+     * read state. Those are collected here instead of syncing on every single edit, and the full sync
+     * is run once the user stops making them (leaving the app) or at the next opportunity.
+     */
+    val syncPendingChange: Preference<Boolean> = preferenceStore.getBoolean("sync_pending_change", false)
     // SY <--
 
     // SY -->

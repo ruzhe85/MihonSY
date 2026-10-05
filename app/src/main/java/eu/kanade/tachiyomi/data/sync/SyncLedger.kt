@@ -46,7 +46,16 @@ object SyncLedger {
     fun historyKey(source: Long, mangaUrl: String, chapterUrl: String) =
         "$HISTORY_PREFIX$source|$mangaUrl|$chapterUrl"
 
-    fun load(context: Context): Map<String, Long> {
+    /**
+     * Guards read-modify-write cycles. Every writer replaces the whole file, so two of them running
+     * at once — a library edit next to a sync capturing the baseline — would otherwise leave the
+     * ledger holding only one of the two views, and a missing key reads as "never owned".
+     */
+    private val lock = Any()
+
+    fun load(context: Context): Map<String, Long> = synchronized(lock) { loadLocked(context) }
+
+    private fun loadLocked(context: Context): Map<String, Long> {
         val file = File(context.filesDir, FILE_NAME)
         if (!file.exists()) return emptyMap()
         return try {
@@ -69,16 +78,44 @@ object SyncLedger {
         }
     }
 
-    fun write(context: Context, entries: Map<String, Long>) {
+    fun write(context: Context, entries: Map<String, Long>) = synchronized(lock) {
+        writeLocked(context, entries)
+    }
+
+    private fun writeLocked(context: Context, entries: Map<String, Long>) {
+        val text = entries.entries
+            .sortedBy { it.key }
+            .joinToString("\n") { "${it.key}\t${it.value}" }
+
         try {
-            File(context.filesDir, FILE_NAME).writeText(
-                entries.entries
-                    .sortedBy { it.key }
-                    .joinToString("\n") { "${it.key}\t${it.value}" },
-            )
+            // Written through a temporary file: a process killed mid-write must not leave a ledger
+            // that no longer lists what this device owns, which would let removals be undone.
+            val target = File(context.filesDir, FILE_NAME)
+            val tmp = File(context.filesDir, "$FILE_NAME.tmp")
+            tmp.writeText(text)
+            if (!tmp.renameTo(target)) {
+                // Better a plain overwrite than no ledger at all
+                target.writeText(text)
+                tmp.delete()
+            }
         } catch (e: Exception) {
             logcat(LogPriority.ERROR) { "Failed to write sync ledger: ${e.message}" }
         }
+    }
+
+    /**
+     * Records that this device owns [key].
+     *
+     * Used when an entry is added and removed between two full syncs: the baseline is only captured
+     * by a sync, so without the key the next merge would read the absence as "never owned" and the
+     * other devices' copy would bring the entry back. An already known key keeps the older value, so
+     * a removal recorded here does not look like a fresh edit.
+     */
+    fun markOwned(context: Context, key: String, timestamp: Long) = synchronized(lock) {
+        val entries = loadLocked(context).toMutableMap()
+        val existing = entries[key]
+        if (existing == null) entries[key] = timestamp
+        writeLocked(context, entries)
     }
 
     /**
