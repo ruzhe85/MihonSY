@@ -301,15 +301,10 @@ abstract class SyncService(
     /** Section selection advertised by another device, or null when it predates the marker. */
     private fun parseSyncSettings(preferences: List<BackupPreference>?): SyncSettings? {
         val encoded = preferences
-            ?.firstOrNull { it.key == SYNC_SETTINGS_KEY }
+            ?.firstOrNull { it.key == SyncPreferences.SYNC_SETTINGS_KEY }
             ?.let { (it.value as? StringPreferenceValue)?.value }
             ?: return null
         return syncPreferences.decodeSyncSettings(encoded)
-    }
-
-    companion object {
-        /** Pseudo preference key carrying the sync section selection inside the synced payload. */
-        const val SYNC_SETTINGS_KEY = "__sync_settings__"
     }
     // SY <--
 

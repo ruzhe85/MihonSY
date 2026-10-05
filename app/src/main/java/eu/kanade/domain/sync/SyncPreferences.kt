@@ -132,6 +132,17 @@ class SyncPreferences(
         // SY <--
     }
 
+    // SY -->
+    companion object {
+        /**
+         * Pseudo preference key carrying the sync section selection inside the synced payload.
+         * Lives here because both the sync manager and the merge need it and the manager has its
+         * own nested `SyncService` enum that would shadow the service class of the same name.
+         */
+        const val SYNC_SETTINGS_KEY = "__sync_settings__"
+    }
+    // SY <--
+
     fun getSyncTriggerOptions(): SyncTriggerOptions {
         return SyncTriggerOptions(
             syncOnChapterRead = preferenceStore.getBoolean("sync_on_chapter_read", false).get(),

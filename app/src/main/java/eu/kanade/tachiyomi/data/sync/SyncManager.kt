@@ -17,7 +17,6 @@ import eu.kanade.tachiyomi.data.backup.restore.restorers.MangaRestorer
 // SY -->
 import eu.kanade.tachiyomi.data.sync.service.GoogleDriveSyncService
 import eu.kanade.tachiyomi.data.sync.service.SyncData
-import eu.kanade.tachiyomi.data.sync.service.SyncService
 import eu.kanade.tachiyomi.data.sync.service.SyncYomiSyncService
 // SY <--
 
@@ -123,7 +122,7 @@ class SyncManager(
                 // Publish which sections this device syncs so the others can detect a disagreement.
                 // The entry is stripped again before it reaches the restore.
                 BackupPreference(
-                    SyncService.SYNC_SETTINGS_KEY,
+                    SyncPreferences.SYNC_SETTINGS_KEY,
                     StringPreferenceValue(syncPreferences.encodeSyncSettings(syncOptions)),
                 ),
             // SY <--
@@ -255,11 +254,11 @@ class SyncManager(
         // SY <--
 
         // SY -->
-        reportSyncSettingsMismatch(syncService)
+        reportSyncSettingsMismatch(syncService?.remoteSyncSettingsMismatch)
         // The marker is metadata for the sync settings screen, not an app preference, so it must
         // not be written into the shared preferences by the restore.
         val restorablePreferences = remoteBackup.backupPreferences
-            .filterNot { it.key == SyncService.SYNC_SETTINGS_KEY }
+            .filterNot { it.key == SyncPreferences.SYNC_SETTINGS_KEY }
         // SY <--
 
         val newSyncData = backup.copy(
@@ -362,16 +361,16 @@ class SyncManager(
      *
      * The value comes from the merge, which sees the remote's own marker before it is overwritten.
      */
-    private fun reportSyncSettingsMismatch(syncService: SyncService?) {
-        val mismatch = syncService?.remoteSyncSettingsMismatch.orEmpty()
+    private fun reportSyncSettingsMismatch(mismatch: String?) {
+        val encoded = mismatch.orEmpty()
 
-        if (mismatch.isNotEmpty()) {
+        if (encoded.isNotEmpty()) {
             logcat(LogPriority.WARN) {
-                "Sync section mismatch: remote=$mismatch local=${syncPreferences.encodeSyncSettings(syncPreferences.getSyncSettings())}"
+                "Sync section mismatch: remote=$encoded local=${syncPreferences.encodeSyncSettings(syncPreferences.getSyncSettings())}"
             }
         }
 
-        syncPreferences.remoteSyncSettings.set(mismatch)
+        syncPreferences.remoteSyncSettings.set(encoded)
     }
     // SY <--
 
