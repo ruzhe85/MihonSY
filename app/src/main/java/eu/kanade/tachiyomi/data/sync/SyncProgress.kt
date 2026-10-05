@@ -13,7 +13,7 @@ import kotlinx.serialization.protobuf.ProtoNumber
  * cannot drift apart.
  *
  * Scope is deliberately narrow: the page a chapter was left at and whether it is read. Browsing
- * history keeps travelling through the full sync.
+ * history and page bookmarks have files of their own, see [SyncHistory] and [SyncBookmarks].
  */
 @Serializable
 data class SyncProgress(

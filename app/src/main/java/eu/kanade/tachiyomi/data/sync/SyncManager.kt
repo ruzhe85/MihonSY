@@ -138,10 +138,14 @@ class SyncManager(
         logcat(LogPriority.DEBUG) { "End create backup" }
 
         // SY -->
-        // Fold the progress channel into this payload before it is sent: entries it knows to be
-        // newer are applied here, and this payload's entries are written back into it, so the two
-        // views converge no matter which one was used since the last full sync.
+        // Fold the small channels into this payload before it is sent: entries they know to be newer
+        // are applied here, and this payload's entries are written back into them, so the views
+        // converge no matter which one was used since the last full sync. History and bookmarks do it
+        // here for the same reason, and one more: a device that never opens those screens only ever
+        // learns about them through the full sync, so the payload has to carry what they exchanged.
         ProgressSyncManager(context).mergeWithFullBackup(backup)
+        HistorySyncManager(context).mergeWithFullBackup(backup)
+        BookmarkSyncManager(context).mergeWithFullBackup(backup)
         // SY <--
 
         // Create the SyncData object

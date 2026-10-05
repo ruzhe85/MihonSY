@@ -3,11 +3,15 @@ package eu.kanade.tachiyomi.data.sync.service
 import android.content.Context
 import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.tachiyomi.data.backup.models.Backup
+import eu.kanade.tachiyomi.data.sync.LightSnapshot
 import eu.kanade.tachiyomi.data.sync.ProgressSnapshot
+import eu.kanade.tachiyomi.data.sync.SyncBookmarks
+import eu.kanade.tachiyomi.data.sync.SyncHistory
 import eu.kanade.tachiyomi.data.sync.SyncNotifier
 import eu.kanade.tachiyomi.data.sync.SyncProgress
 import eu.kanade.tachiyomi.network.await
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.protobuf.ProtoBuf
 import logcat.LogPriority
@@ -307,8 +311,9 @@ class WebDavSyncService(
     private val progressFileName = "${appName}_progress.proto.gz"
 
     /**
-     * Timeout for the progress channel. It carries a few dozen KB and is used while the reader is
-     * waiting, so it has to fail fast instead of inheriting the leisurely full-sync timeouts.
+     * Timeout for the side channels. They carry a few dozen KB and are used while the reader or a
+     * screen is waiting, so they have to fail fast instead of inheriting the leisurely full-sync
+     * timeouts.
      */
     private val interactiveTimeoutSeconds = 5L
 
@@ -327,18 +332,26 @@ class WebDavSyncService(
     }
 
     /**
-     * Reads the progress file. Returns null when it is absent or unreachable: the reader then falls
-     * back to local data, because a missing progress channel must never surface as an error while
-     * reading.
+     * Reads one of the side-channel files. Returns null when it is absent or unreachable: the caller
+     * then falls back to local data, because a missing side channel must never surface as an error
+     * while reading.
+     *
+     * A payload that cannot be decoded is treated the same way, and deliberately not overwritten:
+     * the caller keeps the revision it was merged against, so a bad read cannot make it destroy a
+     * good copy that some other device still has.
      */
-    suspend fun pullProgress(): ProgressSnapshot? {
+    private suspend fun <T> pullLightFile(
+        fileUrl: HttpUrl,
+        label: String,
+        serializer: KSerializer<T>,
+    ): LightSnapshot<T>? {
         return try {
-            val request = requestBuilder(progressFileUrl()).get().build()
+            val request = requestBuilder(fileUrl).get().build()
             interactiveClient.newCall(request).await().use { response ->
                 if (response.code == HttpStatus.SC_NOT_FOUND) return null
 
                 if (!response.isSuccessful) {
-                    logcat(LogPriority.ERROR) { "Failed to download progress: HTTP ${response.code}" }
+                    logcat(LogPriority.ERROR) { "Failed to download $label: HTTP ${response.code}" }
                     return null
                 }
 
@@ -351,26 +364,32 @@ class WebDavSyncService(
                     }
                 }
 
-                val progress = try {
-                    protoBuf.decodeFromByteArray(SyncProgress.serializer(), byteArray)
+                val payload = try {
+                    protoBuf.decodeFromByteArray(serializer, byteArray)
                 } catch (e: Exception) {
-                    logcat(LogPriority.ERROR) { "Bad progress payload received: ${e.message}" }
+                    logcat(LogPriority.ERROR) { "Bad $label payload received: ${e.message}" }
                     return null
                 }
 
-                ProgressSnapshot(progress, etag)
+                LightSnapshot(payload, etag)
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            logcat(LogPriority.DEBUG) { "Progress pull failed: ${e.message}" }
+            logcat(LogPriority.DEBUG) { "$label pull failed: ${e.message}" }
             null
         }
     }
 
     /** Returns false when the remote moved under us or the write failed. */
-    suspend fun pushProgress(progress: SyncProgress, etag: String?): Boolean {
-        val byteArray = protoBuf.encodeToByteArray(SyncProgress.serializer(), progress)
+    private suspend fun <T> pushLightFile(
+        fileUrl: HttpUrl,
+        label: String,
+        serializer: KSerializer<T>,
+        payload: T,
+        etag: String?,
+    ): Boolean {
+        val byteArray = protoBuf.encodeToByteArray(serializer, payload)
         return try {
             withIOContext {
                 val gzipped = ByteArrayOutputStream().also { bos ->
@@ -380,7 +399,7 @@ class WebDavSyncService(
                 ensureDirectoryExists()
 
                 val body = gzipped.toRequestBody("application/octet-stream".toMediaType())
-                val builder = requestBuilder(progressFileUrl()).put(body)
+                val builder = requestBuilder(fileUrl).put(body)
                 if (etag != null) {
                     builder.header("If-Match", etag)
                 } else {
@@ -391,10 +410,10 @@ class WebDavSyncService(
                 interactiveClient.newCall(builder.build()).await().use {
                     when {
                         it.code == HTTP_PRECONDITION_FAILED -> logcat(LogPriority.INFO) {
-                            "Progress file changed under us; leaving it to the next sync"
+                            "$label file changed under us; leaving it to the next sync"
                         }
                         !it.isSuccessful -> logcat(LogPriority.ERROR) {
-                            "Failed to upload progress: HTTP ${it.code}"
+                            "Failed to upload $label: HTTP ${it.code}"
                         }
                         else -> uploaded = true
                     }
@@ -404,10 +423,53 @@ class WebDavSyncService(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            logcat(LogPriority.DEBUG) { "Progress push failed: ${e.message}" }
+            logcat(LogPriority.DEBUG) { "$label push failed: ${e.message}" }
             false
         }
     }
+
+    suspend fun pullProgress(): ProgressSnapshot? =
+        pullLightFile(progressFileUrl(), "progress", SyncProgress.serializer())
+            ?.let { ProgressSnapshot(it.payload, it.etag) }
+
+    suspend fun pushProgress(progress: SyncProgress, etag: String?): Boolean =
+        pushLightFile(progressFileUrl(), "progress", SyncProgress.serializer(), progress, etag)
+
+    // ---- reading-history channel --------------------------------------------------------------
+
+    private val historyFileName = "${appName}_history.proto.gz"
+
+    private fun historyFileUrl(): HttpUrl {
+        return requireRemoteUrl().newBuilder()
+            .addPathSegment(historyFileName)
+            .build()
+    }
+
+    /** Reads the reading-history file; null when it is absent, unreachable or unreadable. */
+    suspend fun pullHistory(): LightSnapshot<SyncHistory>? =
+        pullLightFile(historyFileUrl(), "history", SyncHistory.serializer())
+
+    /** Returns false when the remote moved under us or the write failed. */
+    suspend fun pushHistory(history: SyncHistory, etag: String?): Boolean =
+        pushLightFile(historyFileUrl(), "history", SyncHistory.serializer(), history, etag)
+
+    // ---- page-bookmark channel ----------------------------------------------------------------
+
+    private val bookmarksFileName = "${appName}_bookmarks.proto.gz"
+
+    private fun bookmarksFileUrl(): HttpUrl {
+        return requireRemoteUrl().newBuilder()
+            .addPathSegment(bookmarksFileName)
+            .build()
+    }
+
+    /** Reads the page-bookmark file; null when it is absent, unreachable or unreadable. */
+    suspend fun pullBookmarks(): LightSnapshot<SyncBookmarks>? =
+        pullLightFile(bookmarksFileUrl(), "bookmarks", SyncBookmarks.serializer())
+
+    /** Returns false when the remote moved under us or the write failed. */
+    suspend fun pushBookmarks(bookmarks: SyncBookmarks, etag: String?): Boolean =
+        pushLightFile(bookmarksFileUrl(), "bookmarks", SyncBookmarks.serializer(), bookmarks, etag)
     // SY <--
 
     suspend fun deleteSyncData(): DeleteSyncDataStatus {
@@ -416,17 +478,26 @@ class WebDavSyncService(
                 if (syncPreferences.webdavUrl.get().isBlank()) {
                     return@withIOContext DeleteSyncDataStatus.NOT_INITIALIZED
                 }
-                val request = requestBuilder(fileUrl()).delete().build()
-                client.newCall(request).await().use {
-                    when {
-                        it.code == HttpStatus.SC_NOT_FOUND -> DeleteSyncDataStatus.NO_FILES
-                        it.isSuccessful -> DeleteSyncDataStatus.SUCCESS
-                        else -> {
-                            logcat(LogPriority.ERROR) { "Failed to delete sync data: HTTP ${it.code}" }
-                            DeleteSyncDataStatus.ERROR
+                // SY -->
+                // The side channels are separate files. Leaving them behind would let the very next
+                // sync read back most of what the user just deleted, so they go with the payload.
+                val files = listOf(fileUrl(), progressFileUrl(), historyFileUrl(), bookmarksFileUrl())
+                var deleted = 0
+                for (file in files) {
+                    val request = requestBuilder(file).delete().build()
+                    client.newCall(request).await().use {
+                        when {
+                            it.code == HttpStatus.SC_NOT_FOUND -> Unit
+                            it.isSuccessful -> deleted++
+                            else -> {
+                                logcat(LogPriority.ERROR) { "Failed to delete sync data: HTTP ${it.code}" }
+                                return@withIOContext DeleteSyncDataStatus.ERROR
+                            }
                         }
                     }
                 }
+                if (deleted == 0) DeleteSyncDataStatus.NO_FILES else DeleteSyncDataStatus.SUCCESS
+                // SY <--
             } catch (e: Exception) {
                 logcat(LogPriority.ERROR) { "Error occurred while deleting WebDAV sync data: ${e.message}" }
                 DeleteSyncDataStatus.ERROR

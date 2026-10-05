@@ -14,6 +14,7 @@ import eu.kanade.tachiyomi.data.backup.models.BackupSavedSearch
 import eu.kanade.tachiyomi.data.backup.models.BackupSource
 import eu.kanade.tachiyomi.data.backup.models.BackupSourcePreferences
 import eu.kanade.tachiyomi.data.backup.models.StringPreferenceValue
+import eu.kanade.tachiyomi.data.sync.MergeRules
 import eu.kanade.tachiyomi.data.sync.SyncClock
 import eu.kanade.tachiyomi.data.sync.SyncLedger
 import kotlinx.serialization.Serializable
@@ -517,26 +518,22 @@ abstract class SyncService(
                     val localClearedAt = effectiveClearedAt(manga, local)
                     val remoteClearedAt = effectiveClearedAt(manga, remote)
 
-                    if (localClearedAt > 0L || remoteClearedAt > 0L) {
-                        // Compare like with like: a cleared side is timed by when it was cleared, a
-                        // live side by when it was last read
-                        val localAt = if (localClearedAt > 0L) localClearedAt else local.lastRead / 1000L
-                        val remoteAt = if (remoteClearedAt > 0L) remoteClearedAt else remote.lastRead / 1000L
-                        val localWins = localAt >= remoteAt
-                        val winner = if (localWins) local else remote
-                        val winnerClearedAt = if (localWins) localClearedAt else remoteClearedAt
+                    // SY -->
+                    // The history channel decides the same question on its own file, so the comparison
+                    // is shared: a value arriving through either path is resolved the same way.
+                    val localWins = MergeRules.historyLocalWins(
+                        localReadAtMillis = local.lastRead,
+                        localClearedAt = localClearedAt,
+                        localReadDuration = local.readDuration,
+                        remoteReadAtMillis = remote.lastRead,
+                        remoteClearedAt = remoteClearedAt,
+                        remoteReadDuration = remote.readDuration,
+                    )
+                    // SY <--
+                    val winner = if (localWins) local else remote
+                    val winnerClearedAt = if (localWins) localClearedAt else remoteClearedAt
 
-                        if (winnerClearedAt > 0L) winner.asCleared(winnerClearedAt) else winner.asLive()
-                    } else {
-                        // Neither side cleared anything, so the original rule still applies
-                        if (remote.lastRead > local.lastRead ||
-                            (remote.lastRead == local.lastRead && remote.readDuration > local.readDuration)
-                        ) {
-                            remote.asLive()
-                        } else {
-                            local.asLive()
-                        }
-                    }
+                    if (winnerClearedAt > 0L) winner.asCleared(winnerClearedAt) else winner.asLive()
                 }
 
                 // Only one side has it. A vanished row is deliberately not treated as a removal, so
@@ -662,69 +659,18 @@ abstract class SyncService(
         localSyncs: Boolean,
         remoteSyncs: Boolean,
     ): List<BackupBookmark> {
-        val logTag = "MergeBookmarks"
-
-        fun keyOf(bookmark: BackupBookmark) =
-            "${bookmark.source}|${bookmark.mangaUrl}|${bookmark.chapterUrl}|${bookmark.page}"
-
-        val localMap = localBookmarks.orEmpty().associateBy { keyOf(it) }
-        val remoteMap = remoteBookmarks.orEmpty().associateBy { keyOf(it) }
-
-        val merged = (localMap.keys + remoteMap.keys).distinct().mapNotNull { key ->
-            val local = localMap[key]
-            val remote = remoteMap[key]
-            when {
-                local != null && remote != null -> {
-                    if (maxOf(local.deletedAt, remote.deletedAt) > 0L) {
-                        if (local.deletedAt >= remote.deletedAt) local.asBookmarkTombstone() else remote
-                    } else {
-                        local
-                    }
-                }
-
-                local != null -> {
-                    // Still here but gone from the remote: another device deleted it
-                    if (remoteSyncs &&
-                        SyncLedger.bookmarkKey(local.source, local.mangaUrl, local.chapterUrl, local.page) in ledger
-                    ) {
-                        logcat(LogPriority.DEBUG, logTag) { "Tombstoning bookmark deleted remotely: ${local.mangaUrl}" }
-                        local.asBookmarkTombstone()
-                    } else {
-                        local
-                    }
-                }
-
-                // SY -->
-                else -> remote?.let {
-                    // A bookmark this device no longer has, while the ledger says it owned one at the
-                    // last sync, means it was deleted here. Without this the remote simply handed it
-                    // back on every sync.
-                    if (localSyncs &&
-                        SyncLedger.bookmarkKey(it.source, it.mangaUrl, it.chapterUrl, it.page) in ledger
-                    ) {
-                        logcat(LogPriority.DEBUG, logTag) { "Tombstoning bookmark deleted locally: ${it.mangaUrl}" }
-                        it.asBookmarkTombstone()
-                    } else {
-                        it
-                    }
-                }
-                // SY <--
-            }
-        }
-
-        return merged
-    }
-
-    private fun BackupBookmark.asBookmarkTombstone(): BackupBookmark {
-        return BackupBookmark(
-            source = source,
-            mangaUrl = mangaUrl,
-            chapterUrl = chapterUrl,
-            page = page,
-            createdAt = createdAt,
-            deletedAt = deletedAt.takeIf { it > 0L }
-                ?: SyncClock.next(context, SyncLedger.bookmarkKey(source, mangaUrl, chapterUrl, page)),
+        // SY -->
+        // The rules live in MergeRules because the bookmark channel applies the very same ones to its
+        // own file; a second copy here would be free to drift away from it.
+        return MergeRules.mergeBookmarks(
+            localBookmarks = localBookmarks,
+            remoteBookmarks = remoteBookmarks,
+            localSyncs = localSyncs,
+            remoteSyncs = remoteSyncs,
+            ledger = ledger,
+            context = context,
         )
+        // SY <--
     }
     // SY <--
 

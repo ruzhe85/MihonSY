@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.ui.history
 
+import android.app.Application
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Immutable
 import cafe.adriel.voyager.core.model.StateScreenModel
@@ -8,6 +9,7 @@ import eu.kanade.core.util.insertSeparators
 import eu.kanade.domain.manga.interactor.UpdateManga
 import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.presentation.history.HistoryUiModel
+import eu.kanade.tachiyomi.data.sync.HistorySyncManager
 import eu.kanade.tachiyomi.util.lang.toLocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -61,8 +63,20 @@ class HistoryScreenModel(
     private val _events: Channel<Event> = Channel(Channel.UNLIMITED)
     val events: Flow<Event> = _events.receiveAsFlow()
 
+    // SY -->
+    /** Lightweight history channel, so reading done elsewhere shows up without a full sync. */
+    private val historySyncManager: HistorySyncManager by lazy {
+        HistorySyncManager(Injekt.get<Application>())
+    }
+    // SY <--
+
     init {
         screenModelScope.launch {
+            // SY -->
+            // Reading done on another device reaches this screen through the history file. The list
+            // below subscribes to the database, so applying the entries refreshes it by itself.
+            historySyncManager.pullAndApply(force = true)
+            // SY <--
             state.map { it.searchQuery }
                 .distinctUntilChanged()
                 .flatMapLatest { query ->
@@ -110,12 +124,20 @@ class HistoryScreenModel(
     fun removeFromHistory(history: HistoryWithRelations) {
         screenModelScope.launchIO {
             removeHistory.await(history)
+            // SY -->
+            // The row is only soft-deleted (last_read = 0) and the clearing is what the other devices
+            // have to hear about, so it travels as the entry's own timestamp.
+            historySyncManager.recordLocalClear(history.mangaId)
+            // SY <--
         }
     }
 
     fun removeAllFromHistory(mangaId: Long) {
         screenModelScope.launchIO {
             removeHistory.await(mangaId)
+            // SY -->
+            historySyncManager.recordLocalClear(mangaId)
+            // SY <--
         }
     }
 
@@ -123,6 +145,11 @@ class HistoryScreenModel(
         screenModelScope.launchIO {
             val result = removeHistory.awaitAll()
             if (!result) return@launchIO
+            // SY -->
+            // The rows are gone outright, which leaves nothing to compare against, so the same
+            // statement is made about every entry this device knows: they were all cleared.
+            historySyncManager.recordLocalClearAll()
+            // SY <--
             _events.send(Event.HistoryCleared)
         }
     }

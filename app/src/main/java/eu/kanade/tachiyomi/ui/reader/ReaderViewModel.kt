@@ -27,6 +27,8 @@ import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.saver.Image
 import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.saver.Location
+import eu.kanade.tachiyomi.data.sync.BookmarkSyncManager
+import eu.kanade.tachiyomi.data.sync.HistorySyncManager
 import eu.kanade.tachiyomi.data.sync.ProgressClock
 import eu.kanade.tachiyomi.data.sync.ProgressSyncManager
 import eu.kanade.tachiyomi.data.sync.SyncDataJob
@@ -179,6 +181,18 @@ class ReaderViewModel @JvmOverloads constructor(
      */
     private val progressSyncManager: ProgressSyncManager by lazy {
         ProgressSyncManager(Injekt.get<Application>())
+    }
+
+    /**
+     * History and page bookmarks travel in their own files too, so a chapter read or a bookmark
+     * edited here reaches the other devices without a full sync.
+     */
+    private val historySyncManager: HistorySyncManager by lazy {
+        HistorySyncManager(Injekt.get<Application>())
+    }
+
+    private val bookmarkSyncManager: BookmarkSyncManager by lazy {
+        BookmarkSyncManager(Injekt.get<Application>())
     }
     // SY <--
 
@@ -528,6 +542,13 @@ class ReaderViewModel @JvmOverloads constructor(
                     chapter.requestedPage = applied.lastPageRead.toInt()
                 }
             }
+        }
+
+        // The bookmarks of the chapter being opened are what the bookmark button and its dialog show,
+        // so they are pulled alongside the progress instead of waiting for a full sync. Launched
+        // separately: the chapter must not wait for the network to start loading.
+        viewModelScope.launchNonCancellable {
+            bookmarkSyncManager.pullAndApply()
         }
         // SY <--
 
@@ -1301,6 +1322,18 @@ class ReaderViewModel @JvmOverloads constructor(
             val sessionReadDuration = chapterReadStartTime?.let { endTime.time - it } ?: 0
 
             upsertHistory.await(HistoryUpdate(chapterId, endTime, sessionReadDuration))
+            // SY -->
+            // The history channel carries one entry per manga, so the other devices move this manga to
+            // the top of their history with the chapter that was just read. The push is throttled
+            // internally; an entry that cannot go out yet is still recorded and leaves with the next.
+            manga?.let { currentManga ->
+                historySyncManager.recordLocalRead(
+                    mangaId = currentManga.id,
+                    chapterUrl = readerChapter.chapter.url,
+                    readAtSeconds = endTime.time / 1000L,
+                )
+            }
+            // SY <--
             chapterReadStartTime = null
         }
     }
@@ -1394,8 +1427,23 @@ class ReaderViewModel @JvmOverloads constructor(
             val marked = bookmarkRepository.isPageBookmarked(chapterId, page)
             if (marked) {
                 bookmarkRepository.removeBookmarkAtPage(chapterId, page)
+                // SY -->
+                // The row is gone, so the deletion has to be spelled out: otherwise the other devices
+                // would only see a bookmark missing from here and hand it back.
+                manga?.let { currentManga ->
+                    bookmarkSyncManager.recordLocalDeletion(
+                        source = currentManga.source,
+                        mangaUrl = currentManga.url,
+                        chapterUrl = chapter.url,
+                        page = page,
+                    )
+                }
+                // SY <--
             } else {
                 bookmarkRepository.addBookmark(chapterId, page)
+                // SY -->
+                bookmarkSyncManager.publishLocalChanges()
+                // SY <--
             }
             mutableState.update { it.copy(currentPageBookmarked = !marked) }
         }
@@ -1408,6 +1456,9 @@ class ReaderViewModel @JvmOverloads constructor(
         val page = (state.value.currentPage - 1).coerceAtLeast(0)
         viewModelScope.launchNonCancellable {
             bookmarkRepository.addBookmark(chapterId, page)
+            // SY -->
+            bookmarkSyncManager.publishLocalChanges()
+            // SY <--
             mutableState.update { it.copy(currentPageBookmarked = true) }
         }
     }
@@ -1415,6 +1466,11 @@ class ReaderViewModel @JvmOverloads constructor(
     /** 删除指定书签（列表对话框）。 */
     fun removeBookmark(id: Long) {
         viewModelScope.launchNonCancellable {
+            // SY -->
+            // Recorded while the row still exists: the tombstone has to name what was removed. The
+            // callers of this method only hold the bookmark id.
+            bookmarkSyncManager.recordLocalDeletionById(id)
+            // SY <--
             bookmarkRepository.removeBookmark(id)
             getCurrentChapter()?.chapter?.id?.let { cid ->
                 val marked = bookmarkRepository.isPageBookmarked(

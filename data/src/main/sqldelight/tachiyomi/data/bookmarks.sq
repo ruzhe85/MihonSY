@@ -19,6 +19,13 @@ FROM bookmarks
 WHERE chapter_id = :chapterId
 ORDER BY page ASC;
 
+-- SY --> Multi-device sync: a deleted bookmark has to be described before the row is gone.
+getById:
+SELECT *
+FROM bookmarks
+WHERE _id = :id;
+-- SY <--
+
 deleteById:
 DELETE FROM bookmarks WHERE _id = :id;
 
