@@ -454,10 +454,25 @@ class MangaRestorer(
     }
 
     private suspend fun restoreHistory(manga: Manga, backupHistory: List<BackupHistory>) {
+        // SY -->
+        // A cleared reading date is not an entry to upsert: mihon clears it by setting last_read to
+        // 0 and keeping the row, so it needs its own case here. Without this the merge decision
+        // could never reach the database.
+        val toClear = mutableListOf<Long>()
+        // SY <--
+
         val toUpdate = backupHistory.mapNotNull { history ->
             val dbHistory = database.historyQueries
                 .getHistoryByChapterUrl(manga.id, history.url)
                 .awaitAsOneOrNull()
+
+            // SY -->
+            if (history.clearedAt > 0L) {
+                dbHistory?._id?.let { toClear.add(it) }
+                return@mapNotNull null
+            }
+            // SY <--
+
             val item = history.getHistoryImpl()
 
             if (dbHistory == null) {
@@ -485,8 +500,11 @@ class MangaRestorer(
             )
         }
 
-        if (toUpdate.isEmpty()) return
+        if (toClear.isEmpty() && toUpdate.isEmpty()) return
         database.transaction {
+            // SY -->
+            toClear.forEach { database.historyQueries.resetHistoryById(it) }
+            // SY <--
             toUpdate.forEach {
                 database.historyQueries.upsert(
                     it.chapterId,

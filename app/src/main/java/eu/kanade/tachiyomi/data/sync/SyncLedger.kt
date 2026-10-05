@@ -31,6 +31,7 @@ object SyncLedger {
     private const val CATEGORY_PREFIX = "c:"
     private const val CHAPTER_PREFIX = "s:"
     private const val BOOKMARK_PREFIX = "b:"
+    private const val HISTORY_PREFIX = "h:"
 
     fun mangaKey(source: Long, url: String) = "$MANGA_PREFIX$source|$url"
 
@@ -41,6 +42,9 @@ object SyncLedger {
 
     fun bookmarkKey(source: Long, mangaUrl: String, chapterUrl: String, page: Int) =
         "$BOOKMARK_PREFIX$source|$mangaUrl|$chapterUrl|$page"
+
+    fun historyKey(source: Long, mangaUrl: String, chapterUrl: String) =
+        "$HISTORY_PREFIX$source|$mangaUrl|$chapterUrl"
 
     fun load(context: Context): Map<String, Long> {
         val file = File(context.filesDir, FILE_NAME)
@@ -103,6 +107,24 @@ object SyncLedger {
             database.bookmarksQueries.bookmarksForBackup(backupBookmarkMapper)
                 .awaitAsList()
                 .forEach { put(bookmarkKey(it.source, it.mangaUrl, it.chapterUrl, it.page), it.createdAt) }
+
+            // History, keyed by the chapter it belongs to. The stored value is the reading time as
+            // of this sync; watching it fall from non-zero to zero is how the next merge recognises
+            // a reading date that was cleared in the meantime.
+            favorites.forEach mangaLoop@{ manga ->
+                val historyRows = database.historyQueries.getHistoryByMangaId(manga.id).awaitAsList()
+                if (historyRows.isEmpty()) return@mangaLoop
+
+                val chapterUrls = database.chaptersQueries
+                    .getChaptersByMangaId(mangaId = manga.id, applyScanlatorFilter = 0)
+                    .awaitAsList()
+                    .associate { it._id to it.url }
+
+                historyRows.forEach rowLoop@{ row ->
+                    val url = chapterUrls[row.chapter_id] ?: return@rowLoop
+                    put(historyKey(manga.source, manga.url, url), row.last_read?.time ?: 0L)
+                }
+            }
         }
     }
 }

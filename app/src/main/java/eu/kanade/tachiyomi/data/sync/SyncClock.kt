@@ -72,6 +72,25 @@ object SyncClock {
         }
     }
 
+    /**
+     * Stable timestamp for [key]: the existing one when there is one, otherwise a fresh one.
+     *
+     * [next] deliberately keeps incrementing, which is wrong for values that must survive unchanged
+     * across syncs — re-stamping a tombstone on every run would rewrite the remote file forever and
+     * make the conditional write fail with 412 every time.
+     */
+    fun stamp(context: Context, key: String): Long {
+        ensureLoaded(context)
+        synchronized(lock) {
+            val existing = seen[key]
+            if (existing != null && existing > 0L) return existing
+
+            val ts = maxOf(System.currentTimeMillis() / 1000L, (existing ?: 0L) + 1)
+            seen[key] = ts
+            return ts
+        }
+    }
+
     /** Records a timestamp produced elsewhere so later local writes still land after it. */
     fun observe(context: Context, key: String, ts: Long) {
         if (ts <= 0L) return

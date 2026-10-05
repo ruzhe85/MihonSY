@@ -517,7 +517,7 @@ class ReaderViewModel @JvmOverloads constructor(
         if (page == null) {
             manga?.let { currentManga ->
                 progressSyncManager.applyRemoteProgress(currentManga.id, chapter.chapter.url)?.let { applied ->
-                    chapter.chapter.last_page_read = applied.lastPageRead
+                    chapter.chapter.last_page_read = applied.lastPageRead.toInt()
                     chapter.chapter.read = applied.read
                     chapter.requestedPage = applied.lastPageRead.toInt()
                 }

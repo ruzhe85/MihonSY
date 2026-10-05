@@ -83,6 +83,11 @@ abstract class SyncService(
         val localSyncsBookmarks = localSettings.bookmarks
         val remoteSyncsBookmarks = remoteSettings?.bookmarks
             ?: !remoteBackup?.backupBookmarks.isNullOrEmpty()
+        // History rides inside the manga entries, so an older remote is judged by whether it sent
+        // any manga at all
+        val localSyncsHistory = localSettings.history
+        val remoteSyncsHistory = remoteSettings?.history
+            ?: !remoteBackup?.backupManga.isNullOrEmpty()
         // SY <--
 
         val mergedCategoriesList = mergeCategoriesLists(
@@ -100,6 +105,8 @@ abstract class SyncService(
             mergedCategoriesList,
             localSyncs = localSyncsManga,
             remoteSyncs = remoteSyncsManga,
+            localSyncsHistory = localSyncsHistory,
+            remoteSyncsHistory = remoteSyncsHistory,
         )
 
         val mergedSourcesList = mergeSourcesLists(localBackup?.backupSources, remoteBackup?.backupSources)
@@ -150,6 +157,8 @@ abstract class SyncService(
         mergedCategories: List<BackupCategory>,
         localSyncs: Boolean,
         remoteSyncs: Boolean,
+        localSyncsHistory: Boolean,
+        remoteSyncsHistory: Boolean,
     ): List<BackupManga> {
         val logTag = "MergeMangaLists"
 
@@ -178,6 +187,8 @@ abstract class SyncService(
                     localCategories = localCategoriesByOrder,
                     remoteCategories = remoteCategoriesByOrder,
                     mergedCategories = mergedCategoriesByName,
+                    localSyncsHistory = localSyncsHistory,
+                    remoteSyncsHistory = remoteSyncsHistory,
                 )
 
                 local != null -> {
@@ -230,6 +241,8 @@ abstract class SyncService(
         localCategories: Map<Long, BackupCategory>,
         remoteCategories: Map<Long, BackupCategory>,
         mergedCategories: Map<String, BackupCategory>,
+        localSyncsHistory: Boolean,
+        remoteSyncsHistory: Boolean,
     ): BackupManga {
         if (local.deletedAt > 0L || remote.deletedAt > 0L) {
             return when {
@@ -267,7 +280,13 @@ abstract class SyncService(
         } else {
             remote.chapters
         }
-        base.history = mergeHistoryLists(local.history, remote.history)
+        base.history = mergeHistoryLists(
+            manga = base,
+            localHistory = local.history,
+            remoteHistory = remote.history,
+            localSyncs = localSyncsHistory,
+            remoteSyncs = remoteSyncsHistory,
+        )
 
         remapCategories(base, baseCategories, mergedCategories)
         return base
@@ -398,24 +417,101 @@ abstract class SyncService(
         return tombstone
     }
 
-    /** History is append-only, so the later read time always wins. */
+    // SY -->
+    /**
+     * History merges like the other sections, except that a reading date can also be *cleared*:
+     * mihon models that as `last_read = 0` with the row kept, so a cleared entry has to carry its
+     * own timestamp or the plain "larger reading time wins" rule would silently undo the clearing.
+     */
     private fun mergeHistoryLists(
+        manga: BackupManga,
         localHistory: List<BackupHistory>,
         remoteHistory: List<BackupHistory>,
+        localSyncs: Boolean,
+        remoteSyncs: Boolean,
     ): List<BackupHistory> {
-        if (localHistory.isEmpty()) return remoteHistory
-        if (remoteHistory.isEmpty()) return localHistory
+        if (localHistory.isEmpty() && remoteHistory.isEmpty()) return emptyList()
 
-        val byUrl = linkedMapOf<String, BackupHistory>()
-        (remoteHistory + localHistory).forEach { entry ->
-            val current = byUrl[entry.url]
-            val isNewer = current == null ||
-                entry.lastRead > current.lastRead ||
-                (entry.lastRead == current.lastRead && entry.readDuration > current.readDuration)
-            if (isNewer) byUrl[entry.url] = entry
+        // A side that does not sync history has nothing to say about removals here
+        if (!localSyncs) return remoteHistory
+        if (!remoteSyncs) return localHistory
+
+        val localMap = localHistory.associateBy { it.url }
+        val remoteMap = remoteHistory.associateBy { it.url }
+
+        return (localMap.keys + remoteMap.keys).distinct().mapNotNull { url ->
+            val local = localMap[url]
+            val remote = remoteMap[url]
+
+            when {
+                local != null && remote != null -> {
+                    val localClearedAt = effectiveClearedAt(manga, local)
+                    val remoteClearedAt = effectiveClearedAt(manga, remote)
+
+                    if (localClearedAt > 0L || remoteClearedAt > 0L) {
+                        // Compare like with like: a cleared side is timed by when it was cleared, a
+                        // live side by when it was last read
+                        val localAt = if (localClearedAt > 0L) localClearedAt else local.lastRead / 1000L
+                        val remoteAt = if (remoteClearedAt > 0L) remoteClearedAt else remote.lastRead / 1000L
+                        val localWins = localAt >= remoteAt
+                        val winner = if (localWins) local else remote
+                        val winnerClearedAt = if (localWins) localClearedAt else remoteClearedAt
+
+                        if (winnerClearedAt > 0L) winner.asCleared(winnerClearedAt) else winner.asLive()
+                    } else {
+                        // Neither side cleared anything, so the original rule still applies
+                        if (remote.lastRead > local.lastRead ||
+                            (remote.lastRead == local.lastRead && remote.readDuration > local.readDuration)
+                        ) {
+                            remote.asLive()
+                        } else {
+                            local.asLive()
+                        }
+                    }
+                }
+
+                // Only one side has it. A vanished row is deliberately not treated as a removal, so
+                // the surviving entry is simply kept.
+                local != null -> local.asLive()
+                else -> remote?.asLive()
+            }
         }
-        return byUrl.values.toList()
     }
+
+    /**
+     * Timestamp of the clearing for [entry], or 0 when it still holds a reading date.
+     *
+     * A cleared entry either already carries a timestamp (it came from another device) or was
+     * cleared here since the last sync. The ledger decides which: still holding a reading time means
+     * the clearing is fresh and needs a *new* timestamp, while an already-zero reading time means it
+     * was cleared earlier and the existing stamp must be reused to keep the remote file stable.
+     */
+    private fun effectiveClearedAt(manga: BackupManga, entry: BackupHistory): Long {
+        if (entry.lastRead > 0L) return 0L
+        if (entry.clearedAt > 0L) return entry.clearedAt
+
+        val key = SyncLedger.historyKey(manga.source, manga.url, entry.url)
+        return if ((ledger[key] ?: 0L) > 0L) {
+            logcat(LogPriority.DEBUG, "MergeHistory") {
+                "Reading date cleared since the last sync: ${entry.url}"
+            }
+            SyncClock.next(context, key)
+        } else {
+            SyncClock.stamp(context, key)
+        }
+    }
+
+    private fun BackupHistory.asCleared(clearedAt: Long): BackupHistory {
+        lastRead = 0L
+        this.clearedAt = clearedAt
+        return this
+    }
+
+    private fun BackupHistory.asLive(): BackupHistory {
+        clearedAt = 0L
+        return this
+    }
+    // SY <--
 
     private fun mergeCategoriesLists(
         localCategoriesList: List<BackupCategory>?,

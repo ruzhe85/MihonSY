@@ -437,6 +437,20 @@ class SyncManager(
             return true
         }
 
+        // SY -->
+        // A cleared reading date changes neither the chapter nor the version, so without this check
+        // the merge result would never trigger the restore that is supposed to apply it. Only pay
+        // for the extra query when the merged entry actually asks for a clearing.
+        val clearedInMerge = remoteManga.history.count { it.clearedAt > 0L }
+        if (clearedInMerge > 0) {
+            val clearedLocally = database.historyQueries
+                .getHistoryByMangaId(localManga.id)
+                .awaitAsList()
+                .count { (it.last_read?.time ?: 0L) <= 0L }
+            if (clearedLocally < clearedInMerge) return true
+        }
+        // SY <--
+
         return false
     }
 
