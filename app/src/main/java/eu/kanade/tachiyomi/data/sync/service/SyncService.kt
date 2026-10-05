@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.data.sync.service
 
 import android.content.Context
 import eu.kanade.domain.sync.SyncPreferences
+import eu.kanade.domain.sync.models.SyncSettings
 import eu.kanade.tachiyomi.data.backup.models.Backup
 import eu.kanade.tachiyomi.data.backup.models.BackupBookmark
 import eu.kanade.tachiyomi.data.backup.models.BackupCategory
@@ -12,6 +13,7 @@ import eu.kanade.tachiyomi.data.backup.models.BackupPreference
 import eu.kanade.tachiyomi.data.backup.models.BackupSavedSearch
 import eu.kanade.tachiyomi.data.backup.models.BackupSource
 import eu.kanade.tachiyomi.data.backup.models.BackupSourcePreferences
+import eu.kanade.tachiyomi.data.backup.models.StringPreferenceValue
 import eu.kanade.tachiyomi.data.sync.SyncClock
 import eu.kanade.tachiyomi.data.sync.SyncLedger
 import kotlinx.serialization.Serializable
@@ -45,15 +47,49 @@ abstract class SyncService(
     // SY -->
     /** Entries this device owned at its last successful sync, mapped to their version timestamp. */
     var ledger: Map<String, Long> = emptyMap()
+
+    /**
+     * Encoded section selection of the other device when it disagrees with this one, empty
+     * otherwise. Captured here rather than read back from the merged payload, because merging keeps
+     * the local marker and would always compare it against itself.
+     */
+    var remoteSyncSettingsMismatch: String = ""
     // SY <--
 
     protected fun mergeSyncData(localSyncData: SyncData, remoteSyncData: SyncData): SyncData {
         val localBackup = localSyncData.backup
         val remoteBackup = remoteSyncData.backup
 
+        // SY -->
+        // Which sections each side is actually syncing. A section that is switched off is left out
+        // of the backup completely, so its absence must never be read as "the other device deleted
+        // everything" — that would let one device with a different selection wipe the rest.
+        // An older remote carries no marker, in which case actually sending entries is the signal.
+        val localSettings = syncPreferences.getSyncSettings()
+        val remoteSettings = parseSyncSettings(remoteBackup?.backupPreferences)
+
+        remoteSyncSettingsMismatch = if (remoteSettings != null && remoteSettings != localSettings) {
+            syncPreferences.encodeSyncSettings(remoteSettings)
+        } else {
+            ""
+        }
+
+        val localSyncsCategories = localSettings.categories
+        val remoteSyncsCategories = remoteSettings?.categories
+            ?: !remoteBackup?.backupCategories.isNullOrEmpty()
+        val localSyncsManga = localSettings.libraryEntries
+        val remoteSyncsManga = remoteSettings?.libraryEntries
+            ?: !remoteBackup?.backupManga.isNullOrEmpty()
+        val localSyncsBookmarks = localSettings.bookmarks
+        val remoteSyncsBookmarks = remoteSettings?.bookmarks
+            ?: !remoteBackup?.backupBookmarks.isNullOrEmpty()
+        // SY <--
+
         val mergedCategoriesList = mergeCategoriesLists(
             localBackup?.backupCategories,
             remoteBackup?.backupCategories,
+            localSyncs = localSyncsCategories,
+            remoteSyncs = remoteSyncsCategories,
         )
 
         val mergedMangaList = mergeMangaLists(
@@ -62,6 +98,8 @@ abstract class SyncService(
             localBackup?.backupCategories ?: emptyList(),
             remoteBackup?.backupCategories ?: emptyList(),
             mergedCategoriesList,
+            localSyncs = localSyncsManga,
+            remoteSyncs = remoteSyncsManga,
         )
 
         val mergedSourcesList = mergeSourcesLists(localBackup?.backupSources, remoteBackup?.backupSources)
@@ -79,6 +117,8 @@ abstract class SyncService(
         val mergedBookmarksList = mergeBookmarksLists(
             localBackup?.backupBookmarks,
             remoteBackup?.backupBookmarks,
+            localSyncs = localSyncsBookmarks,
+            remoteSyncs = remoteSyncsBookmarks,
         )
         // SY <--
 
@@ -108,6 +148,8 @@ abstract class SyncService(
         localCategories: List<BackupCategory>,
         remoteCategories: List<BackupCategory>,
         mergedCategories: List<BackupCategory>,
+        localSyncs: Boolean,
+        remoteSyncs: Boolean,
     ): List<BackupManga> {
         val logTag = "MergeMangaLists"
 
@@ -140,11 +182,10 @@ abstract class SyncService(
 
                 local != null -> {
                     // SY -->
-                    // Absent from the remote. If the ledger says we owned it at the last sync, this
-                    // is a local deletion and has to be recorded as one; otherwise we simply have
-                    // an entry the remote never saw.
-                    if (SyncLedger.mangaKey(local.source, local.url) in ledger) {
-                        logcat(LogPriority.DEBUG, logTag) { "Tombstoning locally deleted: ${local.title}" }
+                    // Still here but gone from the remote, and this device had it at the last sync:
+                    // another device deleted it, so the removal is recorded and applied locally too.
+                    if (remoteSyncs && SyncLedger.mangaKey(local.source, local.url) in ledger) {
+                        logcat(LogPriority.DEBUG, logTag) { "Tombstoning manga deleted remotely: ${local.title}" }
                         local.asTombstone()
                     } else {
                         local.apply { remapCategories(this, localCategoriesByOrder, mergedCategoriesByName) }
@@ -156,7 +197,14 @@ abstract class SyncService(
                 else -> {
                     remote?.let {
                         SyncClock.observe(context, mangaLedgerKey(it), it.lastModifiedAt)
-                        it.apply { remapCategories(this, remoteCategoriesByOrder, mergedCategoriesByName) }
+                        // Its key is in the ledger yet it is no longer in the library, so this
+                        // device deleted it. Record the removal instead of pulling it back.
+                        if (localSyncs && SyncLedger.mangaKey(it.source, it.url) in ledger) {
+                            logcat(LogPriority.DEBUG, logTag) { "Tombstoning manga deleted locally: ${it.title}" }
+                            it.asTombstone()
+                        } else {
+                            it.apply { remapCategories(this, remoteCategoriesByOrder, mergedCategoriesByName) }
+                        }
                     }
                 }
                 // SY <--
@@ -248,6 +296,22 @@ abstract class SyncService(
     }
 
     private fun mangaKey(manga: BackupManga) = "${manga.source}|${manga.url}"
+
+    // SY -->
+    /** Section selection advertised by another device, or null when it predates the marker. */
+    private fun parseSyncSettings(preferences: List<BackupPreference>?): SyncSettings? {
+        val encoded = preferences
+            ?.firstOrNull { it.key == SYNC_SETTINGS_KEY }
+            ?.let { (it.value as? StringPreferenceValue)?.value }
+            ?: return null
+        return syncPreferences.decodeSyncSettings(encoded)
+    }
+
+    companion object {
+        /** Pseudo preference key carrying the sync section selection inside the synced payload. */
+        const val SYNC_SETTINGS_KEY = "__sync_settings__"
+    }
+    // SY <--
 
     private fun mangaLedgerKey(manga: BackupManga) = SyncLedger.mangaKey(manga.source, manga.url)
 
@@ -361,6 +425,8 @@ abstract class SyncService(
     private fun mergeCategoriesLists(
         localCategoriesList: List<BackupCategory>?,
         remoteCategoriesList: List<BackupCategory>?,
+        localSyncs: Boolean,
+        remoteSyncs: Boolean,
     ): List<BackupCategory> {
         val logTag = "MergeCategories"
         if (localCategoriesList == null) return remoteCategoriesList ?: emptyList()
@@ -399,8 +465,8 @@ abstract class SyncService(
                 }
 
                 local != null -> {
-                    if (SyncLedger.categoryKey(name) in ledger) {
-                        logcat(LogPriority.DEBUG, logTag) { "Tombstoning locally deleted category: $name" }
+                    if (remoteSyncs && SyncLedger.categoryKey(name) in ledger) {
+                        logcat(LogPriority.DEBUG, logTag) { "Tombstoning category deleted remotely: $name" }
                         merged[name] = local.asCategoryTombstone()
                     } else {
                         merged[name] = local
@@ -410,7 +476,12 @@ abstract class SyncService(
                 else -> {
                     remote?.let {
                         SyncClock.observe(context, SyncLedger.categoryKey(name), it.lastModifiedAt)
-                        merged[name] = it
+                        if (localSyncs && SyncLedger.categoryKey(name) in ledger) {
+                            logcat(LogPriority.DEBUG, logTag) { "Tombstoning category deleted locally: $name" }
+                            merged[name] = it.asCategoryTombstone()
+                        } else {
+                            merged[name] = it
+                        }
                     }
                 }
             }
@@ -428,6 +499,8 @@ abstract class SyncService(
     private fun mergeBookmarksLists(
         localBookmarks: List<BackupBookmark>?,
         remoteBookmarks: List<BackupBookmark>?,
+        localSyncs: Boolean,
+        remoteSyncs: Boolean,
     ): List<BackupBookmark> {
         val logTag = "MergeBookmarks"
 
@@ -450,15 +523,32 @@ abstract class SyncService(
                 }
 
                 local != null -> {
-                    if (SyncLedger.bookmarkKey(local.source, local.mangaUrl, local.chapterUrl, local.page) in ledger) {
-                        logcat(LogPriority.DEBUG, logTag) { "Tombstoning deleted bookmark ${local.mangaUrl}" }
+                    // Still here but gone from the remote: another device deleted it
+                    if (remoteSyncs &&
+                        SyncLedger.bookmarkKey(local.source, local.mangaUrl, local.chapterUrl, local.page) in ledger
+                    ) {
+                        logcat(LogPriority.DEBUG, logTag) { "Tombstoning bookmark deleted remotely: ${local.mangaUrl}" }
                         local.asBookmarkTombstone()
                     } else {
                         local
                     }
                 }
 
-                else -> remote
+                // SY -->
+                else -> remote?.let {
+                    // A bookmark this device no longer has, while the ledger says it owned one at the
+                    // last sync, means it was deleted here. Without this the remote simply handed it
+                    // back on every sync.
+                    if (localSyncs &&
+                        SyncLedger.bookmarkKey(it.source, it.mangaUrl, it.chapterUrl, it.page) in ledger
+                    ) {
+                        logcat(LogPriority.DEBUG, logTag) { "Tombstoning bookmark deleted locally: ${it.mangaUrl}" }
+                        it.asBookmarkTombstone()
+                    } else {
+                        it
+                    }
+                }
+                // SY <--
             }
         }
 

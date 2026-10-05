@@ -4,9 +4,6 @@ import android.content.Context
 import android.net.Uri
 import app.cash.sqldelight.async.coroutines.awaitAsList
 import eu.kanade.domain.sync.SyncPreferences
-// SY -->
-import eu.kanade.domain.sync.models.SyncSettings
-// SY <--
 import eu.kanade.tachiyomi.data.backup.create.BackupCreator
 import eu.kanade.tachiyomi.data.backup.create.BackupOptions
 import eu.kanade.tachiyomi.data.backup.models.Backup
@@ -20,6 +17,7 @@ import eu.kanade.tachiyomi.data.backup.restore.restorers.MangaRestorer
 // SY -->
 import eu.kanade.tachiyomi.data.sync.service.GoogleDriveSyncService
 import eu.kanade.tachiyomi.data.sync.service.SyncData
+import eu.kanade.tachiyomi.data.sync.service.SyncService
 import eu.kanade.tachiyomi.data.sync.service.SyncYomiSyncService
 // SY <--
 
@@ -125,7 +123,7 @@ class SyncManager(
                 // Publish which sections this device syncs so the others can detect a disagreement.
                 // The entry is stripped again before it reaches the restore.
                 BackupPreference(
-                    SYNC_SETTINGS_KEY,
+                    SyncService.SYNC_SETTINGS_KEY,
                     StringPreferenceValue(syncPreferences.encodeSyncSettings(syncOptions)),
                 ),
             // SY <--
@@ -257,10 +255,11 @@ class SyncManager(
         // SY <--
 
         // SY -->
-        reportSyncSettingsMismatch(remoteBackup.backupPreferences, syncOptions)
+        reportSyncSettingsMismatch(syncService)
         // The marker is metadata for the sync settings screen, not an app preference, so it must
         // not be written into the shared preferences by the restore.
-        val restorablePreferences = remoteBackup.backupPreferences.filterNot { it.key == SYNC_SETTINGS_KEY }
+        val restorablePreferences = remoteBackup.backupPreferences
+            .filterNot { it.key == SyncService.SYNC_SETTINGS_KEY }
         // SY <--
 
         val newSyncData = backup.copy(
@@ -360,30 +359,19 @@ class SyncManager(
      * Records whether the devices agree on which sections are synced. A device that syncs fewer
      * sections would otherwise silently truncate the others' data on every merge, so a mismatch is
      * surfaced in the sync settings instead of being resolved automatically.
+     *
+     * The value comes from the merge, which sees the remote's own marker before it is overwritten.
      */
-    private fun reportSyncSettingsMismatch(remotePreferences: List<BackupPreference>, local: SyncSettings) {
-        val remoteEncoded = remotePreferences
-            .firstOrNull { it.key == SYNC_SETTINGS_KEY }
-            ?.let { (it.value as? StringPreferenceValue)?.value }
+    private fun reportSyncSettingsMismatch(syncService: SyncService?) {
+        val mismatch = syncService?.remoteSyncSettingsMismatch.orEmpty()
 
-        // Remote predates this marker, so there is nothing to compare against
-        if (remoteEncoded == null) return
-
-        val remote = syncPreferences.decodeSyncSettings(remoteEncoded)
-        val mismatch = remote != null && remote != local
-
-        if (mismatch) {
+        if (mismatch.isNotEmpty()) {
             logcat(LogPriority.WARN) {
-                "Sync section mismatch: remote=$remoteEncoded local=${syncPreferences.encodeSyncSettings(local)}"
+                "Sync section mismatch: remote=$mismatch local=${syncPreferences.encodeSyncSettings(syncPreferences.getSyncSettings())}"
             }
         }
 
-        syncPreferences.remoteSyncSettings.set(if (mismatch) remoteEncoded else "")
-    }
-
-    private companion object {
-        /** Pseudo preference key carrying the sync section selection inside the synced payload. */
-        const val SYNC_SETTINGS_KEY = "__sync_settings__"
+        syncPreferences.remoteSyncSettings.set(mismatch)
     }
     // SY <--
 
