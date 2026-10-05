@@ -38,8 +38,13 @@ favorite,
 cover_last_modified,
 chapterNumber,
 readAt,
-readDuration
+readDuration,
+chapters.last_page_read AS lastPageRead,
+chapters.memo AS chapterMemo,
+chapters.read AS chapterRead
 FROM historyView
+JOIN chapters
+ON chapters._id = historyView.chapterId
 WHERE historyView.readAt > 0
 AND maxReadAtChapterId = historyView.chapterId
 AND lower(historyView.title) LIKE ('%' || :query || '%')
@@ -57,8 +62,13 @@ favorite,
 cover_last_modified,
 chapterNumber,
 readAt,
-readDuration
+readDuration,
+chapters.last_page_read AS lastPageRead,
+chapters.memo AS chapterMemo,
+chapters.read AS chapterRead
 FROM historyView
+JOIN chapters
+ON chapters._id = historyView.chapterId
 WHERE historyView.readAt > 0
 ORDER BY readAt DESC
 LIMIT 1;

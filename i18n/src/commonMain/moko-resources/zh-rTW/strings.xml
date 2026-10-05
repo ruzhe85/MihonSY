@@ -415,6 +415,10 @@
     <string name="tapping_inverted_none">無</string>
     <string name="restore_duration">%1$02d 分， %2$02d 秒</string>
     <string name="recent_manga_time">第 %1$s 章 - %2$s</string>
+    <!-- SY -->
+    <string name="history_pages_progress">第 %1$d/%2$d 頁</string>
+    <string name="history_pages_read">第 %1$d 頁</string>
+    <!-- SY <-->
     <string name="notification_chapters_single">第 %1$s 章</string>
     <string name="notification_chapters_multiple">第 %1$s 章</string>
     <string name="notification_chapters_single_and_more">第 %1$s 章以及另外 %2$d 章</string>

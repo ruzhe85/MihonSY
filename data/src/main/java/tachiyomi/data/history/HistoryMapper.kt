@@ -1,5 +1,7 @@
 package tachiyomi.data.history
 
+import kotlinx.serialization.json.JsonObject
+import tachiyomi.domain.chapter.model.ChapterMemo
 import tachiyomi.domain.history.model.History
 import tachiyomi.domain.history.model.HistoryWithRelations
 import tachiyomi.domain.manga.model.MangaCover
@@ -30,6 +32,11 @@ object HistoryMapper {
         chapterNumber: Double,
         readAt: Date?,
         readDuration: Long,
+        // SY -->
+        lastPageRead: Long,
+        chapterMemo: JsonObject,
+        chapterRead: Boolean,
+        // SY <--
     ): HistoryWithRelations = HistoryWithRelations(
         id = historyId,
         chapterId = chapterId,
@@ -40,6 +47,11 @@ object HistoryMapper {
         chapterNumber = chapterNumber,
         readAt = readAt,
         readDuration = readDuration,
+        // SY -->
+        lastPageRead = lastPageRead,
+        totalPages = ChapterMemo.pages(chapterMemo),
+        chapterRead = chapterRead,
+        // SY <--
         coverData = MangaCover(
             mangaId = mangaId,
             sourceId = sourceId,

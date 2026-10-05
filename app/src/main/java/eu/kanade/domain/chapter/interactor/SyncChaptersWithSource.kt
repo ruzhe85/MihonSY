@@ -16,6 +16,7 @@ import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.ShouldUpdateDbChapter
 import tachiyomi.domain.chapter.interactor.UpdateChapter
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.chapter.model.ChapterMemo
 import tachiyomi.domain.chapter.model.NoChaptersException
 import tachiyomi.domain.chapter.model.toChapterUpdate
 import tachiyomi.domain.chapter.repository.ChapterRepository
@@ -134,7 +135,11 @@ class SyncChaptersWithSource(
                         chapterNumber = chapter.chapterNumber,
                         scanlator = chapter.scanlator,
                         sourceOrder = chapter.sourceOrder,
-                        memo = chapter.memo,
+                        // SY -->
+                        // The source owns its memo keys, but the keys this app keeps there (the
+                        // recorded page count) must survive an update of the chapter list.
+                        memo = ChapterMemo.merge(chapter.memo, dbChapter.memo),
+                        // SY <--
                     )
 
                     if (chapter.dateUpload != 0L) {

@@ -908,6 +908,10 @@
 
     <!-- History -->
     <string name="recent_manga_time">Ch. %1$s - %2$s</string>
+    <!-- SY -->
+    <string name="history_pages_progress">%1$d/%2$d pages</string>
+    <string name="history_pages_read">Page %1$d</string>
+    <!-- SY <-->
     <string name="pref_clear_history">Clear history</string>
     <string name="clear_history_completed">History deleted</string>
     <string name="clear_history_confirmation">Are you sure? All history will be lost.</string>

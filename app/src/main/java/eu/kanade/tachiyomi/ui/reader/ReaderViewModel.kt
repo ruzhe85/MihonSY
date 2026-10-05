@@ -95,6 +95,7 @@ import tachiyomi.domain.chapter.interactor.GetMergedChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.UpdateChapter
 import tachiyomi.domain.chapter.model.BookmarkItem
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.chapter.model.ChapterMemo
 import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.repository.BookmarkRepository
 import tachiyomi.domain.chapter.service.getChapterSort
@@ -1206,20 +1207,31 @@ class ReaderViewModel @JvmOverloads constructor(
             }
 
             // SY -->
-            if (previousPageRead != readerChapter.chapter.last_page_read ||
+            // The history screen shows "read / total pages", and the total is only known while a
+            // chapter is loaded, so it is recorded next to the progress into the chapter's memo.
+            val memoWithPages = ChapterMemo.withPages(readerChapter.chapter.memo, readerChapter.pages?.size ?: 0)
+            val pagesChanged = memoWithPages !== readerChapter.chapter.memo
+            val progressChanged = previousPageRead != readerChapter.chapter.last_page_read ||
                 previousRead != readerChapter.chapter.read
-            ) {
+            if (progressChanged || pagesChanged) {
                 updateChapter.await(
                     ChapterUpdate(
                         id = readerChapter.chapter.id!!,
                         read = readerChapter.chapter.read,
                         lastPageRead = readerChapter.chapter.last_page_read.toLong(),
+                        memo = memoWithPages.takeIf { pagesChanged },
                     ),
                 )
-                // Only a real change advances the reading clock. The chapter row's own timestamp
-                // cannot be used for this: bookmark edits and sync restores refresh it as well.
-                manga?.let {
-                    ProgressClock.stampProgress(it.source, it.url, readerChapter.chapter.url)
+                if (pagesChanged) {
+                    // Keep the in-memory copy in step so the next page turn does not rewrite it
+                    readerChapter.chapter.memo = memoWithPages
+                }
+                if (progressChanged) {
+                    // Only a real change advances the reading clock. The chapter row's own timestamp
+                    // cannot be used for this: bookmark edits and sync restores refresh it as well.
+                    manga?.let {
+                        ProgressClock.stampProgress(it.source, it.url, readerChapter.chapter.url)
+                    }
                 }
             }
 

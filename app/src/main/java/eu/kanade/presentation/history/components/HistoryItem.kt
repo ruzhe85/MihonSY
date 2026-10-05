@@ -15,7 +15,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -26,7 +25,6 @@ import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.manga.components.MangaCover
 import eu.kanade.presentation.theme.TachiyomiPreviewTheme
 import eu.kanade.presentation.util.formatChapterNumber
-import eu.kanade.tachiyomi.util.lang.toTimestampString
 import tachiyomi.domain.history.model.HistoryWithRelations
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.padding
@@ -68,20 +66,37 @@ fun HistoryItem(
                 overflow = TextOverflow.Ellipsis,
                 style = textStyle,
             )
-            val readAt = remember { history.readAt?.toTimestampString() ?: "" }
+            // SY -->
+            // No date here: the list is already grouped by day. What is useful instead is where the
+            // reader left off, using the page count the reader recorded for this chapter.
+            val totalPages = history.totalPages
+            val pagesText = when {
+                totalPages != null && totalPages > 0 -> {
+                    val readPages = if (history.chapterRead) {
+                        totalPages
+                    } else {
+                        (history.lastPageRead + 1).coerceIn(1L, totalPages.toLong()).toInt()
+                    }
+                    stringResource(MR.strings.history_pages_progress, readPages, totalPages) +
+                        " · ${readPages * 100 / totalPages}%"
+                }
+
+                history.lastPageRead > 0 -> {
+                    stringResource(MR.strings.history_pages_read, history.lastPageRead + 1)
+                }
+
+                else -> null
+            }
+            val subtitle = buildList {
+                if (history.chapterNumber > -1) add(formatChapterNumber(history.chapterNumber))
+                pagesText?.let(::add)
+            }.joinToString(" · ")
             Text(
-                text = if (history.chapterNumber > -1) {
-                    stringResource(
-                        MR.strings.recent_manga_time,
-                        formatChapterNumber(history.chapterNumber),
-                        readAt,
-                    )
-                } else {
-                    readAt
-                },
+                text = subtitle,
                 modifier = Modifier.padding(top = 4.dp),
                 style = textStyle,
             )
+            // SY <--
         }
 
         if (!history.coverData.isMangaFavorite) {

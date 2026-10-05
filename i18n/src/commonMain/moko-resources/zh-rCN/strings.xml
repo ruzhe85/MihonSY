@@ -393,6 +393,10 @@
     <string name="restore_in_progress">还原已在进行</string>
     <string name="backup_in_progress">备份已在进行</string>
     <string name="recent_manga_time">第 %1$s 章 - %2$s</string>
+    <!-- SY -->
+    <string name="history_pages_progress">第 %1$d/%2$d 页</string>
+    <string name="history_pages_read">第 %1$d 页</string>
+    <!-- SY <-->
     <string name="local_source_help_guide">本地图源指南</string>
     <string name="last_used_source">最近使用</string>
     <string name="downloaded_only_summary">筛选书架里的全部作品</string>

@@ -1,6 +1,7 @@
 package tachiyomi.domain.chapter.interactor
 
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.chapter.model.ChapterMemo
 
 class ShouldUpdateDbChapter {
 
@@ -10,6 +11,10 @@ class ShouldUpdateDbChapter {
             dbChapter.dateUpload != sourceChapter.dateUpload ||
             dbChapter.chapterNumber != sourceChapter.chapterNumber ||
             dbChapter.sourceOrder != sourceChapter.sourceOrder ||
-            dbChapter.memo != sourceChapter.memo
+            // SY -->
+            // Only the source's own memo keys count as a change; the keys this app keeps there (the
+            // recorded page count) would otherwise look like a change on every single library update.
+            ChapterMemo.withoutAppKeys(dbChapter.memo) != ChapterMemo.withoutAppKeys(sourceChapter.memo)
+            // SY <--
     }
 }
