@@ -71,6 +71,9 @@ class SyncTriggerOptionsScreen : Screen() {
                     model.toggle(option.setter, it)
                 },
                 enabled = option.enabled(state.options),
+                // SY -->
+                subtitle = option.subtitle?.let { stringResource(it) },
+                // SY <--
             )
         }
     }

@@ -648,6 +648,15 @@
     <string name="webdav_invalid_url">WebDAV 地址无效：%1$s</string>
     <string name="sync_on_chapter_read">退出阅读器时同步</string>
     <string name="sync_on_app_resume">后台转到前台时同步</string>
+    <!-- SY：说明各触发的真实行为，阅读进度/历史/书签由独立小通道实时同步 -->
+    <string name="sync_trigger_chapter_read">离开阅读器时允许全量同步</string>
+    <string name="sync_trigger_chapter_read_summ">进度与历史始终会推送；此项只决定离开阅读器时是否顺带跑一次全量，且仍受「同步频率」限制。</string>
+    <string name="sync_trigger_chapter_open">打开章节时强制拉取进度与书签</string>
+    <string name="sync_trigger_chapter_open_summ">不开也会拉取（最多每 30 秒一次），开启只是让它立即拉取；不会触发全量同步。</string>
+    <string name="sync_trigger_app_start">打开 App 时拉取历史与书签</string>
+    <string name="sync_trigger_app_start_summ">是否顺带跑一次全量由「同步频率」决定。</string>
+    <string name="sync_trigger_app_resume">回到前台时拉取历史与书签</string>
+    <string name="sync_trigger_app_resume_summ">是否顺带跑一次全量由「同步频率」决定。</string>
     <string name="sync_library">同步书架</string>
     <string name="parodies">戏仿</string>
     <string name="non_h">非色情</string>

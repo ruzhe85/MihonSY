@@ -283,6 +283,15 @@
     <string name="sync_on_chapter_open">Sync on Chapter Open</string>
     <string name="sync_on_app_start">Sync on App Start</string>
     <string name="sync_on_app_resume">Sync on App Resume</string>
+    <!-- SY --> what the triggers actually do: reading data travels in its own live channels
+    <string name="sync_trigger_chapter_read">Allow a full sync when leaving the reader</string>
+    <string name="sync_trigger_chapter_read_summ">Progress and history are always pushed. This only decides whether leaving the reader also runs a full sync, which the sync frequency still limits.</string>
+    <string name="sync_trigger_chapter_open">Force-pull progress and bookmarks when a chapter opens</string>
+    <string name="sync_trigger_chapter_open_summ">They are pulled on opening anyway, at most once every 30 seconds. This makes it immediate, and never runs a full sync.</string>
+    <string name="sync_trigger_app_start">Pull history and bookmarks when the app starts</string>
+    <string name="sync_trigger_app_start_summ">Whether a full sync follows is decided by the sync frequency.</string>
+    <string name="sync_trigger_app_resume">Pull history and bookmarks when returning to the app</string>
+    <string name="sync_trigger_app_resume_summ">Whether a full sync follows is decided by the sync frequency.</string>
     <string name="sync_library">Sync library</string>
 
     <!-- Security settings -->
