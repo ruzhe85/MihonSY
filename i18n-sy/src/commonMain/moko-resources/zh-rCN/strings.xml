@@ -588,8 +588,8 @@
     <string name="pref_sync_now">立即同步</string>
     <string name="pref_sync_now_subtitle">立即开始同步数据</string>
     <string name="pref_sync_interval">同步频率</string>
-    <!-- SY：该频率只约束全量同步，阅读进度/历史/书签始终实时 -->
-    <string name="pref_sync_interval_summ">%s · 只限制全量同步；阅读进度、历史与书签始终实时</string>
+    <!-- SY：该频率用于书架类数据，阅读数据由独立通道实时同步 -->
+    <string name="pref_sync_interval_summ">%s · 书架、分类与设置按此频率同步；阅读进度、历史与书签始终实时</string>
     <string name="pref_choose_what_to_sync">选择要同步的内容</string>
     <!-- SY -->
     <string name="pref_sync_sections_mismatch">其他设备的设置类同步项与本机不同。若希望设置保持一致，请在每台设备上选择相同的项目。</string>
@@ -648,15 +648,14 @@
     <string name="webdav_invalid_url">WebDAV 地址无效：%1$s</string>
     <string name="sync_on_chapter_read">退出阅读器时同步</string>
     <string name="sync_on_app_resume">后台转到前台时同步</string>
-    <!-- SY：说明各触发的真实行为，阅读进度/历史/书签由独立小通道实时同步 -->
-    <string name="sync_trigger_chapter_read">离开阅读器时允许全量同步</string>
-    <string name="sync_trigger_chapter_read_summ">进度与历史始终会推送；此项只决定离开阅读器时是否顺带跑一次全量，且仍受「同步频率」限制。</string>
-    <string name="sync_trigger_chapter_open">打开章节时强制拉取进度与书签</string>
-    <string name="sync_trigger_chapter_open_summ">不开也会拉取（最多每 30 秒一次），开启只是让它立即拉取；不会触发全量同步。</string>
-    <string name="sync_trigger_app_start">打开 App 时拉取历史与书签</string>
-    <string name="sync_trigger_app_start_summ">是否顺带跑一次全量由「同步频率」决定。</string>
-    <string name="sync_trigger_app_resume">回到前台时拉取历史与书签</string>
-    <string name="sync_trigger_app_resume_summ">是否顺带跑一次全量由「同步频率」决定。</string>
+    <string name="sync_trigger_chapter_read">退出阅读器时同步</string>
+    <string name="sync_trigger_chapter_read_summ">离开阅读器后，立即把阅读进度与阅读记录更新到其它设备</string>
+    <string name="sync_trigger_chapter_open">打开章节时同步</string>
+    <string name="sync_trigger_chapter_open_summ">打开章节后，立即获取其它设备读到的最新页码与本章书签</string>
+    <string name="sync_trigger_app_start">启动应用时同步</string>
+    <string name="sync_trigger_app_start_summ">启动后获取其它设备的阅读记录与书签</string>
+    <string name="sync_trigger_app_resume">回到应用时同步</string>
+    <string name="sync_trigger_app_resume_summ">从后台回来时获取其它设备的阅读记录与书签</string>
     <string name="sync_library">同步书架</string>
     <string name="parodies">戏仿</string>
     <string name="non_h">非色情</string>
