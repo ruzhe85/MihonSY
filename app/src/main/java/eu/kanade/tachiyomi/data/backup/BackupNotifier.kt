@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.data.backup
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.core.app.NotificationCompat
 import com.hippo.unifile.UniFile
@@ -17,9 +18,12 @@ import eu.kanade.tachiyomi.util.storage.getUriCompat
 import eu.kanade.tachiyomi.util.system.cancelNotification
 import eu.kanade.tachiyomi.util.system.notificationBuilder
 import eu.kanade.tachiyomi.util.system.notify
+import kotlinx.coroutines.CancellationException
+import logcat.LogPriority
 import tachiyomi.core.common.i18n.pluralStringResource
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.storage.displayablePath
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 import uy.kohesive.injekt.injectLazy
 import java.io.File
@@ -33,30 +37,51 @@ class BackupNotifier(private val context: Context) {
     private val syncPreferences: SyncPreferences by injectLazy()
     // SY <--
 
-    private val progressNotificationBuilder = context.notificationBuilder(
+    // SY -->
+    // The icon is decoded once, but the builder never is: a NotificationCompat.Builder is not
+    // thread-safe. A restore updates the same notification from every coroutine of its concurrent
+    // block *and* from WorkManager's foreground thread, so a shared instance let clearActions() /
+    // addAction() mutate the action list while another thread iterated it in build(), which threw
+    // a ConcurrentModificationException and aborted the whole restore.
+    private val largeIcon: Bitmap by lazy {
+        BitmapFactory.decodeResource(context.resources, R.mipmap.ic_launcher)
+    }
+
+    private fun progressBuilder(): NotificationCompat.Builder = context.notificationBuilder(
         Notifications.CHANNEL_BACKUP_RESTORE_PROGRESS,
     ) {
-        setLargeIcon(BitmapFactory.decodeResource(context.resources, R.mipmap.ic_launcher))
+        setLargeIcon(largeIcon)
         setSmallIcon(R.drawable.ic_tachi)
         setAutoCancel(false)
         setOngoing(true)
         setOnlyAlertOnce(true)
     }
 
-    private val completeNotificationBuilder = context.notificationBuilder(
+    private fun completeBuilder(): NotificationCompat.Builder = context.notificationBuilder(
         Notifications.CHANNEL_BACKUP_RESTORE_COMPLETE,
     ) {
-        setLargeIcon(BitmapFactory.decodeResource(context.resources, R.mipmap.ic_launcher))
+        setLargeIcon(largeIcon)
         setSmallIcon(R.drawable.ic_tachi)
         setAutoCancel(false)
     }
+    // SY <--
 
+    // SY -->
+    // Notifications are a side channel: failing to post one must never abort a backup or a restore
+    // that is already in progress.
     private fun NotificationCompat.Builder.show(id: Int) {
-        context.notify(id, build())
+        try {
+            context.notify(id, build())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e) { "Failed to post backup notification $id" }
+        }
     }
+    // SY <--
 
     fun showBackupProgress(): NotificationCompat.Builder {
-        val builder = with(progressNotificationBuilder) {
+        val builder = progressBuilder().apply {
             setContentTitle(context.stringResource(MR.strings.creating_backup))
 
             setProgress(0, 0, true)
@@ -70,7 +95,7 @@ class BackupNotifier(private val context: Context) {
     fun showBackupError(error: String?) {
         context.cancelNotification(Notifications.ID_BACKUP_PROGRESS)
 
-        with(completeNotificationBuilder) {
+        with(completeBuilder()) {
             setContentTitle(context.stringResource(MR.strings.creating_backup_error))
             setContentText(error)
 
@@ -81,7 +106,7 @@ class BackupNotifier(private val context: Context) {
     fun showBackupComplete(file: UniFile) {
         context.cancelNotification(Notifications.ID_BACKUP_PROGRESS)
 
-        with(completeNotificationBuilder) {
+        with(completeBuilder()) {
             setContentTitle(context.stringResource(MR.strings.backup_created))
             setContentText(file.displayablePath)
 
@@ -102,7 +127,7 @@ class BackupNotifier(private val context: Context) {
         maxAmount: Int = 100,
         sync: Boolean = false,
     ): NotificationCompat.Builder {
-        val builder = with(progressNotificationBuilder) {
+        val builder = progressBuilder().apply {
             val contentTitle = if (sync) {
                 context.stringResource(MR.strings.syncing_library)
             } else {
@@ -130,12 +155,27 @@ class BackupNotifier(private val context: Context) {
         return builder
     }
 
-    fun showRestoreError(error: String?) {
+    fun showRestoreError(error: String?, logFile: File? = null) {
         context.cancelNotification(Notifications.ID_RESTORE_PROGRESS)
 
-        with(completeNotificationBuilder) {
+        with(completeBuilder()) {
             setContentTitle(context.stringResource(MR.strings.restoring_backup_error))
             setContentText(error)
+
+            // SY -->
+            // The fatal error is also written to a log file; without this the user is told the
+            // restore failed but has no way to see why.
+            if (logFile != null && logFile.exists()) {
+                val uri = logFile.getUriCompat(context)
+                val errorLogIntent = NotificationReceiver.openErrorLogPendingActivity(context, uri)
+                setContentIntent(errorLogIntent)
+                addAction(
+                    R.drawable.ic_folder_24dp,
+                    context.stringResource(MR.strings.action_show_errors),
+                    errorLogIntent,
+                )
+            }
+            // SY <--
 
             show(Notifications.ID_RESTORE_COMPLETE)
         }
@@ -170,7 +210,7 @@ class BackupNotifier(private val context: Context) {
             ),
         )
 
-        with(completeNotificationBuilder) {
+        with(completeBuilder()) {
             setContentTitle(contentTitle)
             setContentText(
                 context.pluralStringResource(

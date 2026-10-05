@@ -81,6 +81,7 @@ class BackupRestorer(
         val startTime = System.currentTimeMillis()
 
         // SY -->
+        var failure: Exception? = null
         try {
             restoreFromFile(uri, options)
         } catch (e: CancellationException) {
@@ -88,6 +89,7 @@ class BackupRestorer(
         } catch (e: Exception) {
             // Record fatal restore failures into the error log instead of failing with only
             // a transient notification that hides the cause
+            failure = e
             logcat(LogPriority.ERROR, e)
             errors.add(
                 Date() to "Fatal: " +
@@ -108,6 +110,14 @@ class BackupRestorer(
         val time = System.currentTimeMillis() - startTime
 
         // SY -->
+        // A restore that died halfway must not be published as a new baseline. The ledger records
+        // what this device actually owns, so writing it from a partial restore would claim a library
+        // that is missing everything the abort skipped, and reporting "complete" would hide it.
+        if (failure != null) {
+            notifier.showRestoreError(failure.message, writeErrorLog())
+            return
+        }
+
         // The ledger records what this device owns once the merge has actually landed. Writing it
         // when the sync merely queued the restore recorded the pre-restore library, which made
         // every freshly pulled entry look "never owned" and let deletions be undone.
