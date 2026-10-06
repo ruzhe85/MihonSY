@@ -418,8 +418,11 @@ private fun MangaScreenSmallImpl(
             }
             SmallExtendedFloatingActionButton(
                 text = {
+                    // Komiho: 「继续」的判据必须与点击行为一致 —— 点击是「有阅读历史就续读历史章」，
+                    // 所以「读到一半」（read=false 但 lastPageRead>0）也算读过，否则会显示成「开始」
+                    // 而实际却续读了。
                     val isReading = remember(state.chapters) {
-                        state.chapters.fastAny { it.chapter.read }
+                        state.chapters.fastAny { it.chapter.read || it.chapter.lastPageRead > 0L }
                     }
                     Text(
                         text = stringResource(if (isReading) MR.strings.action_resume else MR.strings.action_start),
@@ -735,8 +738,9 @@ fun MangaScreenLargeImpl(
             }
             SmallExtendedFloatingActionButton(
                 text = {
+                    // Komiho: 同上面的 FAB —— 与「有阅读历史就续读」的点击行为对齐。
                     val isReading = remember(state.chapters) {
-                        state.chapters.fastAny { it.chapter.read }
+                        state.chapters.fastAny { it.chapter.read || it.chapter.lastPageRead > 0L }
                     }
                     Text(
                         text = stringResource(

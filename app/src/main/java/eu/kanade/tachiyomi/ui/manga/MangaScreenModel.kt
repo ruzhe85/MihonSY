@@ -48,7 +48,7 @@ import eu.kanade.tachiyomi.source.getNameForMangaInfo
 import eu.kanade.tachiyomi.source.online.MetadataSource
 import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import eu.kanade.tachiyomi.util.chapter.getNextUnread
+import eu.kanade.tachiyomi.util.chapter.getContinueChapter
 import eu.kanade.tachiyomi.util.removeCovers
 import eu.kanade.tachiyomi.util.system.toast
 import exh.debug.DebugToggles
@@ -101,6 +101,7 @@ import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.model.NoChaptersException
 import tachiyomi.domain.chapter.service.calculateChapterGap
 import tachiyomi.domain.chapter.service.getChapterSort
+import tachiyomi.domain.history.interactor.GetHistory
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.interactor.DeleteByMergeId
 import tachiyomi.domain.manga.interactor.DeleteMangaById
@@ -152,6 +153,8 @@ class MangaScreenModel(
     private val downloadManager: DownloadManager = Injekt.get(),
     private val downloadCache: DownloadCache = Injekt.get(),
     private val getMangaAndChapters: GetMangaWithChapters = Injekt.get(),
+    // Komiho: 「继续阅读」按阅读历史续读（见 getNextUnreadChapter / getContinueChapter）。
+    private val getHistory: GetHistory = Injekt.get(),
     // SY -->
     private val sourceManager: SourceManager = Injekt.get(),
     private val getManga: GetManga = Injekt.get(),
@@ -1120,11 +1123,31 @@ class MangaScreenModel(
     }
 
     /**
-     * Returns the next unread chapter or null if everything is read.
+     * Komiho: 「继续阅读」的目标章节。
+     *
+     * 原先只返回「最早未读」（`getNextUnread`），于是 FAB 显示「继续」时点下去却从最早未读开始，
+     * 完全无视阅读历史。现在：有历史就回到历史那一章续读（读完则进它的下一章），没有历史才退回
+     * 最早未读 —— 见 [getContinueChapter]。历史取 `readAt` 最新的一条。
+     *
+     * 注意用 `successState.chapters`（全量，未应用视图过滤）查找：历史章通常是已读章，而
+     * `applyFilters` 会按 unreadFilter 把已读章剔掉。
      */
-    fun getNextUnreadChapter(): Chapter? {
+    suspend fun getNextUnreadChapter(): Chapter? {
         val successState = successState ?: return null
-        return successState.chapters.getNextUnread(successState.manga)
+        // 「清除历史」只把 `last_read` 置 0（行保留、不删），所以没有有效 readAt 的行走不了：
+        // 否则 maxByOrNull 会在全 0 的行里随便挑一条（SQL 无 ORDER BY），跳到不确定的章节。
+        val lastReadChapterId = getHistory.await(mangaId)
+            .maxByOrNull { it.readAt?.time ?: 0L }
+            ?.takeIf { (it.readAt?.time ?: 0L) > 0L }
+            ?.chapterId
+        return successState.chapters
+            .map { it.chapter }
+            .getContinueChapter(
+                manga = successState.manga,
+                downloadManager = downloadManager,
+                mergedManga = successState.mergedData?.manga.orEmpty(),
+                lastReadChapterId = lastReadChapterId,
+            )
     }
 
     private fun getUnreadChapters(): List<Chapter> {

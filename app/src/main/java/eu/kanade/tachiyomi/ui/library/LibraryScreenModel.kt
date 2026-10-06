@@ -30,7 +30,7 @@ import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.online.all.MergedSource
-import eu.kanade.tachiyomi.util.chapter.getNextUnread
+import eu.kanade.tachiyomi.util.chapter.getContinueChapter
 import eu.kanade.tachiyomi.util.removeCovers
 import exh.favorites.FavoritesSyncHelper
 import exh.md.utils.FollowStatus
@@ -85,6 +85,7 @@ import tachiyomi.domain.chapter.interactor.GetBookmarkedChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetMergedChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.history.interactor.GetHistory
 import tachiyomi.domain.history.interactor.GetNextChapters
 import tachiyomi.domain.library.model.LibraryDisplayMode
 import tachiyomi.domain.library.model.LibraryGroup
@@ -120,6 +121,8 @@ class LibraryScreenModel(
     private val getCategories: GetCategories = Injekt.get(),
     private val getTracksPerManga: GetTracksPerManga = Injekt.get(),
     private val getNextChapters: GetNextChapters = Injekt.get(),
+    // Komiho: 「继续阅读」按阅读历史续读（见 getNextUnreadChapter / getContinueChapter）。
+    private val getHistory: GetHistory = Injekt.get(),
     private val getChaptersByMangaId: GetChaptersByMangaId = Injekt.get(),
     private val getBookmarkedChaptersByMangaId: GetBookmarkedChaptersByMangaId = Injekt.get(),
     private val setReadStatus: SetReadStatus = Injekt.get(),
@@ -711,15 +714,29 @@ class LibraryScreenModel(
             .reduce { set1, set2 -> set1.intersect(set2) }
     }
 
+    /**
+     * Komiho: 「继续阅读」（书库网格上的按钮）的目标章节 —— 有阅读历史就回到历史那一章续读
+     * （读完则进它的下一章），没有历史才退回最早未读。与详情页 FAB 走同一套解析
+     * （[getContinueChapter]）。
+     *
+     * 历史按 `readAt` 最新取一条。合并源查不到历史（历史按真实 mangaId 记）⇒ 自然退回最早未读。
+     */
     suspend fun getNextUnreadChapter(manga: Manga): Chapter? {
         // SY -->
         val mergedManga = getMergedMangaById.await(manga.id).associateBy { it.id }
-        return if (manga.id == MERGED_SOURCE_ID) {
+        val chapters = if (manga.id == MERGED_SOURCE_ID) {
             getMergedChaptersByMangaId.await(manga.id, applyScanlatorFilter = true)
         } else {
             getChaptersByMangaId.await(manga.id, applyScanlatorFilter = true)
-        }.getNextUnread(manga, downloadManager, mergedManga)
+        }
         // SY <--
+        // 「清除历史」只把 `last_read` 置 0（行保留、不删），所以没有有效 readAt 的行走不了 ——
+        // 否则 maxByOrNull 会在全 0 的行里随便挑一条，跳到不确定的章节。
+        val lastReadChapterId = getHistory.await(manga.id)
+            .maxByOrNull { it.readAt?.time ?: 0L }
+            ?.takeIf { (it.readAt?.time ?: 0L) > 0L }
+            ?.chapterId
+        return chapters.getContinueChapter(manga, downloadManager, mergedManga, lastReadChapterId)
     }
 
     /**
