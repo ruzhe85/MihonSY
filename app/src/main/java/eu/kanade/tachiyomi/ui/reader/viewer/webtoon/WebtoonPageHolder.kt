@@ -107,11 +107,20 @@ class WebtoonPageHolder(
     private var renderedEnhancementMode = -1
     private var renderedEnhancementKey = ""
 
+    /**
+     * Komiho: 本次解码请求对应的页。增强是**异步**在 Coil 解码器线程里跑的，[frame.onImageLoaded]
+     * 回来时 [page] 可能已经被重绑到别的页，所以用这个字段固定归属，供
+     * [WebtoonViewer.onPageRendered] 记账（跨章预载窗口 / 看门狗）。
+     */
+    private var renderingPage: ReaderPage? = null
+
     init {
         refreshLayoutParams()
 
         frame.onImageLoaded = {
             onImageDecoded()
+            // Komiho: 图片（含 AI 增强）真正落地 —— 通知 viewer 记账（跨章预载窗口/看门狗）。
+            renderingPage?.let { viewer.onPageRendered(it) }
             // MihonSY: with "original resolution" the image is drawn at 1:1 pixels, but the
             // view still measures its height at fit-width ratio (imageWidth * screenWidth),
             // which is taller than the 1:1 image and leaves a large black gap below each
@@ -165,6 +174,8 @@ class WebtoonPageHolder(
 
         removeErrorLayout()
         frame.recycle()
+        // Komiho: 本次解码请求作废 —— 之后再来的 onImageLoaded 不能再算到「当前这一页」头上。
+        renderingPage = null
         progressIndicator.setProgress(0)
         progressContainer.isVisible = true
         // Komiho (2026-09-26): frame.recycle() 已把当前图像清空，但这里必须同步清掉
@@ -269,6 +280,13 @@ class WebtoonPageHolder(
                 Pair(source, isAnimated)
             }
             withUIContext {
+                // Komiho: 这里**刻意不做** pager 那套 `onPrepareStart` + `abortProcessing()` 抢占：
+                // 条漫 holder 没有 pager 的自愈（`renderedPage` 守卫会把「被抢占后的未增强图」一直
+                // 钉住，重绑也不会重算），抢占等于把某个预载页永久降级成未增强。排队优先级已由
+                // Waifu2x 的可见页 / 准可见页闸门覆盖（见 WebtoonViewer 对 visiblePageIndex /
+                // urgentPageIndex 的登记），残差只剩「正在跑的那一次」，不值得拿画质去换。
+                // Komiho: 记下本次解码请求归谁，供 onImageLoaded 回调记账。
+                renderingPage = currentPage
                 // Komiho 诊断：条漫页号（条漫不走 PagerPreparedCache，来源只会是 holder）。
                 frame.pageIndex = page?.index ?: -1
                 frame.setImage(
@@ -335,6 +353,9 @@ class WebtoonPageHolder(
      * Called when the page has an error.
      */
     private fun setError(error: Throwable?) {
+        // Komiho: 失败同样是「这一页的终态」—— 让跨章预载窗口记账。加载期就报错时
+        // renderingPage 还是空的，退回收 page（该页确实已经是终态，不该再被当成「还在跑」）。
+        (renderingPage ?: page)?.let { viewer.onPageRendered(it) }
         progressContainer.isVisible = false
         initErrorLayout(error)
     }

@@ -296,14 +296,29 @@ object Waifu2x {
     }
 
     /**
-     * Komiho (2026-10-01): 当前可见页的页号（-1 = 未知）。阅读器准备**可见页**时写入
-     * （见 `PagerViewer.onPrepareStart`），供 [process] 判断「这次请求是不是用户正在看的那页」。
+     * Komiho (2026-10-01): 当前可见页的页号（-1 = 未知）。阅读器**准备可见页**时写入 ——
+     * pager 见 `PagerViewer.onPrepareStart`，条漫在 `WebtoonViewer.onScrolled` 里按视口中线
+     * 所在页写（条漫原先从不写，闸门对它曾完全失效）。
      *
-     * 只服务于 [prioritizeEnhancement]，不参与任何功能判定 —— 值过期最坏的后果是某个请求
-     * 被当成「可见页」直接放行（本来就放行），没有副作用。
+     * 供 [process] 判断「这次请求是不是用户正在看的那页」。只服务于 [prioritizeEnhancement]，
+     * 不参与任何功能判定 —— 值过期最坏的后果是某个请求被当成「可见页」直接放行（本来就放行），
+     * 没有副作用。
      */
     @Volatile
     var visiblePageIndex: Int = -1
+
+    /**
+     * Komiho: 「准可见页」—— 条漫跨章预载的目标页（下一章第一页），-1 = 无。
+     *
+     * 为什么需要：`LinearLayoutManager` 正向逐项布局 ⇒ 目标页在同批预载里**最后**入队，而刚落进
+     * 预载区的中间页会先占住原生推理锁，「提前几屏 bind」换来的提前量就被它们吃光。这里把它按
+     * 可见页处理（见 [prioritizeEnhancement]）：跳过排队，并让其它预取等它跑完再进。
+     *
+     * 与 [visiblePageIndex] 同一套语义：只服务优先级判定，页号是**章内序号**，跨章撞号最多让某个
+     * 预取多插一次队，无副作用。由 `WebtoonViewer` 在跨章预载窗口开/关、目标渲染完成时登记或撤销。
+     */
+    @Volatile
+    var urgentPageIndex: Int = -1
 
     /**
      * Komiho (2026-10-01): 可见页优先闸门。
@@ -316,15 +331,30 @@ object Waifu2x {
      * 因此最坏情况只是「预取被顺延」，不可能死锁 —— 可见页不受任何人阻塞，而预取等待的那个
      * 计数只由可见页自己的 finally 递减。
      *
+     * Komiho: 加入 [urgentPageIndex]（条漫跨章预载目标页）后变成**三档**，见 [Priority]：
+     * 准可见只插在预取之前，**绝不抢正在看的可见页**（否则等于削弱「可见页优先」这条保证）。
+     * 等待关系依旧无环（可见页不等任何人）⇒ 仍然不可能死锁。
+     *
      * 包住的只有「进原生锁 → 推理 → 释放」这一段，[Timing] 的 wait/proc 口径不变。
      */
     private val gateLock = Object()
     private var visibleInFlight = 0
+    private var urgentInFlight = 0
 
-    private fun <T> prioritizeEnhancement(visible: Boolean, block: () -> T): T {
-        if (!visible) {
+    /**
+     * Komiho: 闸门档位。数值越大优先级越高，只影响「谁能先抢到原生推理锁」。
+     *
+     * - [VISIBLE]：用户正在看的那页（`visiblePageIndex`）—— 永不等待，且不受准可见页阻塞。
+     * - [URGENT]：条漫跨章预载目标页（[urgentPageIndex]）—— 只等可见页，插在预取之前。
+     * - [PREFETCH]：其余预取 —— 等可见页与准可见页都跑完才进。
+     */
+    private enum class Priority { PREFETCH, URGENT, VISIBLE }
+
+    private fun <T> prioritizeEnhancement(priority: Priority, block: () -> T): T {
+        // 先按优先级排队（可见页这一档直接跳过，是本闸门不会死锁的依据）。
+        if (priority != Priority.VISIBLE) {
             synchronized(gateLock) {
-                while (visibleInFlight > 0) {
+                while (visibleInFlight > 0 || (priority == Priority.PREFETCH && urgentInFlight > 0)) {
                     try {
                         gateLock.wait()
                     } catch (e: InterruptedException) {
@@ -333,15 +363,27 @@ object Waifu2x {
                     }
                 }
             }
-            return block()
         }
-        synchronized(gateLock) { visibleInFlight++ }
+        // 登记自己在飞，让更低优先级排队；预取谁也不挡，不需要计数。
+        when (priority) {
+            Priority.VISIBLE -> synchronized(gateLock) { visibleInFlight++ }
+            Priority.URGENT -> synchronized(gateLock) { urgentInFlight++ }
+            Priority.PREFETCH -> Unit
+        }
         try {
             return block()
         } finally {
-            synchronized(gateLock) {
-                visibleInFlight--
-                if (visibleInFlight == 0) gateLock.notifyAll()
+            when (priority) {
+                // 无条件 notifyAll：等待方都在 while 里复核自己的条件，多唤醒只会多一次判断。
+                Priority.VISIBLE -> synchronized(gateLock) {
+                    visibleInFlight--
+                    gateLock.notifyAll()
+                }
+                Priority.URGENT -> synchronized(gateLock) {
+                    urgentInFlight--
+                    gateLock.notifyAll()
+                }
+                Priority.PREFETCH -> Unit
             }
         }
     }
@@ -382,9 +424,15 @@ object Waifu2x {
             // 那段被计入下面的 `inference`（用 pure= 才能摘出来，见 [Timing] 的说明）。
             // 判据：wait 常年 ≈0 → 解码线程没被占住，方案 A 不必做；wait 经常上千毫秒
             // → 线程饥饿真实存在，再考虑把增强搬出解码器。
-            // Komiho (2026-10-01): 可见页优先闸门 —— 只包住「进原生锁 → 推理 → 释放」这一段，
-            // wait/proc 的计时口径完全不变。判据 = 这次请求的页号就是阅读器刚标记的可见页。
-            val visible = id >= 0 && id == visiblePageIndex
+            // Komiho (2026-10-01): 优先闸门 —— 只包住「进原生锁 → 推理 → 释放」这一段，
+            // wait/proc 的计时口径完全不变。档位见 [Priority]：可见页 > 准可见页（条漫跨章预载的
+            // 目标页）> 预取；准可见只插在预取之前，绝不抢用户正在看的那一页。
+            val priority = when {
+                id < 0 -> Priority.PREFETCH
+                id == visiblePageIndex -> Priority.VISIBLE
+                urgentPageIndex >= 0 && id == urgentPageIndex -> Priority.URGENT
+                else -> Priority.PREFETCH
+            }
             var waitMs = 0L
             var procMs = 0L
             // 闸门排队与原生锁排队是同一件事（都在等 GPU 空出来），所以一起计入 [waitMs]
@@ -393,7 +441,7 @@ object Waifu2x {
             // （App.kt 的 setupExhLogging），logcat() 的 DEBUG/INFO 会被整条吞掉；DiagLog
             // 同时写 android.util.Log 与进程内缓冲，所以 logcat 与「导出诊断日志」都能拿到。
             val waitStart = android.os.SystemClock.uptimeMillis()
-            val out = prioritizeEnhancement(visible) {
+            val out = prioritizeEnhancement(priority) {
                 nativeClearAbortProcessing()
                 waitMs = android.os.SystemClock.uptimeMillis() - waitStart
 

@@ -26,6 +26,7 @@ import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
+import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -54,6 +55,19 @@ class WebtoonViewer(
 
     /** Komiho: 合并中的适配器重建任务（见 [refreshAdapter]），null = 没有待办。 */
     private var refreshJob: Job? = null
+
+    /**
+     * Komiho: 跨章预载窗口（下一章第一页）。见 [WebtoonCrossChapterPrewarm] —— 解决
+     * 「开了增强时下一章第一页要滑到才开始解码」。
+     */
+    private val crossChapterPrewarm = WebtoonCrossChapterPrewarm()
+
+    /**
+     * Komiho: 跨章预载的看门狗 —— 目标页**已经进入预载区（已被布局、已开始解码 + 增强）**
+     * 却迟迟没有渲染完时兜底关窗，避免长期占用额外预载空间（例如该页一直报错 / 引擎卡住）。
+     * 只在目标被布局后才武装，所以不会误杀「还在远处、本来就还没开始跑」的窗口。
+     */
+    private var prewarmWatchdog: Job? = null
 
     /**
      * Komiho: 上一次「真正重建」时的成像指纹（见 `ViewerConfig.imageFingerprint()`）。
@@ -112,9 +126,27 @@ class WebtoonViewer(
      * user's prefetch depth (1 = original ~1-screen behaviour, up to 3 screens).
      * Larger depth pre-binds more pages so NPU enhancement finishes before they
      * scroll into view, eliminating the black flash on arrival.
+     *
+     * Komiho: 在「接近章末」时再叠加跨章预载窗口的加成（见 [WebtoonCrossChapterPrewarm]），
+     * 让下一章第一页也能落进预载区。幂等 —— 值没变就不动，避免滚动 / 布局回调每帧触发重排。
      */
     private fun applyWebtoonPrefetch() {
-        layoutManager.extraLayoutSpace = scrollDistance * config.webtoonPrefetchDepth
+        // Komiho: 窗口一开/一关就把「准可见」名额同步给 Waifu2x（插队判定在推理侧，见 syncUrgentPage）。
+        syncUrgentPage()
+        val base = scrollDistance * config.webtoonPrefetchDepth
+        val extra = crossChapterPrewarm.extraFor(base, scrollDistance, isEnhancementOn())
+        if (layoutManager.extraLayoutSpace == extra) return
+        layoutManager.extraLayoutSpace = extra
+        recycler.requestLayout()
+    }
+
+    /**
+     * Komiho: 增强链路是否会真的跑（含「只降噪、不放大」的 mode 0 + 降噪组合，
+     * 见 TachiyomiImageDecoder）。纯解码不需要跨章额外提前量。
+     */
+    private fun isEnhancementOn(): Boolean {
+        val preferences = Injekt.get<ReaderPreferences>()
+        return preferences.enhancementMode.get() != 0 || preferences.denoiseLevel.get() != 0
     }
 
     /**
@@ -167,9 +199,7 @@ class WebtoonViewer(
                 // 条漫只认 DRAGGING（手指真在动）：SETTLING 的惯性滚动也占位会把增强饿死
                 // —— 单页推理是 8 秒级，而连续滚动时惯性期很长。
                 override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
-                    eu.kanade.tachiyomi.util.waifu2x.Waifu2x.setUiBusy(
-                        newState == RecyclerView.SCROLL_STATE_DRAGGING,
-                    )
+                    Waifu2x.setUiBusy(newState == RecyclerView.SCROLL_STATE_DRAGGING)
                 }
 
                 override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
@@ -327,8 +357,71 @@ class WebtoonViewer(
      */
     override fun destroy() {
         scrollAnimator?.cancel()
+        cancelPrewarmWatchdog()
+        crossChapterPrewarm.cancel("viewer-destroy")
+        syncUrgentPage()
         super.destroy()
         scope.cancel()
+    }
+
+    /**
+     * Komiho: holder 报告「这一页的图片（含增强）已经真正落地」（成功与失败终态都会调）。
+     *
+     * 三个用途：
+     * 1. 记账跨章预载目标（日志 + 取消看门狗 + 撤销「准可见」）；
+     * 2. 目标渲染完成后撤销 [Waifu2x.urgentPageIndex] —— 它已经出图，再占着插队名额只会让其它
+     *    预取多等一轮；
+     * 3. 预载窗口开启期间补一次布局 —— 章末页解码完成后高度会从「一屏」涨到真实高度，预载区的
+     *    剩余空间随之重新分配，这里补一次 `requestLayout` 让新腾出的空间立刻用来让下一章第一页
+     *    被 bind（否则要等用户下一次滚动才可能补上）。`requestLayout` 在同一帧内幂等
+     *    （PFLAG_FORCE_LAYOUT），不需要额外的同帧合并标志。
+     */
+    fun onPageRendered(page: ReaderPage) {
+        crossChapterPrewarm.onTargetRendered(page)
+        if (crossChapterPrewarm.isActiveFor(page)) cancelPrewarmWatchdog()
+        syncUrgentPage()
+        if (crossChapterPrewarm.isOpen) recycler.requestLayout()
+    }
+
+    /**
+     * Komiho: 把「跨章预载目标页」登记给 [Waifu2x.urgentPageIndex]，让它的 AI 推理**插队**到同批
+     * 预载的中间页之前 —— 正向布局下目标页是最后入队的，不插队的话「提前几屏 bind」换来的提前量
+     * 会被刚落进预载区的中间页吃光（它们先占住原生推理锁）。
+     *
+     * 撤销时机：窗口关闭 / 目标被替换 / 目标渲染完成 / 离开阅读器 —— 都在调用点触发。
+     */
+    private fun syncUrgentPage() {
+        val prewarm = crossChapterPrewarm
+        val target = prewarm.activeTarget
+        Waifu2x.urgentPageIndex =
+            if (prewarm.isOpen && target != null && !prewarm.isTargetRendered) target.index else -1
+    }
+
+    /**
+     * Komiho: 供 [Waifu2x] 可见页优先闸门使用的「正在看的那一页」。
+     *
+     * 刻意不用 `currentPage`（= 底边可见的最后一页，往往只是屏幕最底部刚露头的那页），改用
+     * **视口中线所在的那一页**：条漫连续阅读时视线在屏幕中部，闸门保护的对象才对得上。
+     * 中线上没有 ReaderPage（过渡页 / 尚未布局）时退回 [currentPage]，再取不到就保留上一个值
+     * （比清成 -1 更安全：清掉等于闸门失效）。
+     *
+     * 只服务于优先级判定，不参与任何功能逻辑。
+     */
+    private fun visiblePageIndexForGate(): Int {
+        val first = layoutManager.findFirstVisibleItemPosition()
+        val last = layoutManager.findLastVisibleItemPosition()
+        if (first >= 0 && last >= first) {
+            val centerY = recycler.paddingTop +
+                (recycler.height - recycler.paddingTop - recycler.paddingBottom) / 2
+            for (position in first..last) {
+                val view = layoutManager.findViewByPosition(position) ?: continue
+                if (view.top <= centerY && view.bottom >= centerY) {
+                    (adapter.items.getOrNull(position) as? ReaderPage)?.let { return it.index }
+                    break
+                }
+            }
+        }
+        return (currentPage as? ReaderPage)?.index ?: Waifu2x.visiblePageIndex
     }
 
     /**
@@ -373,6 +466,20 @@ class WebtoonViewer(
         val forceTransition = config.alwaysShowChapterTransition || currentPage is ChapterTransition
         adapter.setChapters(chapters, forceTransition)
 
+        // Komiho: 刷新跨章预载目标（下一章第一页）。是否开窗由紧随其后的 recheck 决定 ——
+        // 「当前读到本章第几页」这个判据只有那里才有。
+        val nextFirstPage = chapters.nextChapter
+            ?.takeIf { it !== chapters.currChapter }
+            ?.pages
+            ?.firstOrNull()
+        if (crossChapterPrewarm.onChaptersChanged(nextFirstPage)) {
+            cancelPrewarmWatchdog()
+            applyWebtoonPrefetch()
+        }
+        // Komiho: 目标刚就位（或章节数据刚变）就把窗口决策做掉，不必等用户下一次滚动。
+        // 这里只做与下标无关的部分 —— adapter 的更新还没落地，见 recheckCrossChapterPrewarm 的说明。
+        updatePrewarmWindow()
+
         if (recycler.isGone) {
             logcat { "Recycler first layout" }
             val pages = chapters.currChapter.pages ?: return
@@ -407,6 +514,97 @@ class WebtoonViewer(
                 is ChapterTransition -> onTransitionSelected(item)
             }
         }
+
+        // Komiho P3：把「正在看的那一页」登记给 Waifu2x 的可见页优先闸门。原先只有 PagerViewer 会写
+        // （见 Waifu2x.visiblePageIndex 的说明），条漫一直是 -1 ⇒ 闸门对条漫完全失效；
+        // 跨章预载会额外多布几屏页，登记之后预取才会给正在看的那一页让路。
+        Waifu2x.visiblePageIndex = visiblePageIndexForGate()
+
+        // Komiho: 跨章预载窗口复核（幂等）。放在最后 —— 此时 currentPage 才是最新的。
+        recheckCrossChapterPrewarm()
+    }
+
+    /** 距章末还剩几页。判据取自 [currentPage] 这个**对象**，与 RecyclerView 下标无关；null = 未知。 */
+    private fun distanceFromChapterEnd(): Int? {
+        val page = currentPage as? ReaderPage ?: return null
+        val pages = page.chapter.pages ?: return null
+        return pages.size - page.number
+    }
+
+    /**
+     * Komiho: 只做「开 / 关窗」决策（见 [WebtoonCrossChapterPrewarm.onDistanceFromEnd]）。
+     *
+     * 不碰任何 RecyclerView 下标，所以在 `setChapters` 之后**可以立刻调用** —— 目标(下一章首页)
+     * 刚就位时就把窗口开起来，不必等用户下一次滚动。
+     */
+    private fun updatePrewarmWindow() {
+        val distance = distanceFromChapterEnd() ?: return
+        if (crossChapterPrewarm.onDistanceFromEnd(distance)) applyWebtoonPrefetch()
+    }
+
+    /**
+     * Komiho: 复核跨章预载窗口（见 [WebtoonCrossChapterPrewarm]）。
+     *
+     * 1. 距章末足够近 → 开窗（把 extra space 抬到 3 屏，下一章第一页才有机会被提前 bind）；
+     *    滑离章末 → 关窗（滞回）；
+     * 2. 目标页进入视口 / 已成为当前页 → 关窗；
+     * 3. 目标页已被布局（说明已落进预载区、已在解码 + 增强）却迟迟没渲染完 → 武装看门狗兜底。
+     *
+     * ⚠️ 2/3 依赖 `adapter.items` 与 child 的 **position 同源**：DiffUtil 的更新要到下一次布局
+     * （`consumePendingUpdateOperations`）才真正落地，`setChapters` 之后立刻查会拿到旧下标。
+     * 所以本方法只在布局完成后的滚动 / 布局回调里调用，`setChapters` 那边只用 [updatePrewarmWindow]。
+     */
+    private fun recheckCrossChapterPrewarm() {
+        updatePrewarmWindow()
+
+        val target = crossChapterPrewarm.activeTarget ?: return
+        val targetPosition = adapter.items.indexOf(target)
+        if (targetPosition < 0) {
+            // 目标已经不在列表里（章节数据变了 / 不再是下一章）→ 关窗。
+            if (crossChapterPrewarm.cancel("target-not-in-adapter")) applyWebtoonPrefetch()
+            cancelPrewarmWatchdog()
+            return
+        }
+        val firstVisible = layoutManager.findFirstVisibleItemPosition()
+        val targetOnScreen = firstVisible >= 0 &&
+            targetPosition in firstVisible..layoutManager.findLastVisibleItemPosition()
+        if (currentPage === target || targetOnScreen) {
+            if (crossChapterPrewarm.onTargetArrived(target)) applyWebtoonPrefetch()
+            cancelPrewarmWatchdog()
+            return
+        }
+        if (crossChapterPrewarm.isOpen &&
+            !crossChapterPrewarm.isTargetRendered &&
+            layoutManager.findViewByPosition(targetPosition) != null
+        ) {
+            armPrewarmWatchdog(target)
+        }
+    }
+
+    /**
+     * Komiho: 武装跨章预载看门狗。只在**目标页真的被布局、且还没渲染完**之后才计时（否则会把
+     * 「窗口开了但目标还在很远处、本来就还没轮到它跑」误判成超时，或把已经算好的页误杀），
+     * 超时即关窗回落到用户设定深度并记一条 WARN。
+     */
+    private fun armPrewarmWatchdog(target: ReaderPage) {
+        if (prewarmWatchdog != null) return
+        prewarmWatchdog = scope.launch {
+            delay(PREWARM_WATCHDOG_MS)
+            prewarmWatchdog = null
+            if (crossChapterPrewarm.isOpenFor(target) && crossChapterPrewarm.cancel("watchdog-timeout")) {
+                android.util.Log.w(
+                    KOMIHA_PREWARM_TAG,
+                    "prewarm watchdog: page=${target.index} 布局后 ${PREWARM_WATCHDOG_MS}ms " +
+                        "仍未渲染完成，关窗回落用户设定深度",
+                )
+                applyWebtoonPrefetch()
+            }
+        }
+    }
+
+    private fun cancelPrewarmWatchdog() {
+        prewarmWatchdog?.cancel()
+        prewarmWatchdog = null
     }
 
     private var lastAnimatedValue: Int = 0
@@ -627,6 +825,14 @@ class WebtoonViewer(
 
     /** 真正重建适配器：销毁并重建所有可见 holder，按最新图像设置重解码。 */
     private fun rebuildAdapter() {
+        // Komiho: 重建会让全部 holder 作废，先关掉跨章预载窗口（目标保留 —— 下一章第一页这个
+        // 目标本身没变，重建结束后随 onScrolled 复核可以重新开窗）。
+        cancelPrewarmWatchdog()
+        if (crossChapterPrewarm.closeWindow("adapter-rebuild")) {
+            // 窗口关了就回落用户设定深度；注意这里不 requestLayout —— 紧接着就要重建适配器。
+            layoutManager.extraLayoutSpace = scrollDistance * config.webtoonPrefetchDepth
+        }
+        syncUrgentPage()
         // 强制重建适配器（与 pager 的 pager.adapter = adapter 同款）：销毁并重建所有可见
         // WebtoonPageHolder，重新走加载链并按最新增强设置重解码，保证切换增强实时生效。
         // 重设 adapter 会清空滚动位置，故先记下首可见项与像素偏移，重建后再还原，避免跳页。
@@ -655,6 +861,15 @@ private const val TAP_SCROLL_PEEK_MARGIN_DP = 23f
 
 /** Komiho 诊断：适配器重建日志（pager 侧同名 tag，便于一起 grep）。 */
 private const val KOMIHA_REBUILD_TAG = "Waifu2xRebuild"
+
+/** Komiho 诊断：跨章预载窗口日志（与 WebtoonPageHolder / WebtoonCrossChapterPrewarm 同值）。 */
+private const val KOMIHA_PREWARM_TAG = "Waifu2xWebtoon"
+
+/**
+ * Komiho: 跨章预载看门狗超时 —— 目标页**已被布局**（即已落进预载区、已开始解码 + 增强）之后，
+ * 还等不到渲染完成就兜底关窗。宽到足以覆盖最慢的 AI 单页，只拦「一直没跑出来」的异常情况。
+ */
+private const val PREWARM_WATCHDOG_MS = 20_000L
 
 /** Komiho: 适配器重建的合并窗口 —— 把同一批 register 首发回调并成一次重建。 */
 private const val REFRESH_COALESCE_DELAY_MS = 120L
