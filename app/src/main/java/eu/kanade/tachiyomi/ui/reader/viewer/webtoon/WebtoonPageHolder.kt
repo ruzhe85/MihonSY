@@ -37,6 +37,7 @@ import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.io.FileNotFoundException
 
 /**
  * Komiho 诊断：条漫路径的绑定 / 增强日志。pager 那侧用的是 `Waifu2xPrefetch` / `Waifu2xHolder`，
@@ -316,6 +317,18 @@ class WebtoonPageHolder(
                     "id=${System.identityHashCode(this)}",
             )
         } catch (e: Throwable) {
+            // Komiho: 章节缓存文件被清掉时（最常见于 App 退后台被系统清 cache 目录、回前台继续阅读）
+            // 会在这里以 FileNotFoundException 冒出来 —— 此刻 page.status 仍是 Ready，报错给用户只会
+            // 得到一个「点重试不生效」的死页（原因见 HttpPageLoader.retryPage 的注释）。交给 loader
+            // 静默重新入队重下，界面回到「加载中」，随后由 statusFlow 驱动重渲染。
+            if (e is FileNotFoundException &&
+                currentPage.chapter.pageLoader?.healMissingCache(currentPage) == true
+            ) {
+                logcat(LogPriority.WARN) {
+                    "page=${currentPage.index} 章节缓存文件丢失，已重新入队: ${e.message}"
+                }
+                return
+            }
             logcat(LogPriority.ERROR, e)
             withUIContext {
                 setError(e)

@@ -36,6 +36,16 @@ abstract class PageLoader {
     open fun retryPage(page: ReaderPage) {}
 
     /**
+     * Komiho: 渲染期发现章节缓存文件丢失时调用（由 holder 在读图片流抛出
+     * `FileNotFoundException` 时发起）。
+     *
+     * 返回 true = 已接管：会重新入队重新下载，上层**不要**再显示错误页，等
+     * [ReaderPage.statusFlow] 驱动 `Queue → DownloadImage → Ready` 自动重渲染；
+     * 返回 false = 不接管（非在线源 / 自动重下次数用尽），上层按原逻辑报错。
+     */
+    open fun healMissingCache(page: ReaderPage): Boolean = false
+
+    /**
      * Recycles this loader. Implementations must override this method to clean up any active
      * resources.
      */

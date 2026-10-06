@@ -40,6 +40,7 @@ import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.decoder.ImageDecoder
 import tachiyomi.i18n.MR
+import java.io.FileNotFoundException
 import kotlin.math.max
 
 /** Komiho 诊断 TAG：预处理 / 预载路径（沿用既有名字，抓取脚本不用改）。 */
@@ -282,6 +283,17 @@ class PagerPageHolder(
                 } catch (e: kotlin.coroutines.cancellation.CancellationException) {
                     throw e
                 } catch (e: Throwable) {
+                    // Komiho: 同 WebtoonPageHolder —— 章节缓存文件被清掉时，prepareLegacy 读流会抛
+                    // FileNotFoundException（preparePure 那一层只是记 INFO 后返回 null）。交给 loader
+                    // 静默重新入队重下，别把它变成一个「点重试不生效」的死页。
+                    if (e is FileNotFoundException &&
+                        page.chapter.pageLoader?.healMissingCache(page) == true
+                    ) {
+                        logcat(LogPriority.WARN) {
+                            "page=${page.index} 章节缓存文件丢失，已重新入队: ${e.message}"
+                        }
+                        return@withLock
+                    }
                     logcat(LogPriority.ERROR, e)
                     withUIContext { setError(e) }
                     return@withLock
