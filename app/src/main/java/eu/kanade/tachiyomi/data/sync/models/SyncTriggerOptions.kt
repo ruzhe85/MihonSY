@@ -44,31 +44,55 @@ data class SyncTriggerOptions(
             ),
             group(
                 label = SYMR.strings.sync_trigger_app_start,
+                // The two switches of a moment are alternatives rather than additions: a full sync
+                // already carries history and bookmarks, so picking one has to clear the other. Both
+                // may be left off, which makes that moment do nothing at all.
                 children = listOf(
                     Entry(
                         label = SYMR.strings.sync_trigger_history_bookmarks,
                         getter = SyncTriggerOptions::syncOnAppStart,
-                        setter = { options, enabled -> options.copy(syncOnAppStart = enabled) },
+                        setter = { options, enabled ->
+                            options.copy(
+                                syncOnAppStart = enabled,
+                                fullSyncOnAppStart = if (enabled) false else options.fullSyncOnAppStart,
+                            )
+                        },
                     ),
                     Entry(
                         label = SYMR.strings.sync_trigger_full_sync,
                         getter = SyncTriggerOptions::fullSyncOnAppStart,
-                        setter = { options, enabled -> options.copy(fullSyncOnAppStart = enabled) },
+                        setter = { options, enabled ->
+                            options.copy(
+                                fullSyncOnAppStart = enabled,
+                                syncOnAppStart = if (enabled) false else options.syncOnAppStart,
+                            )
+                        },
                     ),
                 ),
             ),
             group(
                 label = SYMR.strings.sync_trigger_app_resume,
+                // The same alternatives as on app start, with their own two switches
                 children = listOf(
                     Entry(
                         label = SYMR.strings.sync_trigger_history_bookmarks,
                         getter = SyncTriggerOptions::syncOnAppResume,
-                        setter = { options, enabled -> options.copy(syncOnAppResume = enabled) },
+                        setter = { options, enabled ->
+                            options.copy(
+                                syncOnAppResume = enabled,
+                                fullSyncOnAppResume = if (enabled) false else options.fullSyncOnAppResume,
+                            )
+                        },
                     ),
                     Entry(
                         label = SYMR.strings.sync_trigger_full_sync,
                         getter = SyncTriggerOptions::fullSyncOnAppResume,
-                        setter = { options, enabled -> options.copy(fullSyncOnAppResume = enabled) },
+                        setter = { options, enabled ->
+                            options.copy(
+                                fullSyncOnAppResume = enabled,
+                                syncOnAppResume = if (enabled) false else options.syncOnAppResume,
+                            )
+                        },
                     ),
                 ),
             ),

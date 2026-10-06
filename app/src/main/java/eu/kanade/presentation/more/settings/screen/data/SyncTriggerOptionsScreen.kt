@@ -70,21 +70,18 @@ class SyncTriggerOptionsScreen : Screen() {
     ) {
         options.forEach { option ->
             // SY -->
-            // A group titles the switches under it; indenting them is what shows that they belong to
-            // the moment above rather than to the one below.
+            // A group titles the switches under it. Nothing is indented: the titles sit in the same
+            // column as the switches, and their smaller, heavier style is what tells them apart.
             if (option.children.isEmpty()) {
                 Option(option, state, model)
             } else {
                 Text(
                     text = stringResource(option.label),
                     style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(
-                        start = MaterialTheme.padding.medium,
-                        top = MaterialTheme.padding.medium,
-                    ),
+                    modifier = Modifier.padding(top = MaterialTheme.padding.medium),
                 )
                 option.children.forEach { child ->
-                    Option(child, state, model, Modifier.padding(start = MaterialTheme.padding.medium))
+                    Option(child, state, model)
                 }
             }
             // SY <--
