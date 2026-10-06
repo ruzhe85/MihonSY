@@ -34,6 +34,17 @@ val Options.cropBorders: Boolean
 
 private val cropBordersKey = Extras.Key(default = false)
 
+// Komiho: 深度裁剪边缘 —— 只在 cropBorders 同时为 true 时由解码器消费
+// （ImageDecoder.newInstance 的 aggressiveCrop），单独为 true 无效果。
+fun ImageRequest.Builder.cropBordersAggressive(enable: Boolean) = apply {
+    extras[cropBordersAggressiveKey] = enable
+}
+
+val Options.cropBordersAggressive: Boolean
+    get() = getExtra(cropBordersAggressiveKey)
+
+private val cropBordersAggressiveKey = Extras.Key(default = false)
+
 fun ImageRequest.Builder.customDecoder(enable: Boolean) = apply {
     extras[customDecoderKey] = enable
 }

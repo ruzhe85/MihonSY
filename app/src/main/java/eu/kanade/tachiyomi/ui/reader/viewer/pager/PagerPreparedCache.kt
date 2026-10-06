@@ -10,6 +10,7 @@ import coil3.request.SuccessResult
 import coil3.request.crossfade
 import coil3.size.Precision
 import eu.kanade.tachiyomi.data.coil.cropBorders
+import eu.kanade.tachiyomi.data.coil.cropBordersAggressive
 import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.data.coil.enhanced
 import eu.kanade.tachiyomi.data.coil.pageIndex
@@ -345,6 +346,8 @@ object PagerPagePreparer {
                 .size(width, height)
                 .precision(Precision.INEXACT)
                 .cropBorders(cropBorders)
+                // Komiho: 深度裁剪边缘 —— 与 holder 侧请求同参，否则预解码位图与实时解码不一致。
+                .cropBordersAggressive(viewer.config.imageCropBordersAggressive)
                 .crossfade(false)
                 .build()
             val result = context.imageLoader.execute(request) as? SuccessResult

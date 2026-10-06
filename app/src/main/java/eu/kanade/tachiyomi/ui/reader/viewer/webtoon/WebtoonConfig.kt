@@ -29,6 +29,10 @@ class WebtoonConfig(
     var imageCropBorders = false
         private set
 
+    /** Komiho: 深度裁剪边缘（只与 [imageCropBorders] / [continuousCropBorders] 同开时生效）。 */
+    var imageCropBordersAggressive = false
+        private set
+
     var zoomOutDisabled = false
         private set
 
@@ -90,6 +94,13 @@ class WebtoonConfig(
     init {
         readerPreferences.cropBordersWebtoon
             .register({ imageCropBorders = it }, { imagePropertyChangedListener?.invoke() })
+
+        // Komiho: 深度裁剪边缘 —— 只与任一裁边开关同开时生效；都关闭时切换它不引起重载。
+        readerPreferences.cropBordersAggressive
+            .register(
+                { imageCropBordersAggressive = it },
+                { if (imageCropBorders || continuousCropBorders) imagePropertyChangedListener?.invoke() },
+            )
 
         // Komiho (2026-09-19): 增强设置同样属于「图像配置」，变更必须立刻重渲染 —— 否则
         // 已绑定的 holder 仍显示旧设置的位图，用户得退出重进或一直划动才看到效果。

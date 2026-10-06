@@ -40,7 +40,9 @@ firebase-crashlytics = "3.0.7"
 # 3268efe4 构建状态为 ok，且 IFlexible / FlexibleAdapter 等 API 与其逐字相同。
 flexibleAdapter = "3268efe4"
 google-services = "4.5.0"
-image-decoder = "e03b81e18a"
+# 深度裁剪边缘（aggressiveCrop）只在 ruzhe85 fork 里有（其基点就是上游 e03b81e18a）；
+# 上游 mihonapp 无此形参，换回上游需同时回退 TachiyomiImageDecoder 的 4 参 newInstance 调用。
+image-decoder = "0060d44"
 injekt = "ee267b2e27"
 jsoup = "1.22.2"
 junit = "6.1.2"
@@ -129,7 +131,7 @@ firebase-analytics = { module = "com.google.firebase:firebase-analytics" }
 firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebase-bom" }
 firebase-crashlytics = { module = "com.google.firebase:firebase-crashlytics" }
 flexibleAdapter = { module = "com.github.arkon.FlexibleAdapter:flexible-adapter", version.ref = "flexibleAdapter" }
-image-decoder = { module = "com.github.mihonapp:image-decoder", version.ref = "image-decoder" }
+image-decoder = { module = "com.github.ruzhe85:image-decoder", version.ref = "image-decoder" }
 injekt = { module = "com.github.null2264:injekt-koin", version.ref = "injekt" }
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }

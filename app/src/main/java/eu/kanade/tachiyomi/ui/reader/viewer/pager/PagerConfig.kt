@@ -46,6 +46,10 @@ class PagerConfig(
     var imageCropBorders = false
         private set
 
+    /** Komiho: 深度裁剪边缘（只与 [imageCropBorders] 同开时生效，见 TachiyomiImageDecoder）。 */
+    var imageCropBordersAggressive = false
+        private set
+
     var navigateToPan = false
         private set
 
@@ -103,6 +107,14 @@ class PagerConfig(
 
         readerPreferences.cropBorders
             .register({ imageCropBorders = it }, { imagePropertyChangedListener?.invoke() })
+
+        // Komiho: 深度裁剪边缘 —— 只与裁边开关同开时生效；裁边关闭时切换它不引起重载
+        // （位图不会有任何变化，白刷一页）。
+        readerPreferences.cropBordersAggressive
+            .register(
+                { imageCropBordersAggressive = it },
+                { if (imageCropBorders) imagePropertyChangedListener?.invoke() },
+            )
 
         // Komiho (2026-09-19): 增强设置同样属于「图像配置」，变更必须立刻重渲染 —— 否则
         // preparedCache 与 holder 的「同一对页已渲染」守卫都还认旧设置，用户得退出重进或

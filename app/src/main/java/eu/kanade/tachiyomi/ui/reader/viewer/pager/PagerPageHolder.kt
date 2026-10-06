@@ -374,6 +374,7 @@ class PagerPageHolder(
         zoomDuration = viewer.config.doubleTapAnimDuration,
         minimumScaleType = viewer.config.imageScaleType,
         cropBorders = viewer.config.imageCropBorders,
+        cropBordersAggressive = viewer.config.imageCropBordersAggressive,
         zoomStartPosition = viewer.config.imageZoomType,
         landscapeZoom = viewer.config.landscapeZoom,
     )

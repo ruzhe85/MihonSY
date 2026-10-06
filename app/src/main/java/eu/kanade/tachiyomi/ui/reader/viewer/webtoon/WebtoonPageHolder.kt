@@ -303,6 +303,11 @@ class WebtoonPageHolder(
                         cropBorders =
                         (viewer.config.imageCropBorders && viewer.isContinuous) ||
                             (viewer.config.continuousCropBorders && !viewer.isContinuous),
+                        // Komiho: 深度裁剪边缘只在裁边开启的那条分支上有意义。
+                        cropBordersAggressive = viewer.config.imageCropBordersAggressive && (
+                            (viewer.config.imageCropBorders && viewer.isContinuous) ||
+                                (viewer.config.continuousCropBorders && !viewer.isContinuous)
+                            ),
                     ),
                 )
                 removeErrorLayout()

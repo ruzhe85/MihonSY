@@ -39,6 +39,7 @@ import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.EASE_OUT_QU
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.SCALE_TYPE_CENTER_INSIDE
 import com.github.chrisbanes.photoview.PhotoView
 import eu.kanade.tachiyomi.data.coil.cropBorders
+import eu.kanade.tachiyomi.data.coil.cropBordersAggressive
 import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.data.coil.enhanced
 import eu.kanade.tachiyomi.data.coil.originalSizeDisplay
@@ -432,7 +433,11 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 // (encrypted or raw archives) can yield non-image streams; feeding
                 // those to the enhancement decoder crashed the reader. Non-standard
                 // streams fall back to the original SSIV direct-decode path.
-                val enhancementOn = preferences.enhancementMode.get() != 0 && isStandardImageStream(data)
+                // Komiho: 深度裁剪边缘开启时也必须走这条链 —— SSIV 直解路径带不上
+                // aggressiveCrop 参数（它内部按纯白边算法裁边），会退回标准裁切。
+                val enhancementOn =
+                    (preferences.enhancementMode.get() != 0 || config.cropBordersAggressive) &&
+                        isStandardImageStream(data)
                 if (!enhancementOn) {
                     setHardwareConfig(ImageUtil.canUseHardwareBitmap(data))
                     setImage(ImageSource.inputStream(data.inputStream()))
@@ -502,6 +507,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .size(ViewSizeResolver(this@ReaderPageImageView))
                     .precision(Precision.INEXACT)
                     .cropBorders(config.cropBorders)
+                    .cropBordersAggressive(config.cropBordersAggressive)
                     .crossfade(false)
                     .build()
                     .let(context.imageLoader::enqueue)
@@ -593,6 +599,8 @@ open class ReaderPageImageView @JvmOverloads constructor(
         val zoomDuration: Int,
         val minimumScaleType: Int = SCALE_TYPE_CENTER_INSIDE,
         val cropBorders: Boolean = false,
+        // Komiho: 深度裁剪边缘；单独为 true 无效果，解码器按 cropBorders && cropBordersAggressive 消费。
+        val cropBordersAggressive: Boolean = false,
         val zoomStartPosition: ZoomStartPosition = ZoomStartPosition.CENTER,
         val landscapeZoom: Boolean = false,
     )

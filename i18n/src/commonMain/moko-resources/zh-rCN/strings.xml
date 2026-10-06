@@ -107,6 +107,7 @@
     <string name="pref_double_tap_anim_speed">双击动画速度</string>
     <string name="pref_show_page_number">显示页码</string>
     <string name="pref_crop_borders">裁剪边缘</string>
+    <string name="pref_crop_borders_aggressive">深度裁剪边缘</string>
     <string name="pref_custom_brightness">自定义亮度</string>
     <string name="pref_custom_color_filter">色彩滤镜</string>
     <string name="pref_keep_screen_on">保持屏幕常亮</string>
