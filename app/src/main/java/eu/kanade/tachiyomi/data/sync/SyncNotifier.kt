@@ -80,7 +80,14 @@ class SyncNotifier(private val context: Context) {
             )
         }
 
-        builder.show(Notifications.ID_RESTORE_PROGRESS)
+        // SY -->
+        // Never created when sync is silent: this is the notification the foreground service would
+        // carry, and posting it only to cancel it moments later is what leaves junk behind in the
+        // system notification history. The builder is still returned for the foreground info.
+        if (syncPreferences.syncNotificationsEnabled()) {
+            builder.show(Notifications.ID_RESTORE_PROGRESS)
+        }
+        // SY <--
 
         return builder
     }
@@ -100,7 +107,7 @@ class SyncNotifier(private val context: Context) {
         context.cancelNotification(Notifications.ID_RESTORE_PROGRESS)
 
         // SY -->
-        if (!syncPreferences.syncShowSuccessNotification.get()) return
+        if (!syncPreferences.syncNotificationsEnabled()) return
         // SY <--
 
         with(completeBuilder()) {

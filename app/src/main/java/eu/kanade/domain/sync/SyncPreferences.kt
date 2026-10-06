@@ -34,8 +34,30 @@ class SyncPreferences(
     val webdavUsername: Preference<String> = preferenceStore.getString("sync_webdav_username", "")
     val webdavPassword: Preference<String> = preferenceStore.getString("sync_webdav_password", "")
     val webdavTrustAllCerts: Preference<Boolean> = preferenceStore.getBoolean("sync_webdav_trust_all", false)
+    /**
+     * Whether sync may use notifications at all.
+     *
+     * Off by default: the progress notification belongs to a foreground service, so having it on
+     * means every sync posts a notification that is cancelled again at the end, which is what fills
+     * the system notification history with entries the user never wanted. Turning it on is for
+     * watching a sync run, and for the cancel button it carries.
+     *
+     * Stored as app state rather than as an ordinary preference: this describes what one device
+     * shows, not data worth carrying elsewhere. As an ordinary preference it travelled inside the
+     * "app settings" section, so a device with notifications off could have them turned back on by a
+     * device that still had them on — the opposite of what turning the switch off promises. The
+     * trade-off is that a restored backup no longer carries the switch, which is the intent.
+     */
     val syncShowSuccessNotification: Preference<Boolean> =
-        preferenceStore.getBoolean("sync_show_success_notification", true)
+        preferenceStore.getBoolean(Preference.appStateKey("sync_show_success_notification"), false)
+
+    /**
+     * Whether sync may notify, which also decides whether it may become a foreground service.
+     *
+     * The two have to agree: the foreground service is what carries the notification, so a run that
+     * is meant to be silent must not enter it either, or WorkManager posts the notification for us.
+     */
+    fun syncNotificationsEnabled(): Boolean = syncShowSuccessNotification.get()
 
     /**
      * Sync sections the other devices are using, as seen during the last sync. Non-empty and

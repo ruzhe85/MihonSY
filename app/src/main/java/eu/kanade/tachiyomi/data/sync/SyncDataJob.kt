@@ -51,7 +51,15 @@ class SyncDataJob(private val context: Context, workerParams: WorkerParameters) 
             // SY <--
         }
 
-        setForegroundSafely()
+        // SY -->
+        // A silent sync does not enter a foreground service: that service exists to carry the
+        // notification, and WorkManager would post it even if the notifier stayed quiet. The trade-off
+        // is that the run falls under the background execution limit instead of being protected from
+        // it, which is acceptable because a sync is conditional writes and can simply be retried.
+        if (Injekt.get<SyncPreferences>().syncNotificationsEnabled()) {
+            setForegroundSafely()
+        }
+        // SY <--
 
         return try {
             SyncManager(context).syncData()

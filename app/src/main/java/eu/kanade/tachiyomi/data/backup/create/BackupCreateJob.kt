@@ -45,7 +45,14 @@ class BackupCreateJob(private val context: Context, workerParams: WorkerParamete
             ?: getAutomaticBackupLocation()
             ?: return Result.failure()
 
-        setForegroundSafely()
+        // SY -->
+        // An automatic backup never enters a foreground service: it runs in the background where
+        // nobody watches it, and the service notification would be posted and cancelled again,
+        // leaving an entry in the notification history. A manual backup keeps both.
+        if (!isAutoBackup) {
+            setForegroundSafely()
+        }
+        // SY <--
 
         val options = inputData.getBooleanArray(OPTIONS_KEY)?.let { BackupOptions.fromBooleanArray(it) }
             ?: BackupOptions()
@@ -58,7 +65,11 @@ class BackupCreateJob(private val context: Context, workerParams: WorkerParamete
             Result.success()
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e)
-            if (!isAutoBackup) notifier.showBackupError(e.message)
+            // SY -->
+            // A failure is the one thing a silent backup has to report: without it an automatic
+            // backup could keep failing forever without the user ever noticing.
+            notifier.showBackupError(e.message)
+            // SY <--
             Result.failure()
         } finally {
             context.cancelNotification(Notifications.ID_BACKUP_PROGRESS)

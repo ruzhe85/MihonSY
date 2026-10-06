@@ -625,8 +625,8 @@
     <string name="pref_sync_now_group_title">同步操作</string>
     <string name="pref_purge_confirmation_message">清除同步数据会从谷歌云端硬盘删除所有已同步的数据，你确定吗？</string>
     <string name="pref_webdav_purge_confirmation_message">清除同步数据会从 WebDAV 服务器删除所有已同步的数据，你确定吗？</string>
-    <string name="pref_sync_success_notification">同步完成后显示通知</string>
-    <string name="pref_sync_success_notification_summ">同步出错时仍会显示错误通知</string>
+    <string name="pref_sync_success_notification">同步时显示通知</string>
+    <string name="pref_sync_success_notification_summ">关闭后同步在后台静默执行，不显示进度与完成通知（通知历史也不会留下记录）；出错时仍会通知。自动备份始终静默，仅在出错时通知。</string>
     <string name="pref_reset_sync_state">重置同步状态</string>
     <string name="pref_reset_sync_state_summ">清除本地同步基线（上次同步时间），下次同步将完整拉取远端书架；不会删除远端数据。</string>
     <string name="webdav">WebDAV</string>

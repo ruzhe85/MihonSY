@@ -11,6 +11,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.tachiyomi.data.backup.BackupNotifier
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.util.system.cancelNotification
@@ -22,6 +23,8 @@ import logcat.LogPriority
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 class BackupRestoreJob(private val context: Context, workerParams: WorkerParameters) :
     CoroutineWorker(context, workerParams) {
@@ -38,7 +41,14 @@ class BackupRestoreJob(private val context: Context, workerParams: WorkerParamet
 
         val isSync = inputData.getBoolean(SYNC_KEY, false)
 
-        setForegroundSafely()
+        // SY -->
+        // A restore that belongs to a sync follows the sync notification setting, so a silent sync
+        // must not become visible here either — the foreground service is what would post the
+        // notification. A manual restore always keeps its progress and its cancel button.
+        if (!isSync || Injekt.get<SyncPreferences>().syncNotificationsEnabled()) {
+            setForegroundSafely()
+        }
+        // SY <--
 
         return try {
             BackupRestorer(context, notifier, isSync).restore(uri, options)
@@ -60,7 +70,10 @@ class BackupRestoreJob(private val context: Context, workerParams: WorkerParamet
     override suspend fun getForegroundInfo(): ForegroundInfo {
         return ForegroundInfo(
             Notifications.ID_RESTORE_PROGRESS,
-            notifier.showRestoreProgress().build(),
+            // SY --> Keep the sync/手动 distinction here as well: this builder is what would be posted
+            // if anything ever asked for the foreground info of a silent sync restore.
+            notifier.showRestoreProgress(sync = inputData.getBoolean(SYNC_KEY, false)).build(),
+            // SY <--
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             } else {

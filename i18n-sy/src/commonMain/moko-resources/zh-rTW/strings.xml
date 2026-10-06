@@ -224,8 +224,8 @@
     <string name="pref_purge_confirmation_title">清除確認</string>
     <string name="pref_purge_confirmation_message">清除同步資料將從 Google Drive 中刪除所有同步資料。您確定要繼續嗎？</string>
     <string name="pref_webdav_purge_confirmation_message">清除同步資料將從 WebDAV 伺服器刪除所有同步資料。您確定要繼續嗎？</string>
-    <string name="pref_sync_success_notification">同步完成後顯示通知</string>
-    <string name="pref_sync_success_notification_summ">同步出錯時仍會顯示錯誤通知</string>
+    <string name="pref_sync_success_notification">同步時顯示通知</string>
+    <string name="pref_sync_success_notification_summ">關閉後同步在背景靜默執行，不顯示進度與完成通知（通知歷史也不會留下記錄）；發生錯誤時仍會通知。自動備份一律靜默，僅在發生錯誤時通知。</string>
     <string name="pref_reset_sync_state">重設同步狀態</string>
     <string name="pref_reset_sync_state_summ">清除本地同步基線（上次同步時間），下次同步將完整拉取遠端書架；不會刪除遠端資料。</string>
     <string name="webdav">WebDAV</string>

@@ -150,7 +150,13 @@ class BackupNotifier(private val context: Context) {
             )
         }
 
-        builder.show(Notifications.ID_RESTORE_PROGRESS)
+        // SY -->
+        // A restore that is part of a sync follows the sync notification setting and stays silent
+        // with it; a manual restore always shows its progress, cancel button included.
+        if (!sync || syncPreferences.syncNotificationsEnabled()) {
+            builder.show(Notifications.ID_RESTORE_PROGRESS)
+        }
+        // SY <--
 
         return builder
     }
@@ -199,7 +205,7 @@ class BackupNotifier(private val context: Context) {
         // SY -->
         // The "library sync complete" notification at the end of a sync restore
         // honors the same toggle as the SyncNotifier success notification
-        if (sync && !syncPreferences.syncShowSuccessNotification.get()) return
+        if (sync && !syncPreferences.syncNotificationsEnabled()) return
         // SY <--
 
         val timeString = context.stringResource(

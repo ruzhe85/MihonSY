@@ -231,8 +231,8 @@
     <string name="pref_reset_sync_state_summ">Clear the local sync baseline (last sync time) so the next sync fully adopts the remote library. Remote data is not deleted.</string>
     <string name="pref_sync_service">Service</string>
     <string name="pref_sync_service_category">Sync</string>
-    <string name="pref_sync_success_notification">Show sync completion notification</string>
-    <string name="pref_sync_success_notification_summ">Errors are still shown as notifications</string>
+    <string name="pref_sync_success_notification">Show notifications while syncing</string>
+    <string name="pref_sync_success_notification_summ">Off keeps sync silent in the background: no progress and no completion notification, and nothing is left in the notification history. Errors are always reported. Automatic backups are always silent.</string>
     <string name="pref_sync_automatic_category">Automatic Synchronization</string>
     <string name="pref_sync_interval">Global sync frequency</string>
     <string name="pref_choose_what_to_sync">Choose what to sync</string>
