@@ -317,10 +317,14 @@ class ReaderPreferences(
     /** CPU 上次选的算法：2 = Lanczos3，3 = Catmull-Rom。 */
     val enhancementLastCpuMode: Preference<Int> = preferenceStore.getInt("pref_enhancement_last_cpu_mode", 2)
 
-    /** GPU（Vulkan）上次选的模型 id。 */
+    /**
+     * GPU（Vulkan）上次选的模型 id；空 = 从未按「按后端记忆」记过（2026-10-03 之前的存量
+     * 选择只写在 aiModelId 里），界面回落到当前生效的 Vulkan 模型。不能用内置默认 id 当
+     * 默认值 —— 那会让存量用户的 GPU 行小字显示成首个模型，与实际生效的已选模型对不上。
+     */
     val enhancementLastGpuModelId: Preference<String> = preferenceStore.getString(
         "pref_enhancement_last_gpu_model_id",
-        AiUpscaleModel.Default.id,
+        "",
     )
 
     /** NPU（HTP）上次选的模型 id；空 = 从未选过，界面回落到本机可用列表的第一个。 */

@@ -144,8 +144,14 @@ private fun EnhancementRootList(
     // CPU 记忆存了非法值（老数据 / 手改）时回落 Lanczos3。
     val cpuMemory = lastCpuMode
         .takeIf { flag -> ReaderPreferences.CpuEnhancementModes.any { it.first == flag } } ?: 2
-    // GPU 记忆走 findById()：未知 / 已卸载的插件归一化到内置默认模型。
-    val gpuMemory = UpscaleModelRegistry.findById(lastGpuModelId)
+    // GPU 记忆：空串 = 从未按后端记过（10-03 之前的存量选择只写在 aiModelId 里），此时回落
+    // 到**当前生效**的 Vulkan 模型 —— 否则行小字会显示内置首个模型，与实际生效的已选模型
+    // 对不上。非空时 findById() 兜底未知 / 已卸载的 id，归一化到内置默认模型。
+    val gpuMemory = lastGpuModelId
+        .takeIf { it.isNotEmpty() }
+        ?.let { UpscaleModelRegistry.findById(it) }
+        ?: activeModel.takeIf { it.backend == UpscaleModelSpec.Backend.NCNN_VULKAN }
+        ?: UpscaleModelRegistry.gpuModels().first()
     // NPU 记忆必须在**本机可用列表**里找：findById() 对已卸载的插件会归一化到内置 Vulkan 模型，
     // 那样 NPU 行会显示一个根本跑不了的模型名。找不到（含从未选过）回落到第一个可用。
     // remember：扫描是幂等的，但没必要每次重组都查一遍 PackageManager。
