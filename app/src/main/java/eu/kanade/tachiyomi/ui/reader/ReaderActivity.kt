@@ -63,6 +63,7 @@ import com.google.android.material.transition.platform.MaterialContainerTransfor
 import com.hippo.unifile.UniFile
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.manga.model.readingMode
+import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.presentation.reader.ChapterListDialog
 import eu.kanade.presentation.reader.DisplayRefreshHost
 import eu.kanade.presentation.reader.OrientationSelectDialog
@@ -165,6 +166,9 @@ class ReaderActivity : BaseActivity() {
 
     private val readerPreferences = Injekt.get<ReaderPreferences>()
     private val preferences = Injekt.get<BasePreferences>()
+    // SY -->
+    private val syncPreferences = Injekt.get<SyncPreferences>()
+    // SY <--
 
     lateinit var binding: ReaderActivityBinding
 
@@ -566,16 +570,24 @@ class ReaderActivity : BaseActivity() {
     }
 
     override fun onPause() {
+        // SY -->
+        // "Sync when leaving the reader" is what makes these pushes immediate; with the switch off
+        // the channels still carry them, just on their own throttle.
+        val force = syncPreferences.getSyncTriggerOptions().syncOnChapterRead
+        // SY <--
         lifecycleScope.launchNonCancellable {
             // SY -->
             // Leaving the reader is where reading stopped, so the history entry is pushed right away
             // rather than waiting out the channel's throttle window.
-            viewModel.updateHistory(forceChannelPush = true)
+            viewModel.updateHistory(forceChannelPush = force)
             // SY <--
             // SY -->
             // The screen going off is a common way to stop reading, so the last page is pushed now
             // instead of waiting for the throttled report on the next page turn.
-            viewModel.commitProgress()
+            viewModel.commitProgress(force = force)
+            // A bookmark is uploaded when it is edited, so this only retries an edit that a dead
+            // network swallowed; leaving the reader with nothing pending uploads nothing.
+            if (force) viewModel.commitBookmarks()
             // SY <--
         }
         super.onPause()

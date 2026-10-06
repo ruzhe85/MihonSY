@@ -40,11 +40,11 @@ class SyncDataJob(private val context: Context, workerParams: WorkerParameters) 
                 return Result.retry()
             }
             // SY -->
-            // The timer and the event triggers share one anchor: when a full sync already happened
-            // inside this period there is nothing left for this run to add. Without the check the
-            // timer would still fire on its own schedule right after an event-triggered run and
-            // double the frequency the user asked for.
-            if (!isFullSyncDue()) {
+            // Only the timer stands down when this period already had a full sync: it shares one
+            // anchor with the switched moments, and without this it would fire on its own schedule
+            // right after one of them and double the frequency the user asked for. A switched moment
+            // asked for its run explicitly, so it is never held back.
+            if (tags.contains(TAG_TIMER) && !isFullSyncDue()) {
                 logcat(LogPriority.DEBUG) { "Skipping scheduled sync: still within the sync frequency" }
                 return Result.success()
             }
@@ -82,25 +82,38 @@ class SyncDataJob(private val context: Context, workerParams: WorkerParameters) 
         private const val TAG_AUTO = "$TAG_JOB:auto"
         const val TAG_MANUAL = "$TAG_JOB:manual"
 
+        // SY -->
+        /** Marks the periodic run, the only one the sync frequency may hold back. */
+        private const val TAG_TIMER = "$TAG_JOB:timer"
+
+        /**
+         * Unique name of the run a switched moment queues.
+         *
+         * It must not be the timer's own name: WorkManager keeps a single work per unique name, and
+         * periodic work never completes, so sharing that name would make every switched full sync
+         * disappear as soon as a sync frequency is set. The tag stays shared, so stopping or observing
+         * sync still covers both kinds of run.
+         */
+        private const val WORK_EVENT = "$TAG_JOB:event"
+        // SY <--
+
         fun isRunning(context: Context): Boolean {
             return context.workManager.isRunning(TAG_JOB)
         }
 
         // SY -->
         /**
-         * True when a full sync is allowed to run under the synchronization frequency.
+         * True when the timer's run has something left to add under the synchronization frequency.
          *
-         * That frequency is reused as the minimum interval between full syncs, so raising it also
-         * calms down the event triggers instead of only the timer. Manual runs never ask here.
+         * The timer and the switched moments share one anchor, and a full sync that already happened
+         * inside this period means this run would only repeat it. The switched moments and the manual
+         * button never ask here: ticking one of them means the sync happens that time.
          *
-         * Everything is throttled only for WebDAV: it is the only service with the lightweight
-         * channels, and holding a full sync back on the others would leave those triggers with
-         * nothing to do at all. A frequency of 0 keeps the previous behaviour too — the user turned
-         * the timer off, not the triggers.
+         * A frequency of 0 means the timer is off entirely, and a device that never completed a sync
+         * has nothing to compare against, so neither is ever held back.
          */
         fun isFullSyncDue(): Boolean {
             val syncPreferences = Injekt.get<SyncPreferences>()
-            if (!isWebdav(syncPreferences)) return true
 
             val interval = syncPreferences.syncInterval.get()
             if (interval <= 0) return true
@@ -109,31 +122,6 @@ class SyncDataJob(private val context: Context, workerParams: WorkerParameters) 
             // 0 means no full sync ever completed on this device, which must not be held back
             return last <= 0L || System.currentTimeMillis() - last >= interval.toLong() * 60_000L
         }
-
-        /**
-         * Runs a full sync for an automatic trigger, unless the sync frequency says it is too early.
-         *
-         * Returns true when the sync was queued, so a caller holding a pending change can drop it:
-         * anything that stayed throttled has to keep waiting for the next opportunity.
-         */
-        fun startIfDue(context: Context): Boolean {
-            val syncPreferences = Injekt.get<SyncPreferences>()
-            if (!syncPreferences.isSyncEnabled()) return false
-
-            // A run that is already in flight may have been built before the change happened
-            if (isRunning(context)) return false
-
-            if (!isFullSyncDue()) {
-                logcat(LogPriority.DEBUG) { "Holding the full sync back: still within the sync frequency" }
-                return false
-            }
-
-            startNow(context)
-            return true
-        }
-
-        private fun isWebdav(syncPreferences: SyncPreferences): Boolean =
-            SyncManager.SyncService.fromInt(syncPreferences.syncService.get()) == SyncManager.SyncService.WEBDAV
         // SY <--
 
         fun setupTask(context: Context, prefInterval: Int? = null) {
@@ -149,6 +137,7 @@ class SyncDataJob(private val context: Context, workerParams: WorkerParameters) 
                 )
                     .addTag(TAG_JOB)
                     .addTag(TAG_AUTO)
+                    .addTag(TAG_TIMER)
                     .build()
 
                 context.workManager.enqueueUniquePeriodicWork(TAG_AUTO, ExistingPeriodicWorkPolicy.UPDATE, request)
@@ -163,12 +152,13 @@ class SyncDataJob(private val context: Context, workerParams: WorkerParameters) 
                 // Already running either as a scheduled or manual job
                 return
             }
+            val uniqueName = if (manual) TAG_MANUAL else WORK_EVENT
             val tag = if (manual) TAG_MANUAL else TAG_AUTO
             val request = OneTimeWorkRequestBuilder<SyncDataJob>()
                 .addTag(TAG_JOB)
                 .addTag(tag)
                 .build()
-            context.workManager.enqueueUniqueWork(tag, ExistingWorkPolicy.KEEP, request)
+            context.workManager.enqueueUniqueWork(uniqueName, ExistingWorkPolicy.KEEP, request)
         }
 
         fun stop(context: Context) {

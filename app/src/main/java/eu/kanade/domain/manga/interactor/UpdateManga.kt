@@ -1,7 +1,6 @@
 package eu.kanade.domain.manga.interactor
 
 import android.app.Application
-import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.tachiyomi.data.sync.SyncClock
 import eu.kanade.tachiyomi.data.sync.SyncLedger
 import tachiyomi.domain.manga.interactor.FetchInterval
@@ -20,21 +19,16 @@ class UpdateManga(
     // SY -->
     /** Held lazily: only touched when library membership actually changes. */
     private val context: Application by injectLazy()
-    private val syncPreferences: SyncPreferences by injectLazy()
     // SY <--
 
     suspend fun await(mangaUpdate: MangaUpdate): Boolean {
         val updated = mangaRepository.update(mangaUpdate)
 
         // SY -->
-        // Being in the library is structural: only the full sync carries it, so the change is merely
-        // flagged here and the sync itself runs once the user stops editing (leaving the app) or as
-        // soon as the sync frequency allows it. Flagging per edit is what keeps a session of adding a
-        // dozen entries down to a single sync.
-        if (updated && mangaUpdate.favorite != null) {
-            syncPreferences.syncPendingChange.set(true)
-            if (mangaUpdate.favorite == false) recordOwned(mangaUpdate.id)
-        }
+        // A removal has to stay recognisable as one for the next merge. Being in the library travels
+        // in the full sync alone, so this device notes that it owned the entry instead of syncing
+        // right away; an addition needs no note, because that sync reads the library as it is then.
+        if (updated && mangaUpdate.favorite == false) recordOwned(mangaUpdate.id)
         // SY <--
         return updated
     }
@@ -43,14 +37,11 @@ class UpdateManga(
         val updated = mangaRepository.updateAll(mangaUpdates)
 
         // SY -->
-        // A batch that moves entries in or out of the library is structural in the same way
+        // A batch that moves entries out of the library is noted the same way
         if (updated) {
             mangaUpdates
-                .filter { it.favorite != null }
-                .forEach {
-                    syncPreferences.syncPendingChange.set(true)
-                    if (it.favorite == false) recordOwned(it.id)
-                }
+                .filter { it.favorite == false }
+                .forEach { recordOwned(it.id) }
         }
         // SY <--
         return updated

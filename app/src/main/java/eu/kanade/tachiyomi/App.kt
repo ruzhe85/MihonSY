@@ -215,21 +215,13 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         if (!WorkManager.isInitialized()) {
             WorkManager.initialize(this, Configuration.Builder().build())
         }
-        val syncTriggerOpt = syncPreferences.getSyncTriggerOptions()
-        if (syncPreferences.isSyncEnabled() && syncTriggerOpt.syncOnAppStart) {
-            // SY -->
-            // Opening the app is a reading moment, not a structural one: pull the lightweight channels
-            // and let the sync frequency decide whether a full sync is worth it as well.
-            refreshLightChannels()
-            startFullSyncIfDue()
-            // SY <--
-        }
-
         // SY -->
-        // The pending change outlives the process, so it is picked up here even when the trigger
-        // options above are off and the app was killed before it could go to the background cleanly.
-        if (syncPreferences.syncPendingChange.get()) {
-            startFullSyncIfDue()
+        // Each moment lists what it does: the reading channels are pulled here, and a full sync runs
+        // only when its own switch was ticked — every single time, with nothing holding it back.
+        val syncTriggerOpt = syncPreferences.getSyncTriggerOptions()
+        if (syncPreferences.isSyncEnabled()) {
+            if (syncTriggerOpt.syncOnAppStart) refreshLightChannels()
+            if (syncTriggerOpt.fullSyncOnAppStart) startFullSync()
         }
         // SY <--
 
@@ -297,9 +289,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     /**
      * Pulls the lightweight channels.
      *
-     * Progress, history and bookmarks travel in their own files, so returning to the app only has to
-     * refresh those. The full sync is left to the sync frequency, to the pending structural change and
-     * to the timer; a failure inside a channel is already swallowed there and never blocks the UI.
+     * History and bookmarks travel in their own files, so an app moment only has to refresh those. A
+     * failure inside a channel is already swallowed there and never blocks the UI.
      */
     private fun refreshLightChannels() {
         val now = System.currentTimeMillis()
@@ -313,32 +304,25 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     }
 
     /**
-     * Starts the full sync a trigger asked for, and the one a pending structural change is waiting
-     * for. The pending marker is dropped only when the sync is really queued, so a run that the sync
-     * frequency holds back stays pending for the next opportunity.
+     * Starts the full sync a switch asked for.
+     *
+     * Nothing holds it back: ticking "full sync" for a moment means it runs every time that moment
+     * comes, which is what the label promises. WorkManager drops the request when a sync is already
+     * running, so a burst of moments cannot pile up.
      */
-    private fun startFullSyncIfDue() {
-        if (SyncDataJob.startIfDue(this@App)) {
-            syncPreferences.syncPendingChange.set(false)
-        }
+    private fun startFullSync() {
+        SyncDataJob.startNow(this@App)
     }
     // SY <--
 
     override fun onStart(owner: LifecycleOwner) {
         SecureActivityDelegate.onApplicationStart()
 
-        val syncTriggerOpt = syncPreferences.getSyncTriggerOptions()
-        if (syncPreferences.isSyncEnabled() && syncTriggerOpt.syncOnAppResume) {
-            // SY -->
-            refreshLightChannels()
-            startFullSyncIfDue()
-            // SY <--
-        }
-
         // SY -->
-        // Another chance for a pending change the sync frequency held back on the way out
-        if (syncPreferences.syncPendingChange.get()) {
-            startFullSyncIfDue()
+        val syncTriggerOpt = syncPreferences.getSyncTriggerOptions()
+        if (syncPreferences.isSyncEnabled()) {
+            if (syncTriggerOpt.syncOnAppResume) refreshLightChannels()
+            if (syncTriggerOpt.fullSyncOnAppResume) startFullSync()
         }
         // SY <--
     }
@@ -348,12 +332,6 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // The reading clock is normally persisted when the reader closes; with full syncs now rare, a
         // process killed while the user is somewhere else must not lose the stamps it produced.
         SyncClock.flush(this)
-
-        // Leaving the app is exactly when the user stops editing the library, so the full sync that
-        // carries those changes belongs here. A run the frequency holds back keeps the marker.
-        if (syncPreferences.syncPendingChange.get()) {
-            startFullSyncIfDue()
-        }
         // SY <--
 
         SecureActivityDelegate.onApplicationStopped()

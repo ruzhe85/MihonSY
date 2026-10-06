@@ -199,9 +199,7 @@
     <string name="pref_sync_service">服務</string>
     <string name="pref_sync_service_category">同步</string>
     <string name="pref_sync_automatic_category">自動同步</string>
-    <string name="pref_sync_interval">同步頻率</string>
-    <!-- SY：該頻率用於書櫃類資料，閱讀資料由獨立通道即時同步 -->
-    <string name="pref_sync_interval_summ">%s · 書櫃、分類與設定依此頻率同步；閱讀進度、歷史與書籤始終即時</string>
+    <string name="pref_sync_interval">全域同步頻率</string>
     <string name="pref_choose_what_to_sync">選擇要同步的內容</string>
     <!-- SY -->
     <string name="pref_sync_sections_mismatch">其他裝置的設定類同步項與本機不同。若希望設定保持一致，請在每台裝置上選擇相同的項目。</string>
@@ -251,14 +249,13 @@
     <string name="sync_on_chapter_open">打開章節時同步</string>
     <string name="sync_on_app_start">啟動應用時同步</string>
     <string name="sync_on_app_resume">重返應用時同步</string>
-    <string name="sync_trigger_chapter_read">離開閱讀器時同步</string>
-    <string name="sync_trigger_chapter_read_summ">離開閱讀器後，立即把閱讀進度與閱讀記錄更新到其他裝置</string>
-    <string name="sync_trigger_chapter_open">開啟章節時同步</string>
-    <string name="sync_trigger_chapter_open_summ">開啟章節後，立即取得其他裝置讀到的最新頁碼與本章書籤</string>
+    <string name="sync_trigger_chapter_open">章節開啟時同步閱讀進度與書籤</string>
+    <string name="sync_trigger_chapter_read">章節退出時更新閱讀進度、歷史與書籤</string>
     <string name="sync_trigger_app_start">啟動應用程式時同步</string>
-    <string name="sync_trigger_app_start_summ">啟動後取得其他裝置的閱讀記錄與書籤</string>
     <string name="sync_trigger_app_resume">回到應用程式時同步</string>
-    <string name="sync_trigger_app_resume_summ">從背景回來時取得其他裝置的閱讀記錄與書籤</string>
+    <string name="sync_trigger_history_bookmarks">歷史與書籤</string>
+    <string name="sync_trigger_full_sync">完整同步</string>
+    <string name="sync_trigger_library">書櫃開啟時完整同步</string>
     <string name="sync_library">同步書櫃</string>
     <!-- Security settings -->
     <string name="biometric_lock_times">生物識別鎖定時間表</string>

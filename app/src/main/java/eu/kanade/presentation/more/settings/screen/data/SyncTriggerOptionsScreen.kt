@@ -1,9 +1,13 @@
 package eu.kanade.presentation.more.settings.screen.data
 
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import cafe.adriel.voyager.core.model.StateScreenModel
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
@@ -19,6 +23,7 @@ import tachiyomi.presentation.core.components.LabeledCheckbox
 import tachiyomi.presentation.core.components.LazyColumnWithAction
 import tachiyomi.presentation.core.components.SectionCard
 import tachiyomi.presentation.core.components.material.Scaffold
+import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -64,18 +69,44 @@ class SyncTriggerOptionsScreen : Screen() {
         model: SyncOptionsScreenModel,
     ) {
         options.forEach { option ->
-            LabeledCheckbox(
-                label = stringResource(option.label),
-                checked = option.getter(state.options),
-                onCheckedChange = {
-                    model.toggle(option.setter, it)
-                },
-                enabled = option.enabled(state.options),
-                // SY -->
-                subtitle = option.subtitle?.let { stringResource(it) },
-                // SY <--
-            )
+            // SY -->
+            // A group titles the switches under it; indenting them is what shows that they belong to
+            // the moment above rather than to the one below.
+            if (option.children.isEmpty()) {
+                Option(option, state, model)
+            } else {
+                Text(
+                    text = stringResource(option.label),
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(
+                        start = MaterialTheme.padding.medium,
+                        top = MaterialTheme.padding.medium,
+                    ),
+                )
+                option.children.forEach { child ->
+                    Option(child, state, model, Modifier.padding(start = MaterialTheme.padding.medium))
+                }
+            }
+            // SY <--
         }
+    }
+
+    @Composable
+    private fun Option(
+        option: SyncTriggerOptions.Entry,
+        state: SyncOptionsScreenModel.State,
+        model: SyncOptionsScreenModel,
+        modifier: Modifier = Modifier,
+    ) {
+        LabeledCheckbox(
+            label = stringResource(option.label),
+            checked = option.getter(state.options),
+            onCheckedChange = {
+                model.toggle(option.setter, it)
+            },
+            modifier = modifier,
+            enabled = option.enabled(state.options),
+        )
     }
 }
 

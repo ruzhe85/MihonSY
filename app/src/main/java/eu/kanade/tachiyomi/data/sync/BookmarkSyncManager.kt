@@ -55,6 +55,10 @@ class BookmarkSyncManager(
     /** Deletions this device decided on: the row is gone, so only a tombstone can carry them. */
     private var tombstones: MutableMap<String, BackupBookmark>? = null
 
+    /** Set while an edit still has to reach the remote; cleared once an upload succeeded. */
+    @Volatile
+    private var dirty = false
+
     /** Only WebDAV carries the extra files for now; other services just skip this channel. */
     private val remote: WebDavSyncService? by lazy {
         val service = SyncManager.SyncService.fromInt(syncPreferences.syncService.get())
@@ -159,7 +163,21 @@ class BookmarkSyncManager(
      */
     suspend fun publishLocalChanges(force: Boolean = true) {
         if (!isAvailable()) return
+        dirty = true
         push(force)
+    }
+
+    /**
+     * Uploads only if something changed since the last successful upload.
+     *
+     * Called when the reader is left: an edit that a dead network swallowed would otherwise sit here
+     * until the next full sync, while an ordinary exit has nothing to say and must not re-upload the
+     * whole set.
+     */
+    suspend fun publishIfChanged() {
+        if (!isAvailable()) return
+        if (!dirty) return
+        push(force = true)
     }
 
     /**
@@ -196,6 +214,7 @@ class BookmarkSyncManager(
             persistLocked()
         }
 
+        dirty = true
         push(force)
     }
 
@@ -320,6 +339,7 @@ class BookmarkSyncManager(
         if (uploaded) {
             // What was just published is also the state the next merge has to start from
             channel.mutex.withLock { storeTombstonesLocked(payload.entries) }
+            dirty = false
             return
         }
 
@@ -328,7 +348,7 @@ class BookmarkSyncManager(
         val latest = pullQuietly() ?: return
         val merged = mergeWith(latest.payload.entries, latest.etag)
 
-        try {
+        val retried = try {
             service.pushBookmarks(SyncBookmarks(syncPreferences.uniqueDeviceID(), merged), latest.etag)
         } catch (e: CancellationException) {
             throw e
@@ -336,6 +356,7 @@ class BookmarkSyncManager(
             logcat(LogPriority.DEBUG) { "Bookmark retry push failed: ${e.message}" }
             return
         }
+        if (retried) dirty = false
 
         // Whatever the retry merged in also has to reach the database, or the values this device just
         // agreed to would never be applied locally.
@@ -386,16 +407,18 @@ class BookmarkSyncManager(
         // included.
         applyToDatabase(merged)
 
-        try {
+        val uploaded = try {
             remote?.pushBookmarks(
                 SyncBookmarks(syncPreferences.uniqueDeviceID(), merged),
                 channel.etag,
-            )
+            ) ?: false
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             logcat(LogPriority.DEBUG) { "Bookmark push during full sync failed: ${e.message}" }
+            false
         }
+        if (uploaded) dirty = false
 
         return backup
     }

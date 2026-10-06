@@ -31,7 +31,6 @@ import eu.kanade.tachiyomi.data.sync.BookmarkSyncManager
 import eu.kanade.tachiyomi.data.sync.HistorySyncManager
 import eu.kanade.tachiyomi.data.sync.ProgressClock
 import eu.kanade.tachiyomi.data.sync.ProgressSyncManager
-import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.online.MetadataSource
@@ -369,14 +368,9 @@ class ReaderViewModel @JvmOverloads constructor(
         // plain call, and a process killed right after leaving the reader must not lose the stamps
         // produced while reading.
         runCatching { ProgressClock.flush() }
-        // Leaving the reader is what "sync after reading" means. Progress and history already went
-        // out through their own channels when the reader paused, so this only hands the full sync to
-        // the sync frequency: it runs when that frequency has elapsed, and is skipped when it has
-        // not. WorkManager only needs a Context, which matters because viewModelScope is already
-        // cancelled by the time onCleared runs.
-        if (syncPreferences.isSyncEnabled() && syncPreferences.getSyncTriggerOptions().syncOnChapterRead) {
-            SyncDataJob.startIfDue(Injekt.get<Application>())
-        }
+        // The full sync is not started from here any more: progress, history and bookmarks left
+        // through their own channels while the reader was open, and the library is carried by the
+        // moments the user ticked for it.
         // SY <--
 
         val currentChapters = state.value.viewerChapters
@@ -1381,13 +1375,23 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Flushes the current chapter's progress onto the lightweight channel. Forced, because the
-     * screen going off or the reader being closed is exactly when the last page matters.
+     * Flushes the current chapter's progress onto the lightweight channel. Forced by default, because
+     * the screen going off or the reader being closed is exactly when the last page matters; the
+     * activity passes the switch along when the user did not ask for an immediate push.
      */
-    suspend fun commitProgress() {
+    suspend fun commitProgress(force: Boolean = true) {
         getCurrentChapter()?.chapter?.id?.let { id ->
-            progressSyncManager.recordLocalProgress(id, force = true)
+            progressSyncManager.recordLocalProgress(id, force = force)
         }
+    }
+
+    /**
+     * Uploads the bookmarks this device changed since the last successful upload. A bookmark is
+     * published when it is edited, so this only retries one that a dead network swallowed, and a
+     * reader left with nothing pending uploads nothing.
+     */
+    suspend fun commitBookmarks() {
+        bookmarkSyncManager.publishIfChanged()
     }
     // SY <--
 

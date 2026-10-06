@@ -28,6 +28,7 @@ import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import cafe.adriel.voyager.navigator.tab.LocalTabNavigator
 import cafe.adriel.voyager.navigator.tab.TabOptions
+import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.presentation.category.components.ChangeCategoryDialog
 import eu.kanade.presentation.library.DeleteLibraryMangaDialog
 import eu.kanade.presentation.library.LibrarySettingsDialog
@@ -74,6 +75,8 @@ import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.EmptyScreenAction
 import tachiyomi.presentation.core.screens.LoadingScreen
 import tachiyomi.source.local.isLocal
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 data object LibraryTab : Tab {
 
@@ -103,6 +106,18 @@ data object LibraryTab : Tab {
         val screenModel = rememberScreenModel { LibraryScreenModel() }
         val settingsScreenModel = rememberScreenModel { LibrarySettingsScreenModel() }
         val state by screenModel.state.collectAsState()
+
+        // SY -->
+        // "Full sync when the library opens" runs the whole payload every time this tab is entered,
+        // which is what its label says. WorkManager drops the request when a sync is already running,
+        // so switching tabs back and forth cannot pile them up.
+        val syncPreferences = remember { Injekt.get<SyncPreferences>() }
+        LaunchedEffect(Unit) {
+            if (syncPreferences.isSyncEnabled() && syncPreferences.getSyncTriggerOptions().syncOnLibrary) {
+                SyncDataJob.startNow(context)
+            }
+        }
+        // SY <--
 
         val snackbarHostState = remember { SnackbarHostState() }
 

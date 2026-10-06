@@ -52,13 +52,6 @@ class SyncPreferences(
 
     /** Epoch millis of the last completed full sync, 0 when it never ran. */
     val syncLastCompletedAt: Preference<Long> = preferenceStore.getLong("sync_last_completed_at", 0L)
-
-    /**
-     * Set when something that only a full sync can carry changed: library membership, categories,
-     * read state. Those are collected here instead of syncing on every single edit, and the full sync
-     * is run once the user stops making them (leaving the app) or at the next opportunity.
-     */
-    val syncPendingChange: Preference<Boolean> = preferenceStore.getBoolean("sync_pending_change", false)
     // SY <--
 
     // SY -->
@@ -200,6 +193,21 @@ class SyncPreferences(
             syncOnChapterOpen = preferenceStore.getBoolean("sync_on_chapter_open", false).get(),
             syncOnAppStart = preferenceStore.getBoolean("sync_on_app_start", false).get(),
             syncOnAppResume = preferenceStore.getBoolean("sync_on_app_resume", false).get(),
+            // SY -->
+            // Before the app moments were split into "reading data" and "full sync", their switch
+            // meant "run a full sync here". Falling back to it keeps those users syncing the library
+            // the way they asked for; storing a value of their own is what ends the fallback.
+            fullSyncOnAppStart = preferenceStore
+                .getBoolean("sync_full_on_app_start", preferenceStore.getBoolean("sync_on_app_start", false).get())
+                .get(),
+            fullSyncOnAppResume = preferenceStore
+                .getBoolean(
+                    "sync_full_on_app_resume",
+                    preferenceStore.getBoolean("sync_on_app_resume", false).get(),
+                )
+                .get(),
+            syncOnLibrary = preferenceStore.getBoolean("sync_on_library", false).get(),
+            // SY <--
         )
     }
 
@@ -212,6 +220,14 @@ class SyncPreferences(
             .set(syncTriggerOptions.syncOnAppStart)
         preferenceStore.getBoolean("sync_on_app_resume", false)
             .set(syncTriggerOptions.syncOnAppResume)
+        // SY -->
+        preferenceStore.getBoolean("sync_full_on_app_start", false)
+            .set(syncTriggerOptions.fullSyncOnAppStart)
+        preferenceStore.getBoolean("sync_full_on_app_resume", false)
+            .set(syncTriggerOptions.fullSyncOnAppResume)
+        preferenceStore.getBoolean("sync_on_library", false)
+            .set(syncTriggerOptions.syncOnLibrary)
+        // SY <--
     }
 }
 // SY -->

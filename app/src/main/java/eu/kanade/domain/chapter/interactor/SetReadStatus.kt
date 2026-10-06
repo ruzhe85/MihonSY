@@ -2,7 +2,6 @@ package eu.kanade.domain.chapter.interactor
 
 import eu.kanade.domain.download.interactor.DeleteDownload
 // SY -->
-import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.tachiyomi.data.sync.ProgressClock
 // SY <--
 import exh.source.MERGED_SOURCE_ID
@@ -16,7 +15,6 @@ import tachiyomi.domain.chapter.repository.ChapterRepository
 import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.repository.MangaRepository
-import uy.kohesive.injekt.injectLazy
 
 class SetReadStatus(
     private val downloadPreferences: DownloadPreferences,
@@ -27,11 +25,6 @@ class SetReadStatus(
     private val getMergedChaptersByMangaId: GetMergedChaptersByMangaId,
     // SY <--
 ) {
-
-    // SY -->
-    /** Held lazily: only touched when a read status actually changed. */
-    private val syncPreferences: SyncPreferences by injectLazy()
-    // SY <--
 
     private val mapper = { chapter: Chapter, read: Boolean ->
         ChapterUpdate(
@@ -60,13 +53,6 @@ class SetReadStatus(
             logcat(LogPriority.ERROR, e)
             return@withNonCancellableContext Result.InternalError(e)
         }
-
-        // SY -->
-        // Read state only travels in the full sync, and marking a few hundred chapters at once would
-        // overflow the progress channel's fixed size, so the change is flagged here: the full sync
-        // runs once the user stops editing instead of once per edit.
-        syncPreferences.syncPendingChange.set(true)
-        // SY <--
 
         // SY -->
         // Marking chapters read (or unread) is a real progress change, so the reading clock is

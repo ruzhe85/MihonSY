@@ -234,9 +234,7 @@
     <string name="pref_sync_success_notification">Show sync completion notification</string>
     <string name="pref_sync_success_notification_summ">Errors are still shown as notifications</string>
     <string name="pref_sync_automatic_category">Automatic Synchronization</string>
-    <string name="pref_sync_interval">Synchronization frequency</string>
-    <!-- SY: this frequency covers the library; reading data has its own live channels -->
-    <string name="pref_sync_interval_summ">%s · library, categories and settings sync at this frequency; progress, history and bookmarks stay live</string>
+    <string name="pref_sync_interval">Global sync frequency</string>
     <string name="pref_choose_what_to_sync">Choose what to sync</string>
     <!-- SY -->
     <string name="pref_sync_sections_mismatch">The other device syncs different settings. Pick the same settings on every device to keep them identical.</string>
@@ -283,14 +281,13 @@
     <string name="sync_on_chapter_open">Sync on Chapter Open</string>
     <string name="sync_on_app_start">Sync on App Start</string>
     <string name="sync_on_app_resume">Sync on App Resume</string>
-    <string name="sync_trigger_chapter_read">Sync when leaving the reader</string>
-    <string name="sync_trigger_chapter_read_summ">Update your reading progress and history on your other devices right away</string>
-    <string name="sync_trigger_chapter_open">Sync on chapter open</string>
-    <string name="sync_trigger_chapter_open_summ">Fetch the latest page and this chapter's bookmarks from your other devices right away</string>
+    <string name="sync_trigger_chapter_open">Sync reading progress and bookmarks when a chapter opens</string>
+    <string name="sync_trigger_chapter_read">Update reading progress, history and bookmarks when leaving a chapter</string>
     <string name="sync_trigger_app_start">Sync on app start</string>
-    <string name="sync_trigger_app_start_summ">Fetch reading history and bookmarks from your other devices</string>
     <string name="sync_trigger_app_resume">Sync when returning to the app</string>
-    <string name="sync_trigger_app_resume_summ">Fetch reading history and bookmarks from your other devices</string>
+    <string name="sync_trigger_history_bookmarks">History and bookmarks</string>
+    <string name="sync_trigger_full_sync">Full sync</string>
+    <string name="sync_trigger_library">Full sync when the library opens</string>
     <string name="sync_library">Sync library</string>
 
     <!-- Security settings -->
