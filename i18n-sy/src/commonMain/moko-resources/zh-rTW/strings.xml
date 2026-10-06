@@ -255,6 +255,7 @@
     <string name="sync_trigger_app_resume">回到應用程式時同步</string>
     <string name="sync_trigger_history_bookmarks">歷史與書籤</string>
     <string name="sync_trigger_full_sync">完整同步</string>
+    <string name="sync_trigger_do_nothing">不同步</string>
     <string name="sync_trigger_library">書櫃開啟時完整同步</string>
     <string name="sync_library">同步書櫃</string>
     <!-- Security settings -->

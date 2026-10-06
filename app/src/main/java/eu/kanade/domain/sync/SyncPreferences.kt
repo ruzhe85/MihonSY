@@ -210,26 +210,31 @@ class SyncPreferences(
     // SY <--
 
     fun getSyncTriggerOptions(): SyncTriggerOptions {
+        // SY -->
+        // Before the app moments were split into "reading data" and "full sync", their one switch
+        // meant "run a full sync here". The new pair falls back to it so those users keep syncing the
+        // library the way they asked for, which makes an upgraded device read both as on. A full sync
+        // already carries history and bookmarks, so that state is reported as the full sync alone: it
+        // is what the page shows and what the moment does. Nothing is written back here — the first
+        // click is what stores the normalised pair.
+        val fullOnAppStart = preferenceStore
+            .getBoolean("sync_full_on_app_start", preferenceStore.getBoolean("sync_on_app_start", false).get())
+            .get()
+        val fullOnAppResume = preferenceStore
+            .getBoolean("sync_full_on_app_resume", preferenceStore.getBoolean("sync_on_app_resume", false).get())
+            .get()
+        // SY <--
+
         return SyncTriggerOptions(
             syncOnChapterRead = preferenceStore.getBoolean("sync_on_chapter_read", false).get(),
             syncOnChapterOpen = preferenceStore.getBoolean("sync_on_chapter_open", false).get(),
-            syncOnAppStart = preferenceStore.getBoolean("sync_on_app_start", false).get(),
-            syncOnAppResume = preferenceStore.getBoolean("sync_on_app_resume", false).get(),
+            syncOnAppStart = !fullOnAppStart && preferenceStore.getBoolean("sync_on_app_start", false).get(),
+            syncOnAppResume = !fullOnAppResume && preferenceStore.getBoolean("sync_on_app_resume", false).get(),
             // SY -->
-            // Before the app moments were split into "reading data" and "full sync", their switch
-            // meant "run a full sync here". Falling back to it keeps those users syncing the library
-            // the way they asked for; storing a value of their own is what ends the fallback.
-            fullSyncOnAppStart = preferenceStore
-                .getBoolean("sync_full_on_app_start", preferenceStore.getBoolean("sync_on_app_start", false).get())
-                .get(),
-            fullSyncOnAppResume = preferenceStore
-                .getBoolean(
-                    "sync_full_on_app_resume",
-                    preferenceStore.getBoolean("sync_on_app_resume", false).get(),
-                )
-                .get(),
-            syncOnLibrary = preferenceStore.getBoolean("sync_on_library", false).get(),
+            fullSyncOnAppStart = fullOnAppStart,
+            fullSyncOnAppResume = fullOnAppResume,
             // SY <--
+            syncOnLibrary = preferenceStore.getBoolean("sync_on_library", false).get(),
         )
     }
 

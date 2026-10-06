@@ -31,7 +31,8 @@ data class SyncTriggerOptions(
     // SY <--
 
     companion object {
-        val mainOptions = listOf(
+        /** One row, one switch: these moments have nothing to choose between. */
+        val switchOptions = listOf(
             Entry(
                 label = SYMR.strings.sync_trigger_chapter_open,
                 getter = SyncTriggerOptions::syncOnChapterOpen,
@@ -42,11 +43,24 @@ data class SyncTriggerOptions(
                 getter = SyncTriggerOptions::syncOnChapterRead,
                 setter = { options, enabled -> options.copy(syncOnChapterRead = enabled) },
             ),
+            Entry(
+                label = SYMR.strings.sync_trigger_library,
+                getter = SyncTriggerOptions::syncOnLibrary,
+                setter = { options, enabled -> options.copy(syncOnLibrary = enabled) },
+            ),
+        )
+
+        /**
+         * Moments whose options exclude each other, so each one is a single choice.
+         *
+         * A full sync already carries history and bookmarks, which makes it and "history and
+         * bookmarks" alternatives rather than additions — picking one has to clear the other. The
+         * third option is what switching the moment off means now that the options cannot simply be
+         * left unticked, and it is the state a fresh install starts in.
+         */
+        val singleChoiceGroups = listOf(
             group(
                 label = SYMR.strings.sync_trigger_app_start,
-                // The two switches of a moment are alternatives rather than additions: a full sync
-                // already carries history and bookmarks, so picking one has to clear the other. Both
-                // may be left off, which makes that moment do nothing at all.
                 children = listOf(
                     Entry(
                         label = SYMR.strings.sync_trigger_history_bookmarks,
@@ -68,11 +82,21 @@ data class SyncTriggerOptions(
                             )
                         },
                     ),
+                    Entry(
+                        label = SYMR.strings.sync_trigger_do_nothing,
+                        getter = { !it.syncOnAppStart && !it.fullSyncOnAppStart },
+                        setter = { options, selected ->
+                            if (selected) {
+                                options.copy(syncOnAppStart = false, fullSyncOnAppStart = false)
+                            } else {
+                                options
+                            }
+                        },
+                    ),
                 ),
             ),
             group(
                 label = SYMR.strings.sync_trigger_app_resume,
-                // The same alternatives as on app start, with their own two switches
                 children = listOf(
                     Entry(
                         label = SYMR.strings.sync_trigger_history_bookmarks,
@@ -94,16 +118,22 @@ data class SyncTriggerOptions(
                             )
                         },
                     ),
+                    Entry(
+                        label = SYMR.strings.sync_trigger_do_nothing,
+                        getter = { !it.syncOnAppResume && !it.fullSyncOnAppResume },
+                        setter = { options, selected ->
+                            if (selected) {
+                                options.copy(syncOnAppResume = false, fullSyncOnAppResume = false)
+                            } else {
+                                options
+                            }
+                        },
+                    ),
                 ),
-            ),
-            Entry(
-                label = SYMR.strings.sync_trigger_library,
-                getter = SyncTriggerOptions::syncOnLibrary,
-                setter = { options, enabled -> options.copy(syncOnLibrary = enabled) },
             ),
         )
 
-        /** A group only titles the switches below it, so it carries no toggle of its own. */
+        /** A group titles the options of one moment; it carries no toggle of its own. */
         private fun group(label: StringResource, children: List<Entry>) = Entry(
             label = label,
             getter = { false },
@@ -118,7 +148,7 @@ data class SyncTriggerOptions(
         val setter: (SyncTriggerOptions, Boolean) -> SyncTriggerOptions,
         val enabled: (SyncTriggerOptions) -> Boolean = { true },
         // SY -->
-        /** Empty for a plain switch; the switches it titles for a group. */
+        /** Empty for a plain switch; the options it titles for a group. */
         val children: List<Entry> = emptyList(),
         // SY <--
     )

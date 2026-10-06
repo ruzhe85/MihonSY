@@ -652,6 +652,7 @@
     <string name="sync_trigger_app_resume">回到应用时同步</string>
     <string name="sync_trigger_history_bookmarks">历史与书签</string>
     <string name="sync_trigger_full_sync">全量同步</string>
+    <string name="sync_trigger_do_nothing">不同步</string>
     <string name="sync_trigger_library">书架打开时全量同步</string>
     <string name="sync_library">同步书架</string>
     <string name="parodies">戏仿</string>
