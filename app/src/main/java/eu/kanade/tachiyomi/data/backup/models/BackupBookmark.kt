@@ -8,7 +8,11 @@ import kotlinx.serialization.protobuf.ProtoNumber
  */
 @Serializable
 data class BackupBookmark(
-    @ProtoNumber(1) val source: Long,
+    // SY --> The other fields carry a default for the same reason: a missing field has to fall back
+    // instead of failing the whole decode — on the SyncYomi path a failed decode reads as "bad remote
+    // content" and the remote copy gets overwritten.
+    @ProtoNumber(1) val source: Long = 0L,
+    // SY <--
     @ProtoNumber(2) val mangaUrl: String = "",
     @ProtoNumber(3) val chapterUrl: String = "",
     @ProtoNumber(4) val page: Int = 0,

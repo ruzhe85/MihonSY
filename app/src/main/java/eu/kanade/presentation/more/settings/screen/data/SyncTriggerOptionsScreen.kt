@@ -11,6 +11,7 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.util.Screen
+import eu.kanade.tachiyomi.data.sync.SyncManager
 import eu.kanade.tachiyomi.data.sync.models.SyncTriggerOptions
 import kotlinx.coroutines.flow.update
 import tachiyomi.i18n.MR
@@ -83,7 +84,9 @@ class SyncTriggerOptionsScreen : Screen() {
                 onCheckedChange = {
                     model.toggle(entry.setter, it)
                 },
-                enabled = entry.enabled(state.options),
+                // SY -->
+                enabled = entry.canRun(state),
+                // SY <--
             )
         }
     }
@@ -105,17 +108,39 @@ class SyncTriggerOptionsScreen : Screen() {
                 onClick = {
                     model.select(entry.setter)
                 },
-                enabled = entry.enabled(state.options),
+                // SY -->
+                enabled = entry.canRun(state),
+                // SY <--
             )
         }
     }
 }
 
+// SY -->
+/**
+ * Whether a row can be used right now.
+ *
+ * Two rules have to hold together: the entry's own one (a few options depend on another being on),
+ * and whether that moment can be served at all. Opening and leaving a chapter are served by the
+ * real-time light channels, which only WebDAV has, so on the other services they are shown disabled
+ * instead of offering a switch that would do nothing. The stored value is left as it is, so going
+ * back to WebDAV makes the choice count again.
+ */
+private fun SyncTriggerOptions.Entry.canRun(state: SyncOptionsScreenModel.State): Boolean =
+    enabled(state.options) && (state.lightChannelsAvailable || !requiresLightChannels)
+// SY <--
+
 private class SyncOptionsScreenModel(
     val syncPreferences: SyncPreferences = Injekt.get(),
 ) : StateScreenModel<SyncOptionsScreenModel.State>(
     State(
-        syncPreferences.getSyncTriggerOptions(),
+        options = syncPreferences.getSyncTriggerOptions(),
+        // SY -->
+        // Which options can be offered depends on the service, so it is read once here, the same way
+        // the options themselves are.
+        lightChannelsAvailable = SyncManager.SyncService.fromInt(syncPreferences.syncService.get()) ==
+            SyncManager.SyncService.WEBDAV,
+        // SY <--
     ),
 ) {
 
@@ -137,5 +162,9 @@ private class SyncOptionsScreenModel(
     @Immutable
     data class State(
         val options: SyncTriggerOptions = SyncTriggerOptions(),
+        // SY -->
+        /** False when only the full sync can serve these moments, i.e. on any service but WebDAV. */
+        val lightChannelsAvailable: Boolean = true,
+        // SY <--
     )
 }

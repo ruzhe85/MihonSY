@@ -37,11 +37,13 @@ data class SyncTriggerOptions(
                 label = SYMR.strings.sync_trigger_chapter_open,
                 getter = SyncTriggerOptions::syncOnChapterOpen,
                 setter = { options, enabled -> options.copy(syncOnChapterOpen = enabled) },
+                requiresLightChannels = true,
             ),
             Entry(
                 label = SYMR.strings.sync_trigger_chapter_read,
                 getter = SyncTriggerOptions::syncOnChapterRead,
                 setter = { options, enabled -> options.copy(syncOnChapterRead = enabled) },
+                requiresLightChannels = true,
             ),
             Entry(
                 label = SYMR.strings.sync_trigger_library,
@@ -71,6 +73,7 @@ data class SyncTriggerOptions(
                                 fullSyncOnAppStart = if (enabled) false else options.fullSyncOnAppStart,
                             )
                         },
+                        requiresLightChannels = true,
                     ),
                     Entry(
                         label = SYMR.strings.sync_trigger_full_sync,
@@ -107,6 +110,7 @@ data class SyncTriggerOptions(
                                 fullSyncOnAppResume = if (enabled) false else options.fullSyncOnAppResume,
                             )
                         },
+                        requiresLightChannels = true,
                     ),
                     Entry(
                         label = SYMR.strings.sync_trigger_full_sync,
@@ -150,6 +154,15 @@ data class SyncTriggerOptions(
         // SY -->
         /** Empty for a plain switch; the options it titles for a group. */
         val children: List<Entry> = emptyList(),
+
+        /**
+         * True for the moments only the real-time light channels can serve.
+         *
+         * Those channels exist on WebDAV alone, so the other services grey these options out rather
+         * than offering a switch that would do nothing. The stored value is left untouched, so going
+         * back to WebDAV makes the choice count again.
+         */
+        val requiresLightChannels: Boolean = false,
         // SY <--
     )
 }

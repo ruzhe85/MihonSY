@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -17,6 +18,9 @@ import androidx.compose.ui.unit.dp
 import tachiyomi.presentation.core.components.material.padding
 
 // SY -->
+/** Alpha of a label whose row is disabled, matching what Material uses for a disabled control. */
+private const val DisabledLabelAlpha = 0.38f
+
 /**
  * A [RadioButton] with its label, laid out exactly like [LabeledCheckbox] so one settings card can
  * hold both kinds of row without them drifting apart.
@@ -53,7 +57,14 @@ fun LabeledRadioButton(
             enabled = enabled,
         )
 
-        Text(text = label)
+        Text(
+            text = label,
+            color = if (enabled) {
+                LocalContentColor.current
+            } else {
+                LocalContentColor.current.copy(alpha = DisabledLabelAlpha)
+            },
+        )
     }
 }
 // SY <--
