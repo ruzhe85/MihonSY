@@ -354,7 +354,7 @@
     <string name="webtoon_tap_scroll_full">一个屏幕</string>
     <string name="pref_webtoon_tap_scroll_duration">滚动动画速度</string>
     <string name="pref_webtoon_original_resolution">原始分辨率</string>
-    <string name="pref_image_enhancement_group">图像增强</string>
+    <string name="pref_image_enhancement_group">图像</string>
     <string name="pref_enhancement_mode">增强算法</string>
     <string name="pref_enhancement_mode_summary">Lanczos3 首图进入黑屏，增强完成后正常显示。</string>
     <string name="enhancement_off">关闭</string>
@@ -372,7 +372,7 @@
     <string name="pref_lanczos_summary">经典 CPU 插值，确定性强且省内存</string>
     <string name="pref_lanczos_scale">Lanczos 倍率</string>
     <string name="pref_show_enhancement_status">显示增强状态</string>
-    <string name="pref_show_enhancement_status_summary">在图片左下方显示增强耗时（完成后显示 OK）</string>
+    <string name="pref_show_enhancement_status_summary">在图片左下方显示实际运行的引擎与耗时（NPU / GPU / CPU OK）</string>
     <string name="lanczos_scale_1_5x">1.5x</string>
     <string name="lanczos_scale_2x">2x</string>
     <string name="lanczos_scale_2_5x">2.5x</string>

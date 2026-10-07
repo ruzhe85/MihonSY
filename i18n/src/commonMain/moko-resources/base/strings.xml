@@ -511,7 +511,7 @@
     <string name="webtoon_tap_scroll_full">Full screen</string>
     <string name="pref_webtoon_tap_scroll_duration">Scroll animation speed</string>
     <string name="pref_webtoon_original_resolution">Original resolution</string>
-    <string name="pref_image_enhancement_group">Image enhancement</string>
+    <string name="pref_image_enhancement_group">Image</string>
     <string name="pref_enhancement_mode">Enhancement algorithm</string>
     <string name="pref_enhancement_mode_summary">Lanczos3: the first image shows black until enhancement completes, then displays normally.</string>
     <string name="enhancement_off">Off</string>
@@ -529,7 +529,7 @@
     <string name="pref_lanczos_summary">Classic CPU resampling, deterministic and memory-friendly</string>
     <string name="pref_lanczos_scale">Lanczos scale</string>
     <string name="pref_show_enhancement_status">Show enhancement status</string>
-    <string name="pref_show_enhancement_status_summary">Show enhancement elapsed time at the bottom-left of the image (OK when done)</string>
+    <string name="pref_show_enhancement_status_summary">Show the engine that actually ran and the elapsed time at the bottom-left of the image (NPU / GPU / CPU OK)</string>
     <string name="lanczos_scale_1_5x">1.5x</string>
     <string name="lanczos_scale_2x">2x</string>
     <string name="lanczos_scale_2_5x">2.5x</string>
