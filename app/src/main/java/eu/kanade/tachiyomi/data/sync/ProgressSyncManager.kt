@@ -15,6 +15,7 @@ import tachiyomi.data.Database
 import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.data.chapter.ChapterMapper.mapChapter
 import tachiyomi.data.manga.MangaMapper.mapManga
+import tachiyomi.domain.chapter.model.ChapterMemo
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
@@ -157,7 +158,7 @@ class ProgressSyncManager(
             return null
         }
 
-        writeChapterProgress(chapter.id, read = read, lastPageRead = page)
+        writeChapterProgress(database, chapter.id, read = read, lastPageRead = page)
         ProgressClock.observeProgress(manga, chapter, remoteEntry.updatedAt)
         logcat(LogPriority.DEBUG) { "Applied remote progress for $chapterUrl (page=$page, read=$read)" }
 
@@ -376,30 +377,47 @@ class ProgressSyncManager(
         return backup
     }
 
-    // ---- helpers -------------------------------------------------------------------------------
+}
 
-    private suspend fun writeChapterProgress(chapterId: Long, read: Boolean, lastPageRead: Long) {
-        val row = database.chaptersQueries.getChapterById(chapterId).awaitAsOneOrNull() ?: return
-        database.chaptersQueries.update(
-            mangaId = null,
-            url = null,
-            name = null,
-            scanlator = null,
-            read = read,
-            bookmark = row.bookmark,
-            lastPageRead = lastPageRead,
-            bookmarkPage = row.bookmark_page,
-            chapterNumber = null,
-            sourceOrder = null,
-            dateFetch = null,
-            dateUpload = null,
-            // Applying another device's progress is not a local edit, so the row keeps its timestamp
-            lastModifiedAt = null,
-            chapterId = chapterId,
-            version = row.version,
-            isSyncing = 1,
-            memo = row.memo.let(MemoColumnAdapter::encode),
-        )
-    }
+// SY -->
+/**
+ * Writes chapter progress without going through the local-edit path.
+ *
+ * Shared by the progress channel and the history channel: both of them apply a reading position that
+ * was decided on another device, and neither may look like an ordinary edit here — `isSyncing = 1`
+ * keeps the write out of the `last_modified_at`/version triggers, and a null `lastModifiedAt` keeps
+ * the row's own timestamp.
+ *
+ * [totalPages] is merged into the memo under this app's own key instead of replacing the memo, so
+ * whatever the source and the reader keep there survives. 0 means the sender did not know it, and the
+ * recorded value is left alone.
+ */
+internal suspend fun writeChapterProgress(
+    database: Database,
+    chapterId: Long,
+    read: Boolean,
+    lastPageRead: Long,
+    totalPages: Int = 0,
+) {
+    val row = database.chaptersQueries.getChapterById(chapterId).awaitAsOneOrNull() ?: return
+    database.chaptersQueries.update(
+        mangaId = null,
+        url = null,
+        name = null,
+        scanlator = null,
+        read = read,
+        bookmark = row.bookmark,
+        lastPageRead = lastPageRead,
+        bookmarkPage = row.bookmark_page,
+        chapterNumber = null,
+        sourceOrder = null,
+        dateFetch = null,
+        dateUpload = null,
+        lastModifiedAt = null,
+        chapterId = chapterId,
+        version = row.version,
+        isSyncing = 1,
+        memo = ChapterMemo.withPages(row.memo, totalPages).let(MemoColumnAdapter::encode),
+    )
 }
 // SY <--

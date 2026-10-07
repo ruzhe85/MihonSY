@@ -16,6 +16,7 @@ import logcat.logcat
 import tachiyomi.data.Database
 import tachiyomi.data.chapter.ChapterMapper.mapChapter
 import tachiyomi.data.manga.MangaMapper.mapManga
+import tachiyomi.domain.chapter.model.ChapterMemo
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
@@ -140,6 +141,16 @@ class HistorySyncManager(
         if (!channel.takePushSlot(force)) return
 
         val manga = database.mangasQueries.getMangaById(mangaId, ::mapManga).awaitAsOneOrNull() ?: return
+
+        // SY -->
+        // Where the reader left off rides along, so the other device can show the page progress
+        // without waiting for a full sync. Both values are hints: the receiver writes them only after
+        // the same comparison the progress channel makes, against the same reading clock, so this can
+        // never win over a device that actually read further. Anything not found here stays 0, which
+        // the other side reads as "unknown".
+        val chapter = database.chaptersQueries
+            .getChapterByUrlAndMangaId(chapterUrl = chapterUrl, mangaId = mangaId, mapper = ::mapChapter)
+            .awaitAsOneOrNull()
         val entry = HistoryEntry(
             source = manga.source,
             mangaUrl = manga.url,
@@ -147,7 +158,17 @@ class HistorySyncManager(
             lastRead = readAtSeconds,
             clearedAt = 0L,
             updatedAt = HistoryClock.stampHistory(manga.source, manga.url),
+            lastPageRead = chapter?.lastPageRead ?: 0L,
+            totalPages = chapter?.memo?.let(ChapterMemo::pages) ?: 0,
+            // The reading clock only moves when the progress itself changed, so a chapter it never
+            // stamped falls back to the row's own timestamp — the very pair the progress channel
+            // compares against, which is what keeps the two channels speaking the same language.
+            progressAt = ProgressClock.progressAt(manga.source, manga.url, chapterUrl)
+                .takeIf { it > 0L }
+                ?: chapter?.lastModifiedAt
+                ?: 0L,
         )
+        // SY <--
 
         channel.mutex.withLock {
             cacheLocked()[entry.key] = entry
@@ -291,6 +312,28 @@ class HistorySyncManager(
             readAt = Date(entry.lastRead * 1000L),
             time_read = 0L,
         )
+
+        // SY -->
+        // The reading position came along with the entry, so the history screen shows the page
+        // progress right away instead of waiting for a payload round trip. It is written the way the
+        // progress channel writes it, and only when it beats what this device's reading clock holds:
+        // the write then teaches the clock that timestamp, so a later progress pull with an older
+        // entry can no longer undo it. An entry from a release without the field carries 0 and is
+        // left alone, which is what the comparison already does.
+        val localProgressAt = ProgressClock.progressAt(manga.source, manga.url, chapter.url)
+            .takeIf { it > 0L }
+            ?: chapter.lastModifiedAt
+        if (entry.progressAt > localProgressAt) {
+            writeChapterProgress(
+                database = database,
+                chapterId = chapter.id,
+                read = chapter.read,
+                lastPageRead = entry.lastPageRead,
+                totalPages = entry.totalPages,
+            )
+            ProgressClock.observeProgress(manga.source, manga.url, chapter.url, entry.progressAt)
+        }
+        // SY <--
     }
 
     // ---- transport -----------------------------------------------------------------------------
