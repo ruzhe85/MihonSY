@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <changelog bulletedList="true">
-    <changelogversion versionName="1.2.0" changeDate="October 7,2026">
-        <changelogtext>[b]MihonSY 1.2.0 (10)[/b]</changelogtext>
+    <changelogversion versionName="1.2.1" changeDate="October 7,2026">
+        <changelogtext>[b]MihonSY 1.2.1 (11)[/b]</changelogtext>
         <changelogtext>[b]新增[/b] 全新设计多设备同步（WebDAV）：多端书架、阅读历史、书签及设置实时同步，实现跨端阅读统一体验</changelogtext>
         <changelogtext>[b]新增[/b] 书签：底部新增「书签」页签，跨作品汇总所有按页书签并可跳页</changelogtext>
         <changelogtext>[b]新增[/b] 深度裁剪边缘：裁剪可以穿过水印与页码</changelogtext>
