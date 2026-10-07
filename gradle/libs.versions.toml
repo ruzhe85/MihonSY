@@ -42,7 +42,10 @@ flexibleAdapter = "3268efe4"
 google-services = "4.5.0"
 # 深度裁剪边缘（aggressiveCrop）只在 ruzhe85 fork 里有（其基点就是上游 e03b81e18a）；
 # 上游 mihonapp 无此形参，换回上游需同时回退 TachiyomiImageDecoder 的 4 参 newInstance 调用。
-image-decoder = "0060d44"
+# ⚠️ 该 rev 必须保留上游 3 参 newInstance(InputStream, Boolean, ByteArray?) 的二进制兼容入口：
+# SubsamplingScaleImageView 是按上游编译的，插了 aggressiveCrop 又没补回这个描述符时，大图分块
+# 解码会在运行期抛 NoSuchMethodError（0b61f3e 起已在 fork 里补回）。
+image-decoder = "0b61f3e"
 injekt = "ee267b2e27"
 jsoup = "1.22.2"
 junit = "6.1.2"
