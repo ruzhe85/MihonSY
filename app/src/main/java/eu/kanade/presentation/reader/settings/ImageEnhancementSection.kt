@@ -153,12 +153,13 @@ private fun EnhancementRootList(
         ?: activeModel.takeIf { it.backend == UpscaleModelSpec.Backend.NCNN_VULKAN }
         ?: UpscaleModelRegistry.gpuModels().first()
     // NPU 记忆必须在**本机可用列表**里找：findById() 对已卸载的插件会归一化到内置 Vulkan 模型，
-    // 那样 NPU 行会显示一个根本跑不了的模型名。找不到（含从未选过）回落到第一个可用。
+    // 那样 NPU 行会显示一个根本跑不了的模型名。因此这里的 null 代表「本机没有有效选择」——
+    // 从未选过、或上次选的模型已卸载 / 本机不兼容。
     // remember：扫描是幂等的，但没必要每次重组都查一遍 PackageManager。
     val npuCompatible = remember(npuAvailable) {
         if (npuAvailable) compatibleNpuModels(context) else emptyList()
     }
-    val npuMemory = npuCompatible.firstOrNull { it.id == lastNpuModelId } ?: npuCompatible.firstOrNull()
+    val npuRemembered = npuCompatible.firstOrNull { it.id == lastNpuModelId }
 
     // Komiho: 降噪独立于增强档位（mode 0 也生效），常驻首行。
     val denoise by preferences.denoiseLevel.collectAsState()
@@ -183,9 +184,10 @@ private fun EnhancementRootList(
     val activateCpu: () -> Unit = { setEnhancementMode(preferences, cpuMemory) }
     EnhancementMethodRow(
         label = stringResource(MR.strings.enhancement_group_cpu),
-        // 显示 CPU **自己**上次选的算法，而不是当前档位 —— 非选中行也有值可读。
+        // 选中时显示**当前生效**的算法，未选中时显示 CPU 自己上次选的 —— 非选中行也有值可读，
+        // 而选中行的值永远等于实际在跑的那个。
         subtitle = ReaderPreferences.CpuEnhancementModes
-            .firstOrNull { it.first == cpuMemory }
+            .firstOrNull { it.first == if (cpuActive) mode else cpuMemory }
             ?.let { stringResource(it.second) },
         selected = cpuActive,
         onClick = {
@@ -203,7 +205,8 @@ private fun EnhancementRootList(
     }
     EnhancementMethodRow(
         label = stringResource(MR.strings.enhancement_group_gpu),
-        subtitle = gpuMemory.displayLabel(),
+        // 选中时显示当前生效的模型，未选中时显示这个后端上次选的那个（切回去会得到它）。
+        subtitle = if (gpuActive) activeModel.displayLabel() else gpuMemory.displayLabel(),
         selected = gpuActive,
         onClick = {
             activateGpu()
@@ -215,17 +218,27 @@ private fun EnhancementRootList(
     // NPU：门控与详情页共用同一条件（CDSP 优先）。没有可用模型时不改设置，只进详情页看提示。
     if (npuAvailable) {
         val npuActive = mode == 5 && activeModel.backend == UpscaleModelSpec.Backend.QNN_HTP
+        // 点击目标：这个后端上次选的 → 当前生效的那个（属于 NPU 且在本机可用列表里）→ 第一个可用。
+        // 与显示分开：显示要诚实，切换却必须有一个能落地的目标。
+        val npuTarget = npuRemembered
+            ?: npuCompatible.firstOrNull { it.id == activeModel.id }
+            ?: npuCompatible.firstOrNull()
         val activateNpu: () -> Unit = {
             if (!npuActive) {
                 // 本机可用列表为空时再现场扫一次（装了新模型包后不必重启）。
-                val target = npuMemory ?: compatibleNpuModels(context).firstOrNull()
+                val target = npuTarget ?: compatibleNpuModels(context).firstOrNull()
                 target?.let { setEnhancementModel(preferences, it) }
             }
         }
         EnhancementMethodRow(
             label = stringResource(MR.strings.enhancement_group_npu),
-            // 只有「一个可用模型都没有」时才是占位符 —— 那时确实无值可显示。
-            subtitle = npuMemory?.displayLabel() ?: PLACEHOLDER,
+            // 选中时显示当前生效的模型；未选中时只有「本机有效记忆」才显示，从未选过或记忆里的
+            // 模型已卸载 / 不兼容时是占位符 —— 那时没有属于用户选择的值可显示。
+            subtitle = when {
+                npuActive -> activeModel.displayLabel()
+                npuRemembered != null -> npuRemembered.displayLabel()
+                else -> PLACEHOLDER
+            },
             selected = npuActive,
             onClick = {
                 activateNpu()
