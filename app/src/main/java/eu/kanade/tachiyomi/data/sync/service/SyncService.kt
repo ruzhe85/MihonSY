@@ -7,6 +7,7 @@ import eu.kanade.tachiyomi.data.backup.models.Backup
 import eu.kanade.tachiyomi.data.backup.models.BackupBookmark
 import eu.kanade.tachiyomi.data.backup.models.BackupCategory
 import eu.kanade.tachiyomi.data.backup.models.BackupChapter
+import eu.kanade.tachiyomi.data.backup.models.BackupExtensionStore
 import eu.kanade.tachiyomi.data.backup.models.BackupHistory
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
 import eu.kanade.tachiyomi.data.backup.models.BackupPreference
@@ -147,6 +148,17 @@ abstract class SyncService(
         )
 
         // SY -->
+        // Extension repositories ride along the same way as the other settings sections: unioned, so
+        // that a device which never had them still ends up with the ones the others keep. Whether the
+        // merged list is written locally is decided by the restore options, not here — a device that
+        // does not sync this section leaves the list untouched.
+        val mergedExtensionStoresList = mergeExtensionStoresLists(
+            localBackup?.backupExtensionStores,
+            remoteBackup?.backupExtensionStores,
+        )
+        // SY <--
+
+        // SY -->
         val mergedSavedSearchesList = mergeSavedSearchesLists(
             localBackup?.backupSavedSearches,
             remoteBackup?.backupSavedSearches,
@@ -166,6 +178,7 @@ abstract class SyncService(
             backupSources = mergedSourcesList,
             backupPreferences = mergedPreferencesList,
             backupSourcePreferences = mergedSourcePreferencesList,
+            backupExtensionStores = mergedExtensionStoresList,
             backupSavedSearches = mergedSavedSearchesList,
             backupBookmarks = mergedBookmarksList,
         )
@@ -793,6 +806,57 @@ abstract class SyncService(
     }
 
     // SY -->
+    /**
+     * Unions the extension repositories of both sides, keyed by their index URL.
+     *
+     * [BackupExtensionStore.indexUrl] is the primary key of the `extension_store` table and what the
+     * restorer upserts on, so it is the key that decides whether two entries are the same repository.
+     * The local copy wins when both sides have it, matching the other settings sections.
+     *
+     * A removal deliberately does NOT propagate: the backup model carries no tombstone for a
+     * repository, so a store only one side still has comes back on the other one. Sources,
+     * preferences and saved searches behave the same way.
+     */
+    private fun mergeExtensionStoresLists(
+        localStores: List<BackupExtensionStore>?,
+        remoteStores: List<BackupExtensionStore>?,
+    ): List<BackupExtensionStore> {
+        val logTag = "MergeExtensionStores"
+        val localStoreMap = localStores?.associateBy { it.indexUrl } ?: emptyMap()
+        val remoteStoreMap = remoteStores?.associateBy { it.indexUrl } ?: emptyMap()
+
+        val mergedStores = (localStoreMap.keys + remoteStoreMap.keys).distinct().mapNotNull { indexUrl ->
+            val localStore = localStoreMap[indexUrl]
+            val remoteStore = remoteStoreMap[indexUrl]
+
+            logcat(LogPriority.DEBUG, logTag) {
+                "Processing store index URL: $indexUrl. Local store: ${localStore != null}, " +
+                    "Remote store: ${remoteStore != null}"
+            }
+
+            when {
+                localStore != null && remoteStore == null -> {
+                    logcat(LogPriority.DEBUG, logTag) { "Using local store: ${localStore.name}." }
+                    localStore
+                }
+                remoteStore != null && localStore == null -> {
+                    logcat(LogPriority.DEBUG, logTag) { "Using remote store: ${remoteStore.name}." }
+                    remoteStore
+                }
+                else -> {
+                    logcat(LogPriority.DEBUG, logTag) {
+                        "Remote and local have the same store index URL: $indexUrl. Keeping local."
+                    }
+                    localStore
+                }
+            }
+        }
+
+        logcat(LogPriority.DEBUG, logTag) { "Store merge completed. Total merged stores: ${mergedStores.size}" }
+
+        return mergedStores
+    }
+
     private fun mergeSavedSearchesLists(
         localSearches: List<BackupSavedSearch>?,
         remoteSearches: List<BackupSavedSearch>?,
