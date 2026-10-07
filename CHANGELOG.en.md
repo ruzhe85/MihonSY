@@ -6,6 +6,31 @@
 
 [中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
 
+## v1.2.0 (MihonSY)
+
+### New
+
+- **Multi-device sync redesigned (WebDAV)**: rebuilt around WebDAV — library, reading
+  history, bookmarks and settings sync in real time, for a consistent reading experience
+  across devices.
+- **Bookmarks**: new bottom "Bookmarks" tab that gathers page bookmarks from every title
+  and can jump straight to them.
+- **Deep crop edge**: improved crop algorithm — the crop can now cut through watermarks and
+  page numbers.
+
+### Improvements & Fixes
+
+- **Added NPU models Real-CUGAN Pro / SE** — install the updated model pack to use them.
+- **Improved AI-enhancement scheduling, Vulkan inference and progress-bar dragging performance.**
+- **Reading history now shows progress** — pages read / total pages.
+- **Auto-webtoon sticks per title**: once detected, following chapters no longer flip back
+  one by one.
+- **Continue reading follows reading history** instead of chapter list order.
+- **Chapter cache self-heals**: a missing cache file is downloaded again, and the retry that
+  did nothing was fixed.
+- **Fixed a crash and a blocked restore** caused by the notification builder being shared
+  across threads.
+
 ## v1.1.0 (MihonSY)
 
 ### New

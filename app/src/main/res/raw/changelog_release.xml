@@ -1,5 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <changelog bulletedList="true">
+    <changelogversion versionName="1.2.0" changeDate="October 7,2026">
+        <changelogtext>[b]MihonSY 1.2.0 (10)[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 全新设计多设备同步（WebDAV）：多端书架、阅读历史、书签及设置实时同步，实现跨端阅读统一体验</changelogtext>
+        <changelogtext>[b]新增[/b] 书签：底部新增「书签」页签，跨作品汇总所有按页书签并可跳页</changelogtext>
+        <changelogtext>[b]新增[/b] 深度裁剪边缘：裁剪可以穿过水印与页码</changelogtext>
+        <changelogtext>[b]新增[/b] NPU 模型 Real-CUGAN Pro / SE（需更新安装模型包）</changelogtext>
+        <changelogtext>[b]优化[/b] AI 增强调度、Vulkan 推理与进度条拖动性能</changelogtext>
+        <changelogtext>[b]优化[/b] 阅读历史现在显示「已读页数 / 总页数」</changelogtext>
+        <changelogtext>[b]修复[/b] 自动条漫命中后按书粘住，后续章节不再逐章翻转</changelogtext>
+        <changelogtext>[b]修复[/b] 继续阅读改为按阅读历史续读，而不是只看章节列表顺序</changelogtext>
+        <changelogtext>[b]修复[/b] 章节缓存文件丢失时自动重新下载，并修复重试无效的问题</changelogtext>
+        <changelogtext>[b]修复[/b] 通知构建器跨线程共享导致的崩溃与恢复中断</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.1.0" changeDate="September 23,2026">
         <changelogtext>[b]MihonSY 1.1.0 (9)[/b]</changelogtext>
         <changelogtext>[b]新增[/b] AI 超分：图像增强加入 AI 超分（GPU / NPU），基础代码移植自 mihon_img_upscale</changelogtext>
@@ -17,10 +30,5 @@
     <changelogversion versionName="1.0.5" changeDate="August 15,2026">
         <changelogtext>[b]MihonSY 1.0.5 (6)[/b]</changelogtext>
         <changelogtext>[b]修复[/b] 开启图像增强时，已下载的 CBZ 章节不再闪退，增强可正常处理</changelogtext>
-    </changelogversion>
-    <changelogversion versionName="1.0.4" changeDate="August 13,2026">
-        <changelogtext>[b]MihonSY 1.0.4 (5)[/b]</changelogtext>
-        <changelogtext>[b]优化[/b] 图像增强部分重做：所有阅读模式（翻页 / 条漫 / 长条图）下都能生效；关闭增强时恢复原始高清直出解码</changelogtext>
-        <changelogtext>[b]新增[/b] 增强状态显示器：图像增强设置中新增「显示增强状态」开关（默认关闭），开启后在图片左下方显示增强耗时（完成后显示 OK）</changelogtext>
     </changelogversion>
 </changelog>
