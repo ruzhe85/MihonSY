@@ -34,7 +34,7 @@
     <string name="label_bookmarks">Bookmarks</string>
     <string name="label_sources">Sources</string>
     <string name="label_backup">Backup and restore</string>
-    <string name="label_data_storage">Data and storage</string>
+    <string name="label_data_storage">Data and sync</string>
     <string name="label_stats">Statistics</string>
     <string name="label_migration">Migrate</string>
     <string name="label_extensions">Extensions</string>
@@ -220,9 +220,9 @@
     <string name="pref_library_summary">Categories, global update, chapter swipe</string>
     <string name="pref_reader_summary">Reading mode, display, navigation</string>
     <string name="pref_downloads_summary">Automatic download, download ahead</string>
-    <string name="pref_tracking_summary">One-way progress sync, enhanced sync</string>
+    <string name="pref_tracking_summary">One-way progress sync</string>
     <string name="pref_browse_summary">Sources, extensions, global search</string>
-    <string name="pref_backup_summary">Manual &amp; automatic backups, storage space</string>
+    <string name="pref_backup_summary">Manual &amp; automatic backups, storage space, enhanced sync</string>
     <string name="pref_security_summary">App lock, secure screen</string>
     <string name="pref_advanced_summary">Dump crash logs, battery optimizations</string>
 

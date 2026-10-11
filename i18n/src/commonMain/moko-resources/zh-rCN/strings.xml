@@ -672,9 +672,9 @@
     <string name="pref_appearance_summary">主题 • 日期格式</string>
     <string name="pref_library_summary">分类 • 全局更新 • 目录左右滑动</string>
     <string name="pref_downloads_summary">自动下载 • 预先下载</string>
-    <string name="pref_tracking_summary">阅读进度上传 • 增强同步</string>
+    <string name="pref_tracking_summary">阅读进度上传</string>
     <string name="pref_advanced_summary">导出崩溃日志 • 电池优化</string>
-    <string name="pref_backup_summary">手动备份 • 自动备份 • 存储空间</string>
+    <string name="pref_backup_summary">手动备份 • 自动备份 • 存储空间 • 增强同步</string>
     <string name="pref_security_summary">应用锁 • 隐私界面</string>
     <string name="pref_browse_summary">图源 • 插件 • 全局搜索</string>
     <string name="pref_reader_summary">阅读模式 • 显示 • 翻页</string>
@@ -767,7 +767,7 @@
     <string name="pref_flash_page_summ">减轻墨水屏上的残影</string>
     <string name="last_auto_backup_info">上次自动备份时间：%s</string>
     <string name="pref_flash_page">翻页时闪烁</string>
-    <string name="label_data_storage">数据与存储</string>
+    <string name="label_data_storage">数据与同步</string>
     <string name="pref_storage_usage">存储占用</string>
     <string name="action_create">创建</string>
     <string name="action_apply">应用</string>

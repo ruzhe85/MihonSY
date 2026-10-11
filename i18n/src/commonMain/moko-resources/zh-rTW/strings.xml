@@ -663,8 +663,8 @@
     <string name="pref_reader_summary">閱讀模式、檢視、導覽</string>
     <string name="pref_appearance_summary">主題、日期格式</string>
     <string name="pref_downloads_summary">自動下載、預先下載</string>
-    <string name="pref_tracking_summary">單向進度同步、增強式同步</string>
-    <string name="pref_backup_summary">手動與自動備份、儲存空間</string>
+    <string name="pref_tracking_summary">單向進度同步</string>
+    <string name="pref_backup_summary">手動與自動備份、儲存空間、增強式同步</string>
     <string name="pref_security_summary">上鎖應用程式、防窺畫面</string>
     <string name="pref_advanced_summary">傾印當機記錄、電池效能最佳化</string>
     <string name="crash_screen_restart_application">重新啟動應用程式</string>
@@ -760,7 +760,7 @@
     <string name="pref_flash_page_summ">減少電子紙顯示器上的殘影</string>
     <string name="last_auto_backup_info">上次自動備份於：%s</string>
     <string name="pref_flash_page">翻頁時閃爍畫面</string>
-    <string name="label_data_storage">資料與儲存空間</string>
+    <string name="label_data_storage">資料與同步</string>
     <string name="pref_storage_usage">儲存空間使用情形</string>
     <string name="action_sort_tracker_score">歷程平臺評分</string>
     <string name="action_apply">套用</string>
