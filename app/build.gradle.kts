@@ -18,8 +18,9 @@ plugins {
     id("com.github.ben-manes.versions")
 }
 
-// MihonSY: this fork does not ship Firebase telemetry (no google-services.json), so the
-// Google services / Crashlytics plugins are intentionally not applied, even for Release builds.
+// MihonSY: this fork does not ship Firebase telemetry (no google-services.json), so neither the
+// Google services / Crashlytics plugins nor the Firebase runtime dependencies are kept -- no
+// Google class is loaded at startup and no GMS meta-data ends up in the merged manifest.
 // MihonSY <--
 
 android {
@@ -323,11 +324,6 @@ dependencies {
     // Logging
     implementation(libs.logcat)
 
-    // Crash reports/analytics
-//    "standardImplementation"(platform(libs.firebase.bom))
-//    "standardImplementation"(libs.firebase.analytics)
-//    "standardImplementation"(libs.firebase.crashlytics)
-
     // Shizuku
     implementation(libs.bundles.shizuku)
 
@@ -345,11 +341,6 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
 
     // SY -->
-    // Firebase (EH)
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.analytics)
-    implementation(libs.firebase.crashlytics)
-
     // Better logging (EH)
     implementation(sylibs.xlog)
 

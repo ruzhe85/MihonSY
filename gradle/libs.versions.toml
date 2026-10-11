@@ -34,12 +34,9 @@ composeWebview = "0.33.6"
 conscrypt = "2.6.0"
 directionalViewPager = "1.0.0"
 diskLruCache = "2.0.2"
-firebase-bom = "34.15.0"
-firebase-crashlytics = "3.0.7"
 # jitpack 上原 c8013533 的构建状态为 Error（artifact 已 404，无法下载）；
 # 3268efe4 构建状态为 ok，且 IFlexible / FlexibleAdapter 等 API 与其逐字相同。
 flexibleAdapter = "3268efe4"
-google-services = "4.5.0"
 # 深度裁剪边缘（aggressiveCrop）只在 ruzhe85 fork 里有（其基点就是上游 e03b81e18a）；
 # 上游 mihonapp 无此形参，换回上游需同时回退 TachiyomiImageDecoder 的 4 参 newInstance 调用。
 # ⚠️ 该 rev 必须保留上游 3 参 newInstance(InputStream, Boolean, ByteArray?) 的二进制兼容入口：
@@ -130,9 +127,6 @@ composeWebview = { module = "io.github.kevinnzou:compose-webview", version.ref =
 conscrypt = { module = "org.conscrypt:conscrypt-android", version.ref = "conscrypt" }
 directionalViewPager = { module = "com.github.tachiyomiorg:DirectionalViewPager", version.ref = "directionalViewPager" }
 diskLruCache = { module = "com.jakewharton:disklrucache", version.ref = "diskLruCache" }
-firebase-analytics = { module = "com.google.firebase:firebase-analytics" }
-firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebase-bom" }
-firebase-crashlytics = { module = "com.google.firebase:firebase-crashlytics" }
 flexibleAdapter = { module = "com.github.arkon.FlexibleAdapter:flexible-adapter", version.ref = "flexibleAdapter" }
 image-decoder = { module = "com.github.ruzhe85:image-decoder", version.ref = "image-decoder" }
 injekt = { module = "com.github.null2264:injekt-koin", version.ref = "injekt" }
@@ -199,8 +193,6 @@ android-kmp-library = { id = "com.android.kotlin.multiplatform.library", version
 android-library = { id = "com.android.library", version.ref = "android-gradle" }
 android-test = { id = "com.android.test", version.ref = "android-gradle" }
 androidx-baselineProfile = { id = "androidx.baselineprofile", version.ref = "androidx-baselineProfile" }
-firebase-crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "firebase-crashlytics" }
-google-services = { id = "com.google.gms.google-services", version.ref = "google-services" }
 kotlin-compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin-gradle" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin-gradle" }
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin-gradle" }

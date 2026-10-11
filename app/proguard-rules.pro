@@ -133,10 +133,6 @@
 # XmlUtil
 -keep public enum nl.adaptivity.xmlutil.EventType { *; }
 
-# Firebase
--keep class com.google.firebase.installations.** { *; }
--keep interface com.google.firebase.installations.** { *; }
-
 # Google Drive
 -keep class com.google.api.services.** { *; }
 
@@ -168,11 +164,9 @@
 # === RxBinding
 -dontwarn com.google.auto.value.AutoValue
 
-# === Crashlytics
+# === Keep attributes (annotations / line numbers), required by other libraries
 -keepattributes *Annotation*
 -keepattributes SourceFile,LineNumberTable
--keep class com.crashlytics.** { *; }
--dontwarn com.crashlytics.**
 
 # === Humanize + Guava: https://github.com/google/guava/wiki/UsingProGuardWithGuava
 -dontwarn javax.lang.model.element.Modifier
