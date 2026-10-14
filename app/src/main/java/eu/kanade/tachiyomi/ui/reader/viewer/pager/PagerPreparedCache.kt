@@ -64,6 +64,12 @@ class PagerPreparedPage(
     val enhanceElapsedMillis: Long,
     /** false = 仅完成通用预处理（流物化+嗅探），布局处理（分割/合并）留待 holder 补跑。 */
     val layoutApplied: Boolean,
+    /**
+     * 本次预解码**真出了增强图**（解码器登记了成功计时）。false 而 [decodedBitmap] 非空 = 这幅位图
+     * 没增强（被抢占打断 / 门禁跳过 / 失败）——holder 据此在停顿后补算一次
+     * （见 `PagerPageHolder.maybeReEnhance`），角标也据此显示「跳过」而不是冒充引擎 OK + 假耗时。
+     */
+    val enhanced: Boolean = false,
 )
 
 /**
@@ -101,6 +107,12 @@ class PagerPreparedCache(private val maxSize: Int = 3) {
             it.remove()
         }
     }
+
+    /**
+     * 作废指定条目。停顿补算（PagerPageHolder.maybeReEnhance）用：缓存里那份是**未增强**的位图，
+     * 不删的话回翻再命中还是原图。
+     */
+    fun remove(key: Pair<ReaderPage, ReaderPage?>) = synchronized(lock) { map.remove(key) }
 
     fun clear() = synchronized(lock) { map.clear() }
 }
@@ -209,6 +221,10 @@ object PagerPagePreparer {
         // 线程排队，见 EnhanceTimings）；取不到才回退旧口径（Coil 外层墙钟，含排队会虚高，
         // 实测同一页可被显示成 6.9s / 12.1s，而实际只花 2.7s）。
         val pureEnhanceMs = EnhanceTimings.take(pageIndex)
+        // 这份计时**只有增强成功才登记**（见 TachiyomiImageDecoder），所以 pureEnhanceMs != null
+        // 等价于「这幅位图真增强过」。被抢占打断（abort）的页两者皆空：enhanceElapsedMillis 置 -1
+        // （角标显示跳过），enhanced=false 供 holder 停顿后补算。
+        val enhancedOk = pureEnhanceMs != null
         return PagerPreparedPage(
             source = itemSource,
             source2 = null,
@@ -217,12 +233,13 @@ object PagerPagePreparer {
             decodedBitmap = bitmap,
             enhancementMode = enhancementMode,
             cropBorders = config.imageCropBorders,
-            enhanceElapsedMillis = if (bitmap != null) {
+            enhanceElapsedMillis = if (bitmap != null && enhancedOk) {
                 pureEnhanceMs ?: (android.os.SystemClock.uptimeMillis() - decodeStart)
             } else {
                 -1L
             },
             layoutApplied = true,
+            enhanced = enhancedOk,
         )
     }
 

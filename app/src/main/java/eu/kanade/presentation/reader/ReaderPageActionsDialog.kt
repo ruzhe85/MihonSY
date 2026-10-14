@@ -41,7 +41,9 @@ fun ReaderPageActionsDialog(
 ) {
     var showSetCoverDialog by remember { mutableStateOf(false) }
     // SY -->
-    var useExtraPage by remember { mutableStateOf(false) }
+    // 本次「设置封面」的目标页：false = 第一页/当前页，true = 第二页。
+    // 两个入口各自显式赋值，不依赖上一次的残留值。
+    var coverUseExtraPage by remember { mutableStateOf(false) }
     // SY <--
 
     AdaptiveSheet(onDismissRequest = onDismissRequest) {
@@ -61,7 +63,10 @@ fun ReaderPageActionsDialog(
                         // SY <--
                     ),
                     icon = Icons.Outlined.Photo,
-                    onClick = { showSetCoverDialog = true },
+                    onClick = {
+                        coverUseExtraPage = false
+                        showSetCoverDialog = true
+                    },
                 )
                 ActionButton(
                     modifier = Modifier.weight(1f),
@@ -131,6 +136,7 @@ fun ReaderPageActionsDialog(
                         title = stringResource(SYMR.strings.action_set_second_page_cover),
                         icon = Icons.Outlined.Photo,
                         onClick = {
+                            coverUseExtraPage = true
                             showSetCoverDialog = true
                         },
                     )
@@ -201,9 +207,8 @@ fun ReaderPageActionsDialog(
         SetCoverDialog(
             onConfirm = {
                 // SY -->
-                onSetAsCover(useExtraPage)
+                onSetAsCover(coverUseExtraPage)
                 showSetCoverDialog = false
-                useExtraPage = false
                 // SY <--
             },
             onDismiss = { showSetCoverDialog = false },

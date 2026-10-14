@@ -103,6 +103,22 @@ open class ReaderPageImageView @JvmOverloads constructor(
      */
     var pageIndex: Int = -1
 
+    /**
+     * 当前屏上图是否**真出过增强图**。false = 未增强（被抢占打断 / 增强失败 / 门禁跳过）。
+     * 预解码位图路径由 holder 置位（见 PagerPageHolder 的 bitmap 分支），现场解码路径由
+     * [onDecodeCompleted] 置位，两条路径汇聚到这一个字段。
+     */
+    internal var currentImageEnhanced: Boolean = true
+
+    /**
+     * 现场解码（Coil 链）完成、增强结果已知后的回执。供 holder 做「停顿后补算」的迟到判定——
+     * ViewPager 停顿回调到达时，预热抢占可见页推理的 abort 可能还没发生，只能在这里补上。
+     *
+     * @param enhanced 本次是否真出了增强图；@param aborted 是否被抢占打断（无成功计时、
+     * 无 skip 标记，但原生有打断记录）。
+     */
+    internal var onDecodeCompleted: ((enhanced: Boolean, aborted: Boolean) -> Unit)? = null
+
     @CallSuper
     open fun onImageLoaded() {
         onImageLoaded?.invoke()
@@ -481,15 +497,22 @@ open class ReaderPageImageView @JvmOverloads constructor(
                             // 登记成 skip。角标必须显示 skip —— 否则会落回 engineLabel 的默认值
                             // `CPU OK`，看着像 CPU 做过增强（实测 1600×10064 这类大图就是如此）。
                             val skipped = EnhanceTimings.takeSkipped(pageIndex)
+                            // 计时只取一次——既做角标耗时，也判「真增强过」。
+                            val timing = EnhanceTimings.take(pageIndex)
+                            // 被抢占打断（快速翻页 / 预热抢占）的页：无成功计时、无 skip 标记，但原生有
+                            // 打断记录。角标要显示「跳过」，不能冒充引擎 OK + 墙钟假耗时；holder 也据此
+                            // 在停顿后补算一次。
+                            val aborted = !skipped && timing == null && Waifu2x.wasAborted(pageIndex)
+                            currentImageEnhanced = timing != null || skipped
+                            onDecodeCompleted?.invoke(currentImageEnhanced, aborted)
                             showEnhancementOutcome(
-                                success = !skipped,
-                                // Komiho: 优先用解码器登记的实际计算耗时（解码 + 增强，已剔除等锁）；
+                                success = !skipped && !aborted,
+                                // 优先用解码器登记的实际计算耗时（解码 + 增强，已剔除等锁）；
                                 // 取不到才回退 Coil 外层墙钟（含排队会虚高）。
-                                elapsedMillis = if (skipped) {
-                                    0L
-                                } else {
-                                    EnhanceTimings.take(pageIndex)
-                                        ?: (android.os.SystemClock.uptimeMillis() - startTime)
+                                elapsedMillis = when {
+                                    skipped -> 0L
+                                    timing != null -> timing
+                                    else -> android.os.SystemClock.uptimeMillis() - startTime
                                 },
                                 output = "${image.bitmap.width}×${image.bitmap.height}",
                             )
@@ -498,6 +521,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .listener(
                         onError = { _, _ ->
                             onImageLoadError(null)
+                            // 失败也要回执——否则 holder 的补算在飞标记永远不释放，之后真需要补算时
+                            // 会被自己挡住。
+                            currentImageEnhanced = false
+                            onDecodeCompleted?.invoke(false, false)
                             showEnhancementOutcome(
                                 success = false,
                                 elapsedMillis = android.os.SystemClock.uptimeMillis() - startTime,

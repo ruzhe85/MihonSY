@@ -159,9 +159,13 @@ class ReaderActivity : BaseActivity() {
             }
         }
 
-        const val SHIFT_DOUBLE_PAGES = "shiftingDoublePages"
-        const val SHIFTED_PAGE_INDEX = "shiftedPageIndex"
-        const val SHIFTED_CHAP_INDEX = "shiftedChapterIndex"
+        /**
+         * 双页配对「对齐」诊断的日志 tag（按它 grep 可看每次对齐的输入与结果）。
+         *
+         * 这里原有 SHIFT_DOUBLE_PAGES / SHIFTED_PAGE_INDEX / SHIFTED_CHAP_INDEX 三个常量，全仓无人
+         * 引用（那套基于 Intent / SavedState 保存配对状态的方案从未实现），随本次对齐修复一并删除。
+         */
+        private const val DOUBLE_PAGE_TAG = "MihonSYDoublePage"
     }
 
     private val readerPreferences = Injekt.get<ReaderPreferences>()
@@ -941,14 +945,10 @@ class ReaderActivity : BaseActivity() {
             viewer.config.doublePages = doublePages
             viewModel.setDoublePages(viewer.config.doublePages)
         }
-        val currentChapter = viewModel.state.value.currentChapter
-        if (doublePages) {
-            // If we're moving from singe to double, we want the current page to be the first page
-            val currentPage = viewModel.state.value.currentPage
-            viewer.config.shiftDoublePage = (
-                currentPage + (currentChapter?.pages?.take(currentPage)?.count { it.fullPage || it.isolatedPage } ?: 0)
-                ) % 2 != 0
-        }
+        // 从单页切到双页时「当前页应当成为跨页第一页」：原实现用的是 **1 基**的 state.currentPage
+        // （updateChapterProgress 写的是 pageIndex + 1），与对齐函数用的 0 基 requestedPage 相差一页，
+        // 会把当前页配到跨页第二位。现在两处共用同一实现，公式只有一份；单页模式由对齐函数提前返回。
+        alignDoublePageShiftToCurrentPage(viewer)
         viewModel.state.value.viewerChapters?.let {
             viewer.setChaptersDoubleShift(it)
         }
@@ -969,6 +969,42 @@ class ReaderActivity : BaseActivity() {
                 viewer.setChaptersDoubleShift(it)
                 invalidateOptionsMenu()
             }
+        }
+    }
+
+    /**
+     * 把双页配对对齐到**当前跨页的第一页**（幂等，可重复调用）。移植自 Komiho 的双页配对修复。
+     *
+     * 为什么是「现算」而不是「记住离开时的状态」：旧做法记录 adapter.pageToShift（只有
+     * updateShifting() 会写，即手动切布局或手动「位移一页」时）与当时的 shiftDoublePage，但
+     * **翻页不会更新它们** —— 翻过几跨后记录就过期，原样写回反而把当前页配到跨页第二位（实机表现：
+     * 双页里跳了下一页、旋转回来还是上一页）；而且每转一次都重放同一份过期状态，偏差会累积。改成
+     * 从当前位置推导后，结果是位置的纯函数，反复旋转不会漂移。
+     *
+     * 推导（与手动「位移一页」同类语义：把整本按当前页对齐，故对已手动对齐的书不会回退 ——
+     * 那类书每一跨首页的奇偶一致，现算值与手动值相同）：
+     * - 锚点 = 当前跨页第一页 = currChapter.pages[requestedPage]（双页下 PagerViewer.onPageChange
+     *   上报的就是 joinedItems[i].first，requestedPage 即它）；
+     * - shift = (requestedPage + 它之前的整页/孤立页数) % 2 != 0 —— 默认配对是 (0,1),(2,3)…（偶数页
+     *   在跨页首位），shift 把配对整体错开一页，所以「有效序号为奇」时才需要 shift；整页/孤立页各自
+     *   独占一跨，用计数补偿。
+     *
+     * 单页模式直接返回（doublePages == false 时 shiftDoublePage 无意义）；页码还没就绪
+     * （requestedPage < 0）也返回。shiftDoublePage 属布局，不要加进 PagerConfig.imageFingerprint()。
+     */
+    private fun alignDoublePageShiftToCurrentPage(viewer: PagerViewer) {
+        if (!viewer.config.doublePages) return
+        val chapter = viewModel.state.value.viewerChapters?.currChapter ?: return
+        val pages = chapter.pages ?: return
+        val requested = chapter.requestedPage
+        if (requested < 0) return
+        val anchor = pages.getOrNull(requested)
+        val fullBefore = pages.take(requested).count { it.fullPage || it.isolatedPage }
+        viewer.config.shiftDoublePage = (requested + fullBefore) % 2 != 0
+        anchor?.let { viewer.updateShifting(it) }
+        logcat(LogPriority.DEBUG, tag = DOUBLE_PAGE_TAG) {
+            "align requested=$requested/${pages.size} fullBefore=$fullBefore " +
+                "shift=${viewer.config.shiftDoublePage} anchor=${anchor?.index ?: "-"}"
         }
     }
 // EXH <--
@@ -1015,7 +1051,12 @@ class ReaderActivity : BaseActivity() {
             if (readerPreferences.pageLayout.get() == PagerConfig.PageLayout.AUTOMATIC) {
                 setDoublePageMode(newViewer)
             }
-            viewModel.state.value.lastShiftDoubleState?.let { newViewer.config.shiftDoublePage = it }
+            // 按**当前位置**重新对齐双页配对（旋转回来仍停在原来那一跨）。替换原来那句
+            // `lastShiftDoubleState?.let { … }` —— 该状态全仓没有任何写入点（恒为 null），于是旋转后
+            // 配对退回默认排法、跨页整体挪一页。必须排在 setDoublePageMode 之后：它按屏幕方向设置
+            // doublePages，并在关闭双页时清掉 shiftDoublePage。此处幂等；紧接着的 setChapters() 还会
+            // 再对齐一次（那时页列表才就绪）。
+            alignDoublePageShiftToCurrentPage(newViewer)
         }
 
         val manga = viewModel.state.value.manga
@@ -1102,24 +1143,21 @@ class ReaderActivity : BaseActivity() {
             loadingIndicator = null
         }
         // SY -->
-        val state = viewModel.state.value
-        if (state.indexChapterToShift != null && state.indexPageToShift != null) {
-            viewerChapters.currChapter.pages?.find {
-                it.index == state.indexPageToShift && it.chapter.chapter.id == state.indexChapterToShift
-            }?.let {
-                (viewModel.state.value.viewer as? PagerViewer)?.updateShifting(it)
+        // 旋转（viewer 重建）时页列表常常还没喂进来，真正生效的对齐落在这里 —— 与 updateViewer()
+        // 共用 alignDoublePageShiftToCurrentPage()，只依赖当前页，因此两处都调是安全的（幂等）。
+        // 这里原有两支基于 state.indexChapterToShift / indexPageToShift 与 state.lastShiftDoubleState
+        // 的「恢复 / 重算」代码，那三项全仓没有任何写入点（恒为 null，等于死代码），已随本次改动删除。
+        (viewModel.state.value.viewer as? PagerViewer)?.let { pagerViewer ->
+            alignDoublePageShiftToCurrentPage(pagerViewer)
+            // 诊断：成对是异步落到 adapter 上的，下一帧再记「屏幕上实际是哪两页」——配对错位时的
+            // 实机表现就是这一对变成了相邻的另一跨。
+            if (pagerViewer.config.doublePages) {
+                pagerViewer.pager.post {
+                    logcat(LogPriority.DEBUG, tag = DOUBLE_PAGE_TAG) {
+                        "spread(after setChapters)=${pagerViewer.currentSpreadForLog()}"
+                    }
+                }
             }
-            viewModel.setIndexChapterToShift(null)
-            viewModel.setIndexPageToShift(null)
-        } else if (state.lastShiftDoubleState != null) {
-            val currentChapter = viewerChapters.currChapter
-            (viewModel.state.value.viewer as? PagerViewer)?.config?.shiftDoublePage = (
-                currentChapter.requestedPage +
-                    (
-                        currentChapter.pages?.take(currentChapter.requestedPage)
-                            ?.count { it.fullPage || it.isolatedPage } ?: 0
-                        )
-                ) % 2 != 0
         }
         // SY <--
 

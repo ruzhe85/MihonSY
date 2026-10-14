@@ -16,6 +16,7 @@ import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.EnhanceTimings
+import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import eu.kanade.tachiyomi.widget.ViewPagerAdapter
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -116,6 +117,23 @@ class PagerPageHolder(
      */
     private var renderedEnhancementKey = ""
 
+    // 停顿补算（快速翻页被抢占打断的页，停在此页时补超一次）。
+    // currentImageEnhanced 定义在 ReaderPageImageView（预解码位图路径与现场解码路径共用）。
+
+    /** 补算重发解码请求用的源（仅未增强时保留；内存 Buffer，零网络）。 */
+    private var appliedSource: BufferedSource? = null
+
+    /** 当前屏上图是否动图（动图不进增强链，不补算）。 */
+    private var appliedAnimated = false
+
+    /** 补算请求在飞标记——防止停顿回调与迟到回调叠加重复发。 */
+    private var reEnhanceInFlight = false
+
+    /** 迟到补算延迟（ms）：等预热抢占的 abort 发生、被打断的解码出图后再判一次。 */
+    private val reEnhanceDelayMs = 400L
+
+    private val pendingReEnhance = Runnable { maybeReEnhance("late") }
+
     init {
         // Komiho 诊断：记录 holder 实例身份 —— 用于判断「同一页被增强两次」是
         // 两个 holder 实例各算一次，还是同一个 holder 被调了两次 setImage。
@@ -123,8 +141,71 @@ class PagerPageHolder(
             "Waifu2xHolder",
             "CREATE page=${page.index} extra=${extraPage?.index ?: -1} id=${System.identityHashCode(this)}",
         )
+        // 现场解码完成回执——记录增强结果；未增强且被打断、用户就停在这一页时，
+        // 安排一次迟到补算（停顿回调到达时 abort 可能还没发生）。
+        onDecodeCompleted = { enhanced, aborted -> handleDecodeCompleted(enhanced, aborted) }
         loadJob = scope.launch { loadPageAndProcessStatus(1) }
         extraLoadJob = scope.launch { loadPageAndProcessStatus(2) }
+    }
+
+    /**
+     * 现场解码完成。记录本次屏上图是否真增强；未增强且被抢占打断、且用户仍停在这一页时，延迟
+     * [reEnhanceDelayMs] 安排补算（届时复核仍是当前页）。
+     */
+    private fun handleDecodeCompleted(enhanced: Boolean, aborted: Boolean) {
+        currentImageEnhanced = enhanced
+        reEnhanceInFlight = false
+        if (enhanced) {
+            appliedSource = null
+            removeCallbacks(pendingReEnhance)
+            return
+        }
+        if (aborted && viewer.isCurrentItem(item)) {
+            removeCallbacks(pendingReEnhance)
+            postDelayed(pendingReEnhance, reEnhanceDelayMs)
+        }
+    }
+
+    /**
+     * 停顿补算——当前屏上图是「被抢占打断的未增强图」时，重跑一次解码 + 增强（reader 页请求缓存
+     * 全 DISABLED，重发即真重算；源走内存 Buffer，零网络）。触发点：ViewPager 停顿回调（settle）
+     * 与迟到回调（late）。
+     *
+     * 闸门（缺一不可）：
+     * - 增强开着（mode != 0 或降噪开着）、非动图；
+     * - [Waifu2x.wasAborted] 为真——原生只对**真被 abort 过**的页登记，尺寸门 / HARDWARE / 引擎
+     *   失败等永不误触发；补算成功后该记录被下次推理清除，天然防循环；
+     * - 仍是当前页（快速翻页时只为停下的那一页补算，不形成重试风暴）；
+     * - 没有已在飞的补算。
+     */
+    private fun maybeReEnhance(reason: String) {
+        if (currentImageEnhanced || reEnhanceInFlight) return
+        val src = appliedSource ?: return
+        if (appliedAnimated) return
+        val preferences = Injekt.get<ReaderPreferences>()
+        if (preferences.enhancementMode.get() == 0 && preferences.denoiseLevel.get() == 0) return
+        if (!Waifu2x.wasAborted(page.index)) return
+        if (!viewer.isCurrentItem(item)) return
+        reEnhanceInFlight = true
+        // 作废预处理缓存里那份未增强位图 + 放行 already-rendered 守卫：否则回翻再命中还是原图，
+        // 状态重发也被守卫挡掉。缓存删除后本 holder 持有的源是唯一引用。
+        val key = viewer.preparedCache.key(page, extraPage)
+        viewer.preparedCache.remove(key)
+        renderedKey = null
+        android.util.Log.d(
+            "Waifu2xReEnhance",
+            "page=${page.index} reason=$reason id=${System.identityHashCode(this)}",
+        )
+        setImage(src.peek(), appliedAnimated, viewerImageConfig())
+    }
+
+    /**
+     * ViewPager 停顿回调 = 「翻页停止」。除既有的 landscapeZoom 外，若当前屏上图是被抢占打断的
+     * 未增强图，补算一次（issue：快速翻页后停在此页停在原图）。
+     */
+    override fun onPageSelected(forward: Boolean) {
+        super.onPageSelected(forward)
+        maybeReEnhance("settle")
     }
 
     /**
@@ -142,6 +223,8 @@ class PagerPageHolder(
         loadJob = null
         extraLoadJob?.cancel()
         extraLoadJob = null
+        // 离屏即取消待执行的补算——补算只为「停下来的那一页」服务。
+        removeCallbacks(pendingReEnhance)
     }
 
     private fun initProgressIndicator() {
@@ -323,6 +406,11 @@ class PagerPageHolder(
                         android.graphics.drawable.BitmapDrawable(resources, bitmap),
                         viewerImageConfig(),
                     )
+                    // 登记本次屏上图是否真增强。未增强（被抢占打断）时保留源，停顿后由
+                    // maybeReEnhance 补算一次。
+                    currentImageEnhanced = result.enhanced
+                    appliedAnimated = result.isAnimated
+                    appliedSource = if (result.enhanced) null else result.source
                     // SY: 预解码路径补发增强角标（现场解码路径由 SSIV 的 Coil 回调触发）
                     // Komiho: enhanceElapsedMillis = -1 表示这份预处理**没有做过增强**（尺寸门 /
                     // 已解到位图等），角标要显示 SKIP 而不是 CPU OK。这条路径不走 Coil 解码，
@@ -335,6 +423,10 @@ class PagerPageHolder(
                         output = "${bitmap.width}×${bitmap.height}",
                     )
                 } else {
+                    // 现场解码路径——先保留源（未增强时补算要用），增强结果由 onDecodeCompleted
+                    // 回执后置位（成功则顺手释放源）。
+                    appliedAnimated = result.isAnimated
+                    appliedSource = result.source
                     setImage(result.source.peek(), result.isAnimated, viewerImageConfig())
                 }
                 if (!result.isAnimated) {

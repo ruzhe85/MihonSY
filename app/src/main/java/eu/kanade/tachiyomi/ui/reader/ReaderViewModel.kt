@@ -1582,10 +1582,10 @@ class ReaderViewModel @JvmOverloads constructor(
             setMangaViewerFlags.awaitSetReadingMode(manga.id, readingMode.flagValue.toLong())
             val currChapters = state.value.viewerChapters
             if (currChapters != null) {
-                // Save current page
-                val currChapter = currChapters.currChapter
-                currChapter.requestedPage = currChapter.chapter.last_page_read
-
+                // MihonSY: 不重置 requestedPage —— 它随翻页实时维护（updateChapterProgress 每次翻页
+                // 写它，ChapterLoader 也按 intent page 设好），重建后的 viewer 正是按它定位首帧。
+                // 上游那行取的是 DB 的 last_page_read：无痕模式不写它，从书签/续读跳页进入时也与它
+                // 不一致，切阅读模式就会把用户弹回旧页。口径与 recreateViewerForAutoMode() 一致。
                 mutableState.update {
                     it.copy(
                         manga = getManga.await(manga.id),
@@ -1618,10 +1618,7 @@ class ReaderViewModel @JvmOverloads constructor(
             setMangaViewerFlags.awaitSetOrientation(manga.id, orientation.flagValue.toLong())
             val currChapters = state.value.viewerChapters
             if (currChapters != null) {
-                // Save current page
-                val currChapter = currChapters.currChapter
-                currChapter.requestedPage = currChapter.chapter.last_page_read
-
+                // MihonSY: 同 setMangaReadingMode —— 不重置 requestedPage，重建后的 viewer 停在当前页。
                 mutableState.update {
                     it.copy(
                         manga = getManga.await(manga.id),
@@ -1673,13 +1670,12 @@ class ReaderViewModel @JvmOverloads constructor(
         mutableState.update { it.copy(ehUtilsVisible = visible) }
     }
 
-    fun setIndexChapterToShift(index: Long?) {
-        mutableState.update { it.copy(indexChapterToShift = index) }
-    }
-
-    fun setIndexPageToShift(index: Int?) {
-        mutableState.update { it.copy(indexPageToShift = index) }
-    }
+    // 这里原有 setIndexChapterToShift / setIndexPageToShift 两个 setter，与 State 里的
+    // indexChapterToShift / indexPageToShift / lastShiftDoubleState 配套 —— 它们属于「跨 viewer 重建
+    // 保存双页配对」那套方案，实测被否掉：记录会随翻页过期，重放反而把当前页配到跨页第二位（双页里
+    // 跳了下一页、转回来还是上一页），且反复旋转会累积偏移。现在由
+    // ReaderActivity.alignDoublePageShiftToCurrentPage() 按当前位置现算对齐，配对状态不再跨重建保存，
+    // 这些 API 与相应 State 字段一并删除。
 
     fun openChapterListDialog() {
         mutableState.update { it.copy(dialog = Dialog.ChapterList) }
@@ -2091,9 +2087,6 @@ class ReaderViewModel @JvmOverloads constructor(
         val meta: RaisedSearchMetadata? = null,
         val mergedManga: Map<Long, Manga>? = null,
         val ehUtilsVisible: Boolean = false,
-        val lastShiftDoubleState: Boolean? = null,
-        val indexPageToShift: Int? = null,
-        val indexChapterToShift: Long? = null,
         val doublePages: Boolean = false,
         val dateRelativeTime: Boolean = true,
         val autoScroll: Boolean = false,

@@ -695,6 +695,20 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     }
 
     fun getShiftedPage(): ReaderPage? = adapter.pageToShift
+
+    /**
+     * 诊断用 —— 把「当前实际拼装出的跨页」压成 `first-second@item` 一行。
+     *
+     * 为什么放在这里：adapter 是私有的，外部（ReaderActivity 的双页对齐日志）读不到 joinedItems；
+     * 而双页配对错位时的实机表现就是「屏幕上显示成了相邻的另一跨」，只有把实际拼装结果打出来才能
+     * 一眼判定对齐成功与否。**只读、无副作用、不参与任何逻辑。**
+     */
+    fun currentSpreadForLog(): String {
+        val item = adapter.joinedItems.getOrNull(pager.currentItem)
+        val first = (item?.first as? ReaderPage)?.index ?: -1
+        val second = (item?.second as? ReaderPage)?.index ?: -1
+        return "$first-$second@${pager.currentItem}"
+    }
     // SY <--
 }
 
