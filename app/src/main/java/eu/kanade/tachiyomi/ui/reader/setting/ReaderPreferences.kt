@@ -1,5 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.setting
 
+import android.graphics.Color
+import android.graphics.ColorMatrix
 import android.os.Build
 import androidx.compose.ui.graphics.BlendMode
 import dev.icerock.moko.resources.StringResource
@@ -463,6 +465,95 @@ class ReaderPreferences(
         const val LOAD_FROM_FILE = 0
         const val LOAD_INTO_MEMORY = 1
         const val CACHE_TO_DISK = 2
+    }
+
+    /**
+     * 阅读器背景档位。0-3 是既有档位；[AUTOMATIC] 已从设置入口隐藏（底层智能取色逻辑保留），
+     * 仅作存量值兼容 —— 本分支**不做存量收敛**，用户手里的值原样留着，只是不再能选到它。
+     *
+     * 4/5 为纸化档位：页面白场被映射成纸色、并叠一层均值等于该纸色的纸纹，容器衬底平铺同一
+     * 纸纹，页面与 letterbox 才能同色衔接。
+     */
+    object ReaderTheme {
+        const val WHITE = 0
+        const val BLACK = 1
+        const val GRAY = 2
+
+        /** 已隐藏：不再出现在设置入口，仅存量值兼容。 */
+        const val AUTOMATIC = 3
+        const val PARCHMENT = 4
+        const val KRAFT = 5
+
+        /**
+         * 纸化档位参数：
+         * - [whiteColor]：纸色（白场映射目标，须与纸纹均值一致，页面与 letterbox 才能同色衔接）；
+         * - [blackColor]：暖深色（黑场映射目标）；
+         * - [chromaKeep]：彩度保留系数，彩色像素保留的原始彩度比例。
+         */
+        data class PaperStyle(val whiteColor: Int, val blackColor: Int, val chromaKeep: Float)
+
+        /** 羊皮纸：纸色 = 纸纹实测均值，页面与 letterbox 才能同色衔接。 */
+        val PARCHMENT_STYLE = PaperStyle(
+            whiteColor = Color.rgb(0xF6, 0xE1, 0xBF),
+            blackColor = Color.rgb(0x2B, 0x22, 0x18),
+            chromaKeep = 0.35f,
+        )
+
+        /** 牛皮纸：纸色 = 纸纹实测均值。 */
+        val KRAFT_STYLE = PaperStyle(
+            whiteColor = Color.rgb(0xD0, 0xAC, 0x82),
+            blackColor = Color.rgb(0x34, 0x26, 0x18),
+            chromaKeep = 0.35f,
+        )
+
+        fun paperStyleOf(theme: Int): PaperStyle? = when (theme) {
+            PARCHMENT -> PARCHMENT_STYLE
+            KRAFT -> KRAFT_STYLE
+            else -> null
+        }
+
+        /**
+         * 纸色坡道矩阵。页面此后还会乘一层均值 = [PaperStyle.whiteColor] 的纸纹
+         * （见 `PaperPageTexture`），所以矩阵按**复合效果**反解：
+         *
+         * - 白场坡到 255：乘完正好落在纸色，与容器 letterbox 的纸纹衬底同色衔接；
+         * - 黑场坡到 255K/T：乘完正好落在 [PaperStyle.blackColor] 墨色；
+         * - 中间调乘完正好是 K → T 的理想纸色坡道（坡道与相乘都是线性，可精确反解）；
+         * - 彩色像素的彩度保留系数经相乘后仍为 [PaperStyle.chromaKeep]。
+         *
+         * 其中 T = 纸色（0-255），K = 墨色，`out = ramp × T/255`。
+         * Android ColorMatrix 通道取值 0-255、偏移列同量纲。
+         */
+        fun buildPaperMatrix(style: PaperStyle): ColorMatrix {
+            val luminance = floatArrayOf(0.299f, 0.587f, 0.114f)
+            val paper = intArrayOf(
+                Color.red(style.whiteColor),
+                Color.green(style.whiteColor),
+                Color.blue(style.whiteColor),
+            )
+            val ink = intArrayOf(
+                Color.red(style.blackColor),
+                Color.green(style.blackColor),
+                Color.blue(style.blackColor),
+            )
+            val chromaKeep = style.chromaKeep
+            val m = FloatArray(20)
+            for (c in 0..2) {
+                val ramp = (paper[c] - ink[c] - 255f * chromaKeep) / paper[c]
+                val chroma = 255f * chromaKeep / paper[c]
+                for (j in 0..2) {
+                    m[c * 5 + j] = ramp * luminance[j] + if (j == c) chroma else 0f
+                }
+                m[c * 5 + 3] = 0f
+                m[c * 5 + 4] = 255f * ink[c] / paper[c]
+            }
+            m[15] = 0f
+            m[16] = 0f
+            m[17] = 0f
+            m[18] = 1f
+            m[19] = 0f
+            return ColorMatrix(m)
+        }
     }
 
     companion object {

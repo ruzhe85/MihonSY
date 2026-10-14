@@ -99,10 +99,11 @@ object SettingsReaderScreen : SearchableSettings {
                 Preference.PreferenceItem.ListPreference(
                     preference = readerPreferences.readerTheme,
                     entries = mapOf(
-                        1 to stringResource(MR.strings.black_background),
-                        2 to stringResource(MR.strings.gray_background),
-                        0 to stringResource(MR.strings.white_background),
-                        3 to stringResource(MR.strings.automatic_background),
+                        ReaderPreferences.ReaderTheme.BLACK to stringResource(MR.strings.black_background),
+                        ReaderPreferences.ReaderTheme.GRAY to stringResource(MR.strings.gray_background),
+                        ReaderPreferences.ReaderTheme.WHITE to stringResource(MR.strings.white_background),
+                        ReaderPreferences.ReaderTheme.PARCHMENT to stringResource(MR.strings.parchment_background),
+                        ReaderPreferences.ReaderTheme.KRAFT to stringResource(MR.strings.kraft_background),
                     ),
                     title = stringResource(MR.strings.pref_reader_theme),
                 ),

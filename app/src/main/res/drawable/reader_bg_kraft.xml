@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  阅读器牛皮纸背景：无缝平铺纹理。webp 放在 drawable-nodpi，避免系统按密度缩放导致平铺
+  网格尺寸随设备漂移。基色 #D0AC82（纸纹实测均值）与 ReaderPreferences.ReaderTheme.KRAFT_STYLE
+  的页面滤镜白场一致，页面与 letterbox 才能同色衔接。
+-->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/reader_bg_kraft_tile"
+    android:tileMode="repeat"
+    android:antialias="true" />

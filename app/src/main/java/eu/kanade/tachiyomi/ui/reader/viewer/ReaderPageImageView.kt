@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.ui.reader.viewer
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.drawable.Animatable
@@ -118,6 +119,18 @@ open class ReaderPageImageView @JvmOverloads constructor(
      * 无 skip 标记，但原生有打断记录）。
      */
     internal var onDecodeCompleted: ((enhanced: Boolean, aborted: Boolean) -> Unit)? = null
+
+    /**
+     * 纸化背景的页面纹理叠加。
+     *
+     * 放在 dispatchDraw（而非 onDraw）是因为本类是 FrameLayout，画面由子 View（SSIV / PhotoView /
+     * GIF）绘制，纹理必须盖在子视图之上。非纸档位时 [PaperPageTexture.drawOver] 内部直接返回，
+     * 不分配图层，等于零开销。
+     */
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        PaperPageTexture.drawOver(canvas, width, height)
+    }
 
     @CallSuper
     open fun onImageLoaded() {

@@ -21,10 +21,11 @@ import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 
 private val themes = listOf(
-    MR.strings.black_background to 1,
-    MR.strings.gray_background to 2,
-    MR.strings.white_background to 0,
-    MR.strings.automatic_background to 3,
+    MR.strings.black_background to ReaderPreferences.ReaderTheme.BLACK,
+    MR.strings.gray_background to ReaderPreferences.ReaderTheme.GRAY,
+    MR.strings.white_background to ReaderPreferences.ReaderTheme.WHITE,
+    MR.strings.parchment_background to ReaderPreferences.ReaderTheme.PARCHMENT,
+    MR.strings.kraft_background to ReaderPreferences.ReaderTheme.KRAFT,
 )
 
 private val flashColors = listOf(

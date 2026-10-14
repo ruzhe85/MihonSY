@@ -174,9 +174,11 @@
     <string name="pref_read_with_volume_keys">音量按鈕</string>
     <string name="pref_read_with_volume_keys_inverted">反轉音量按鈕</string>
     <string name="pref_read_with_long_tap">長按時彈出快顯選單</string>
-    <string name="pref_reader_theme">背景顏色</string>
+    <string name="pref_reader_theme">閱讀背景</string>
     <string name="white_background">白色</string>
     <string name="black_background">黑色</string>
+    <string name="parchment_background">羊皮紙</string>
+    <string name="kraft_background">牛皮紙</string>
     <string name="pref_viewer_type">預設閱讀模式</string>
     <string name="left_to_right_viewer">單頁(左至右)</string>
     <string name="right_to_left_viewer">單頁(右至左)</string>
