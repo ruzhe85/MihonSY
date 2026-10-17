@@ -43,15 +43,25 @@ object Waifu2x {
         /** 原生自报的**纯推理**耗时；-1 = 未知（失败 / 被抢占 / 没拿到）。 */
         @Volatile var nativeInferenceMs = -1L
 
-        /** 需要从「总流程」里剔除的等锁总时长（两段之和）；拿不到拆分的部分按 0 计。 */
+        /**
+         * Komiho (2026-10-16): **可见页重试时白扔掉的墙钟**（ms，被抢占那几次尝试的总耗时，含它们
+         * 自己的等锁）。由调用方（`MihonSyEnhancer.enhanceWithGpu`）累加 —— 那次推理产出的图根本
+         * 没被用上，纯属重试代价。
+         *
+         * 为什么算进「要剔除的时间」：角标口径是「最终这张图从 0 解码 + 增强的实际消耗」。
+         * 不剔的话，罕见情况下（连撞两次抢占）角标会凭空多出 0.5~1s。
+         */
+        @Volatile var retryLossMs = 0L
+
+        /** 需要从「总流程」里剔除的等锁总时长（两段之和 + 重试损失）；拿不到拆分的部分按 0 计。 */
         fun totalWaitMs(): Long {
-            if (waitMs < 0) return 0L
+            if (waitMs < 0) return retryLossMs
             val secondWait = if (nativeInferenceMs > 0 && procMs > nativeInferenceMs) {
                 procMs - nativeInferenceMs
             } else {
                 0L
             }
-            return waitMs + secondWait
+            return waitMs + secondWait + retryLossMs
         }
     }
 
@@ -300,9 +310,17 @@ object Waifu2x {
      * pager 见 `PagerViewer.onPrepareStart`，条漫在 `WebtoonViewer.onScrolled` 里按视口中线
      * 所在页写（条漫原先从不写，闸门对它曾完全失效）。
      *
-     * 供 [process] 判断「这次请求是不是用户正在看的那页」。只服务于 [prioritizeEnhancement]，
-     * 不参与任何功能判定 —— 值过期最坏的后果是某个请求被当成「可见页」直接放行（本来就放行），
-     * 没有副作用。
+     * 三个消费方：[prioritizeEnhancement]（可见页永不排在预取之后）、[abortProcessing] 的守卫
+     * （不打断可见页的推理）、以及 `MihonSyEnhancer` 的可见页重试 —— 后两者是 2026-10-16 为
+     * issue #8 加的，所以「值过期」不再是「没有副作用」：
+     *
+     * ⚠️ 它是**章内页号**（`ReaderPage.index`），跨章会与新章的页号数值重复。因此：
+     * - 阅读器销毁 / 切换阅读模式时由 `PagerViewer.destroy()` 复位为 -1；
+     * - 引擎释放时由 [destroy] 复位为 -1；
+     * - 章内换章**没有**复位点（换章不销毁 viewer），残留值最坏的后果是「少打断一次」或
+     *   「让一张预取页多等一次有界重试」——方向安全，故不为此引入跨章判断。
+     * - 条漫侧（`WebtoonViewer.onScrolled`）也写它，但 webtoon 没有 abort 调用点，所以那边
+     *   只会影响优先级判定与可见页重试。
      */
     @Volatile
     var visiblePageIndex: Int = -1
@@ -512,12 +530,57 @@ object Waifu2x {
             isInitialized = false
             activeModel = null
             appliedTileSize = -1
+            // Komiho (2026-10-16): 引擎已释放，「当前可见页」不再有意义 —— 它是**章内页号**，
+            // 留着会被下一次阅读会话/另一种阅读模式当成同一页（守卫会少打断一次、
+            // 可见页重试也可能被误触发）。见 [visiblePageIndex] 的说明。
+            visiblePageIndex = -1
         }
     }
 
-    /** Asks an in-flight inference to stop at its next cancellation check. */
-    fun abortProcessing() {
+    /**
+     * Komiho (2026-10-16): 当前**正在推理**的页号（-1 = 空闲 / 未知 / 原生库未加载）。
+     *
+     * 数据来源是原生已有的 `g_current_id`：它在拿到 `g_lock` 之后写入
+     * （`waifu2x_jni.cpp:361`，即「真正在跑的那一次」），而 `nativeGetProgress()` 本来就把它
+     * 放在返回值的**高 32 位**（低 32 位是进度）—— 所以不需要新增 JNI 符号、也不用改 C++。
+     *
+     * 用途：打断之前先判断「这一枪会打中谁」。issue #8 的根因就是打断无差别 ——
+     * 快速翻页时被打中的往往正是刚变成可见页自己的预解码（日志 `from=prewarm#N` 被打断后
+     * 立刻 `enhanceMs=-1 visible=true`）。
+     *
+     * 注意：`g_current_id` 只在 `destroy` 时归 -1，推理跑完后会**残留**上一次页号；这只会让
+     * [abortProcessing] 的守卫「多保护一次」（本来也没有推理可打断），方向安全。
+     */
+    fun currentInferencePage(): Int = try {
+        if (libraryLoaded) (nativeGetProgress() ushr 32).toInt() else -1
+    } catch (_: Throwable) {
+        -1
+    }
+
+    /**
+     * Asks an in-flight inference to stop at its next cancellation check.
+     *
+     * Komiho (2026-10-16): 默认**不打断当前可见页的推理**（[protectVisiblePage]）。可见页是用户
+     * 正在看的图，把它打断只会让它降级成未增强原图（issue #8）。要立刻停的场景（E-Ink 模式切
+     * 换、引擎释放）传 `false` 绕过守卫 —— 那边紧接着还会 [destroy]，原生侧自己也会先置
+     * abort 标志再等锁，所以绕过与否都停得下来。
+     *
+     * 守卫放在收方而不是三处调用点：调用点语义完全不变，且将来新增调用点自动受保护。
+     */
+    fun abortProcessing(protectVisiblePage: Boolean = true) {
         if (!libraryLoaded) return
+        val running = currentInferencePage()
+        if (protectVisiblePage && running >= 0 && running == visiblePageIndex) {
+            android.util.Log.d(
+                "Waifu2xAbort",
+                "skip reason=protect-visible running=$running visible=$visiblePageIndex",
+            )
+            return
+        }
+        android.util.Log.d(
+            "Waifu2xAbort",
+            "abort running=$running visible=$visiblePageIndex protect=$protectVisiblePage",
+        )
         try {
             nativeAbortProcessing()
         } catch (_: Exception) {
@@ -582,6 +645,11 @@ object Waifu2x {
      * 再来一遍；它的原始解码图本来就已经在屏幕上，不会留黑帧。
      * 与 [abortProcessing] 同款竞态：下一次 nativeProcess 会清掉这份记录，此时返回 false
      * 只会退回「照旧跑兜底」，方向安全。
+     *
+     * ⚠️ Komiho (2026-10-16)：正因为「下一次推理一起步就把它清成 -1」，这个查询**不能**用来
+     * 判断「某页曾被抢占」（实测停顿 400ms 后必为 false，导致补算闸门从未放过行）。
+     * 「本页被抢占过」改由解码器当场登记到 `EnhanceTimings`（见 `markInterrupted`），
+     * 补算与降级判定一律读那份应用层登记；这里只保留「这次失败要不要跑 CPU 兜底」的当场判断。
      */
     fun wasAborted(id: Int): Boolean = try {
         nativeWasAborted(id)

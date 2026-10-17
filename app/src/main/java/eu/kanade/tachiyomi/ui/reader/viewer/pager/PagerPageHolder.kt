@@ -16,7 +16,6 @@ import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.EnhanceTimings
-import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import eu.kanade.tachiyomi.widget.ViewPagerAdapter
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -173,8 +172,8 @@ class PagerPageHolder(
      *
      * 闸门（缺一不可）：
      * - 增强开着（mode != 0 或降噪开着）、非动图；
-     * - [Waifu2x.wasAborted] 为真——原生只对**真被 abort 过**的页登记，尺寸门 / HARDWARE / 引擎
-     *   失败等永不误触发；补算成功后该记录被下次推理清除，天然防循环；
+     * - [EnhanceTimings.hasInterrupted] 为真——只有**真被抢占过**的页才有这份登记（尺寸门 /
+     *   HARDWARE / 引擎失败等永久跳过不会登记），且真正动手时消费掉，天然防循环；
      * - 仍是当前页（快速翻页时只为停下的那一页补算，不形成重试风暴）；
      * - 没有已在飞的补算。
      */
@@ -184,8 +183,15 @@ class PagerPageHolder(
         if (appliedAnimated) return
         val preferences = Injekt.get<ReaderPreferences>()
         if (preferences.enhancementMode.get() == 0 && preferences.denoiseLevel.get() == 0) return
-        if (!Waifu2x.wasAborted(page.index)) return
+        // Komiho (2026-10-16): 闸门换成**应用层**的「本页被抢占过」登记（由 MihonSyEnhancer 在
+        // 抢占当场写入、按页保留）。原来查的是原生 `Waifu2x.wasAborted()` —— 那个槽位只有一个，
+        // 下一次推理一起步就被清成 -1，而这里是几百毫秒后才回头看，实测必为 false ⇒ 这条兜底
+        // 从未生效（issue #8 日志里 `Waifu2xReEnhance` 出现 0 次）。
+        // 消费放在**其余闸门都通过之后**：否则一次「不满足条件」的检查就把标记吃掉，
+        // 之后真需要补算时反倒读不到了。
+        if (!EnhanceTimings.hasInterrupted(page.index)) return
         if (!viewer.isCurrentItem(item)) return
+        EnhanceTimings.takeInterrupted(page.index)
         reEnhanceInFlight = true
         // 作废预处理缓存里那份未增强位图 + 放行 already-rendered 守卫：否则回翻再命中还是原图，
         // 状态重发也被守卫挡掉。缓存删除后本 holder 持有的源是唯一引用。
@@ -411,6 +417,15 @@ class PagerPageHolder(
                     currentImageEnhanced = result.enhanced
                     appliedAnimated = result.isAnimated
                     appliedSource = if (result.enhanced) null else result.source
+                    // Komiho (2026-10-16): 预解码路径也要安排补算。这条路径**不走 Coil 回调**，
+                    // `handleDecodeCompleted` 永远不会被调，所以「迟到的复核」以前只对现场解码路径
+                    // 生效 —— 预解码降级图一旦渲染就没人再管，这正是 issue #8 里「翻回还是原图，
+                    // 只有退出重进才恢复」的一半原因。命中可重试的降级图（被抢占、且没进缓存）时
+                    // 也排一次，到时仍复核「是不是当前页」。
+                    if (result.retryable && viewer.isCurrentItem(item)) {
+                        removeCallbacks(pendingReEnhance)
+                        postDelayed(pendingReEnhance, reEnhanceDelayMs)
+                    }
                     // SY: 预解码路径补发增强角标（现场解码路径由 SSIV 的 Coil 回调触发）
                     // Komiho: enhanceElapsedMillis = -1 表示这份预处理**没有做过增强**（尺寸门 /
                     // 已解到位图等），角标要显示 SKIP 而不是 CPU OK。这条路径不走 Coil 解码，

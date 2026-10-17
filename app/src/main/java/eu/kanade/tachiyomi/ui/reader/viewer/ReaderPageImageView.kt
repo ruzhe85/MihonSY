@@ -512,10 +512,15 @@ open class ReaderPageImageView @JvmOverloads constructor(
                             val skipped = EnhanceTimings.takeSkipped(pageIndex)
                             // 计时只取一次——既做角标耗时，也判「真增强过」。
                             val timing = EnhanceTimings.take(pageIndex)
-                            // 被抢占打断（快速翻页 / 预热抢占）的页：无成功计时、无 skip 标记，但原生有
-                            // 打断记录。角标要显示「跳过」，不能冒充引擎 OK + 墙钟假耗时；holder 也据此
-                            // 在停顿后补算一次。
-                            val aborted = !skipped && timing == null && Waifu2x.wasAborted(pageIndex)
+                            // 被抢占打断（快速翻页 / 预热抢占）的页：无成功计时、无 skip 标记，但有
+                            // 打断记录。角标要显示「跳过」，不能冒充引擎 OK + 墙钟假耗时；holder 也
+                            // 据此在停顿后补算一次。
+                            // 2026-10-16: 判据加上应用层登记（[EnhanceTimings.hasInterrupted]，
+                            // 由 MihonSyEnhancer 在抢占当场写入、按页保留）—— 原生那一个单槽会被下一次
+                            // 推理清掉，只靠它会让角标在部分抢占页上误报成引擎 OK。这里**只读不消费**：
+                            // 消费留给 holder 的停顿补算（否则它永远看不到这份标记）。
+                            val aborted = !skipped && timing == null &&
+                                (EnhanceTimings.hasInterrupted(pageIndex) || Waifu2x.wasAborted(pageIndex))
                             currentImageEnhanced = timing != null || skipped
                             onDecodeCompleted?.invoke(currentImageEnhanced, aborted)
                             showEnhancementOutcome(

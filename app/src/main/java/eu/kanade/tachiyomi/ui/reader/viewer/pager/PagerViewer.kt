@@ -79,13 +79,6 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     private val prewarmGeneration = java.util.concurrent.atomic.AtomicInteger(0)
 
     /**
-     * Komiho P1：正在执行预热的页位置（-1 = 空闲）。翻页后若它离当前页太远，
-     * 说明 GPU 正在为一个已经没人要的页面做推理 → 主动 abort（C++ 在 tile 边界生效，很快）。
-     */
-    @Volatile
-    private var runningPrewarmPosition = -1
-
-    /**
      * Adapter of the pager.
      */
     private val adapter = PagerViewerAdapter(this)
@@ -213,6 +206,12 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
 
     override fun destroy() {
         super.destroy()
+        // Komiho (2026-10-16): 退出阅读器 / 切到 webtoon 时清掉「可见页」标记 —— 它是**章内页号**，
+        // 留着会被下一个阅读会话或另一种阅读模式当成同一页：`abortProcessing` 的守卫会因此少打断
+        // 一次、`MihonSyEnhancer` 也可能把一张并不在看的页当成可见页去重试（issue #8 那套逻辑
+        // 依赖这个字段，不能再让它跨会话残留）。
+        Waifu2x.visiblePageIndex = -1
+        lastPreparePage = -1
         scope.cancel()
     }
 
@@ -263,7 +262,10 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         // 传 false，不能把它解读成「可见页已经换了」。
         if (visible) Waifu2x.visiblePageIndex = pageIndex
         if (!visible || previous < 0 || previous == pageIndex) return
-        prewarmLog("preempt page=$previous by-page=$pageIndex")
+        // Komiho (2026-10-16): 把「原生此刻在跑的页号」一起记下来 —— 这条打断会不会误伤可见页，
+        // 看 running 就知道（守卫在 Waifu2x.abortProcessing 内，running == visiblePageIndex 时
+        // 会拒绝打断并打 `Waifu2xAbort ... skip reason=protect-visible`）。
+        prewarmLog("preempt page=$previous by-page=$pageIndex running=${Waifu2x.currentInferencePage()}")
         Waifu2x.abortProcessing()
     }
 
@@ -358,13 +360,39 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     // GPU 上正在为已跑远的目标做的推理主动 abort，避免新目标被旧任务拖住。
     private val readerPrefs: ReaderPreferences by injectLazy()
 
+    /**
+     * Komiho (2026-10-16)：「跑远就打断」判定用的**参考页号**（页 index，-1 = 未知）。
+     *
+     * 与 [Waifu2x.currentInferencePage] 同坐标系（都是页 index；`pos=`/`pager.currentItem` 是
+     * joinedItems 下标，**不能**拿来比）。首选 [Waifu2x.visiblePageIndex]——它由 holder 在真正
+     * 可见时写入；尚未写过（刚进阅读器、holder 还没渲染出可见页）时退回当前 ViewPager 项的
+     * 页号，否则「跑太远」的保护会整体失效。
+     */
+    private fun currentPageIndexForAbortGuard(): Int {
+        val visible = Waifu2x.visiblePageIndex
+        if (visible >= 0) return visible
+        return (adapter.joinedItems.getOrNull(pager.currentItem)?.first as? ReaderPage)?.index ?: -1
+    }
+
     private fun prewarmAdjacentPages(forward: Boolean) {
         val enhancementOn = readerPrefs.enhancementMode.get() != 0
         val generation = prewarmGeneration.incrementAndGet()
 
         if (enhancementOn) {
-            val running = runningPrewarmPosition
-            if (running >= 0 && abs(running - pager.currentItem) > 1) {
+            // Komiho (2026-10-16)：判据不再用「预热槽位」—— 它记的是 **joinedItems 下标**，而且在
+            // 整个 prewarmMutex 临界区里一直保持（中间要等 Coil 线程与原生锁），实测滞后好几页：
+            // 用户连翻 2 页就误判「跑远」⇒ 静默 abort 打断「此刻正在跑的那一次推理」，而那往往正是
+            // **刚变成可见页自己的预解码**（issue #8 主根因：日志里 16 次 preempted 却一条 `preempt`
+            // 都没有，被打断的正是 `from=prewarm#N` 的同页请求）。
+            // 现在问原生「实际在跑哪一页」，只在确实跑远（相差 > 1 页）时才打断；打断本身还有
+            // Waifu2x.abortProcessing 的可见页守卫兜第二道。
+            val running = Waifu2x.currentInferencePage()
+            val reference = currentPageIndexForAbortGuard()
+            if (running >= 0 && reference >= 0 && abs(running - reference) > 1) {
+                android.util.Log.d(
+                    "Waifu2xAbort",
+                    "want reason=prewarm-far running=$running ref=$reference",
+                )
                 Waifu2x.abortProcessing()
             }
         }
@@ -415,26 +443,21 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
                         prewarmLog("abort page=${next.index} reason=cache-filled-while-waiting")
                         return@withLock
                     }
-                    runningPrewarmPosition = position
                     // Komiho P3：把预热也登记进「谁在跑」，这样可见页 holder 开始跑时能把它打断
                     // （否则新可见页会排在一条已无人要的预热推理后面，实测可拖到 +2.5s）。
                     onPrepareStart(pageIndex = next.index, visible = false)
-                    try {
-                        val prepared = PagerPagePreparer.preparePure(
-                            viewer = this@PagerViewer,
-                            page = next,
-                            extraPage = pair.second as? ReaderPage,
-                            viewHeight = pager.height,
-                        )
-                        prewarmLog(
-                            "done page=${next.index} ok=${prepared != null} " +
-                                "enhanceMs=${prepared?.enhanceElapsedMillis} " +
-                                "layoutApplied=${prepared?.layoutApplied}",
-                        )
-                        prepared?.let { preparedCache.put(key, it) }
-                    } finally {
-                        runningPrewarmPosition = -1
-                    }
+                    val prepared = PagerPagePreparer.preparePure(
+                        viewer = this@PagerViewer,
+                        page = next,
+                        extraPage = pair.second as? ReaderPage,
+                        viewHeight = pager.height,
+                    )
+                    prewarmLog(
+                        "done page=${next.index} ok=${prepared != null} " +
+                            "enhanceMs=${prepared?.enhanceElapsedMillis} " +
+                            "layoutApplied=${prepared?.layoutApplied}",
+                    )
+                    prepared?.let { preparedCache.put(key, it) }
                 }
             }
         }

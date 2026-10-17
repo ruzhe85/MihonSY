@@ -374,6 +374,21 @@ object MihonSyEnhancer {
     }
 
     /**
+     * Komiho (2026-10-16): 可见页被抢占后的**追加**重试次数（不含首次尝试）。
+     * 2 次 ≈ 最多多花 1~2s（单次推理实测 0.35~0.6s，QNN/HTP），用户已明确接受这个等待。
+     */
+    private const val VISIBLE_RETRY_LIMIT = 2
+
+    /**
+     * Komiho (2026-10-16): 可见页重试的**总时间窗**（ms）——从第一次尝试算起，超了就保持原图。
+     * 兜住「引擎反复被抢」这种极端情况，绝不为一张图无限等下去。
+     */
+    private const val VISIBLE_RETRY_WINDOW_MS = 6_000L
+
+    /** Komiho (2026-10-16): 重试前的退避（ms）——让被打断的那次推理先真正退出 `g_lock`。 */
+    private const val VISIBLE_RETRY_BACKOFF_MS = 60L
+
+    /**
      * Komiho: 降噪输入像素量护栏。超大图（已超分页/长条漫全高图）跑降噪收益存疑且耗时
      * 随像素量线性增长，直接跳过（解码管线的采样已把常规页压到 1~3MP；
      * 6MP 是长条漫按宽度采样后的常见上限）。
@@ -553,26 +568,71 @@ object MihonSyEnhancer {
             // （Waifu2x 的 `NPU UNAVAILABLE` WARN 带 on-chip arch），当页仍回落 Vulkan 出图。
             // 回落现在是**可见**的：角标读 Waifu2x.lastEngine，QNN 没跑成就会显示 GPU OK。
             Waifu2x.setTileSize(preferences.aiTileSize.get())
-            Waifu2x.process(
-                app,
-                input,
-                id = pageIndex,
-                tag = sourceTag,
-                timing = timing,
-            )?.let { upscaled ->
-                // Komiho (2026-09-30): AI 2x 结果默认直接交 SSIV 缩放显示（2026-09-26 定稿）。
-                // 可选开关 [ReaderPreferences.aiAreaDownscale] 开启后，由解码器按视图尺寸
-                // 走 [areaDownscaleToDisplay] 面积回缩 —— SSIV 对 bitmap 源是整图双线性缩小、
-                // 无低通，AI 2x 的高频网点会拍频出摩尔纹（回缩在解码器做，因为它持有视图尺寸）。
-                return upscaled
-            }
-            // Komiho (2026-10-01): 被抢占打断的页不跑 CPU 兜底 —— 那一整幅重采样要占住
-            // CPU 0.5~1 秒（还会和别的页的增强抢核），而这一页之所以被打断，正是因为可见页
-            // 已经换人；它的原始解码图本来就在屏幕上，AI 结果稍后重算时自然会再来。
-            // 返回 null 等于「保持原始解码图」。
-            if (Waifu2x.wasAborted(pageIndex)) {
-                logcat(LogPriority.DEBUG) { "AI upscale preempted; keeping original decode" }
-                return null
+
+            // Komiho (2026-10-16): 可见页宁可等也不降级。issue #8 的要求原话是「可见页保证 NPU
+            // 超分，不回退 CPU；如果 NPU 来不及，短暂等待或黑屏可以接受；预取页可以跳过或取消」。
+            // 所以「被打断」按两类分别处理：
+            //  - 本页是**当前可见页** → 有界重试（每轮重算可见性：用户翻走就立刻停，不形成重试风暴）；
+            //  - 其它页（预取、已被翻走） → 保持原解码图，既不重试也不跑 CPU 兜底（原逻辑）。
+            // 可见页重试用尽后同样**保持原图、不回退 CPU**（严格按用户选择），角标如实显示跳过。
+            var retry = 0
+            val retryDeadline = SystemClock.uptimeMillis() + VISIBLE_RETRY_WINDOW_MS
+            while (true) {
+                val attemptStart = SystemClock.uptimeMillis()
+                Waifu2x.process(
+                    app,
+                    input,
+                    id = pageIndex,
+                    tag = sourceTag,
+                    timing = timing,
+                )?.let { upscaled ->
+                    // Komiho (2026-09-30): AI 2x 结果默认直接交 SSIV 缩放显示（2026-09-26 定稿）。
+                    // 可选开关 [ReaderPreferences.aiAreaDownscale] 开启后，由解码器按视图尺寸
+                    // 走 [areaDownscaleToDisplay] 面积回缩 —— SSIV 对 bitmap 源是整图双线性缩小、
+                    // 无低通，AI 2x 的高频网点会拍频出摩尔纹（回缩在解码器做，因为它持有视图尺寸）。
+                    return upscaled
+                }
+                val attemptMs = SystemClock.uptimeMillis() - attemptStart
+                if (!Waifu2x.wasAborted(pageIndex)) break
+                // Komiho (2026-10-16): 当场把「本页被抢占过」登记到应用层 —— 原生那个打断记录
+                // （单槽）会被下一次推理清掉，几百毫秒后停顿补算再来查必然为 false（issue #8：
+                // 兜底因此从未生效）。登记后：这份降级结果会被判为「可重试」而不进预处理缓存，
+                // 角标如实显示跳过，停顿时 holder 还能补算一次。
+                EnhanceTimings.markInterrupted(pageIndex)
+                if (pageIndex < 0 || pageIndex != Waifu2x.visiblePageIndex) {
+                    // Komiho (2026-10-01): 被抢占的**非可见页**不跑 CPU 兜底 —— 那一整幅重采样要占住
+                    // CPU 0.5~1 秒（还会和别的页的增强抢核），而这一页之所以被打断，正是因为可见页
+                    // 已经换人；它的原始解码图本来就在屏幕上，AI 结果稍后重算时自然会再来。
+                    // 返回 null 等于「保持原始解码图」。
+                    logcat(LogPriority.DEBUG) { "AI upscale preempted; keeping original decode" }
+                    return null
+                }
+                // 这次尝试产出的图不会被用上 ⇒ 记成重试损失，角标据此剔除（见 Timing.retryLossMs）。
+                timing?.let { it.retryLossMs += attemptMs }
+                if (retry >= VISIBLE_RETRY_LIMIT || SystemClock.uptimeMillis() >= retryDeadline) {
+                    logcat(LogPriority.WARN) {
+                        "AI upscale still preempted on visible page $pageIndex after " +
+                            "${retry + 1} attempt(s); keeping original decode"
+                    }
+                    android.util.Log.d(
+                        "Waifu2xEnsure",
+                        "page=$pageIndex give-up retry=$retry reason=preempted keep=original",
+                    )
+                    return null
+                }
+                retry++
+                android.util.Log.d(
+                    "Waifu2xEnsure",
+                    "page=$pageIndex retry=$retry reason=preempted tag=${sourceTag.ifEmpty { "?" }}",
+                )
+                // 退避一下：被打断的那次推理是在 tile 边界返回的，让它先真正退出 g_lock，
+                // 否则新请求会又一次排在它后面（甚至又被同一条打断盯上）。
+                try {
+                    Thread.sleep(VISIBLE_RETRY_BACKOFF_MS)
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return null
+                }
             }
             logcat(LogPriority.WARN) { "AI upscale produced no result; falling back to Lanczos3" }
         } else {

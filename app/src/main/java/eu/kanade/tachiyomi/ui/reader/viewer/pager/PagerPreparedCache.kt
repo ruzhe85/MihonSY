@@ -70,6 +70,18 @@ class PagerPreparedPage(
      * （见 `PagerPageHolder.maybeReEnhance`），角标也据此显示「跳过」而不是冒充引擎 OK + 假耗时。
      */
     val enhanced: Boolean = false,
+    /**
+     * Komiho (2026-10-16): 这份**未增强**的结果是「被抢占」造成的 ⇒ **可重试**、不该当终态。
+     * 由 `finishLayout` 依 `EnhanceTimings.hasInterrupted`（抢占当场登记、按页保留）判定。
+     *
+     * 这类结果**不写入 [PagerPreparedCache]**（收口在 `put`）：它只是临时产物，回翻/停顿后应当
+     * 重新预解码再跑一次 NPU。否则会复现 issue #8 —— 「翻回被跳过的页还是原图，只有退出漫画
+     * 重进才恢复」（章节重载会 clear 缓存）。
+     *
+     * 与它的边界：永久跳过（尺寸门 / HARDWARE / 输入已回收 / 增强关闭 / 动图 / 双页副作用分支
+     * `layoutApplied=false`）一律 false —— 那些页重算也只会被同一道门挡回来，照旧缓存。
+     */
+    val retryable: Boolean = false,
 )
 
 /**
@@ -99,12 +111,22 @@ class PagerPreparedCache(private val maxSize: Int = 3) {
     }
 
     fun put(key: Pair<ReaderPage, ReaderPage?>, value: PagerPreparedPage) = synchronized(lock) {
-        map[key] = value
-        while (map.size > maxSize) {
-            val it = map.entries.iterator()
-            if (!it.hasNext()) break
-            it.next()
-            it.remove()
+        // Komiho (2026-10-16): 可重试的降级结果（被抢占、没增强）**不入缓存** —— 见
+        // [PagerPreparedPage.retryable]。收口在这个唯一写入口：两个写入者（预热 / holder）
+        // 都不必各自记得判，也不会漏。留一条日志，便于从导出日志核对「降级没沉淀」。
+        if (value.retryable) {
+            android.util.Log.d(
+                "Waifu2xCache",
+                "drop-degraded page=${key.first.index} enhanceMs=${value.enhanceElapsedMillis}",
+            )
+        } else {
+            map[key] = value
+            while (map.size > maxSize) {
+                val it = map.entries.iterator()
+                if (!it.hasNext()) break
+                it.next()
+                it.remove()
+            }
         }
     }
 
@@ -225,6 +247,12 @@ object PagerPagePreparer {
         // 等价于「这幅位图真增强过」。被抢占打断（abort）的页两者皆空：enhanceElapsedMillis 置 -1
         // （角标显示跳过），enhanced=false 供 holder 停顿后补算。
         val enhancedOk = pureEnhanceMs != null
+        // Komiho (2026-10-16): 「可重试的降级」= 有图可出但没增强，且这次没增强是**被抢占**造成的
+        // （`EnhanceTimings.markInterrupted` 由 MihonSyEnhancer 在抢占当场登记、按页保留），
+        // 同时也不是「永久跳过」（尺寸门 / HARDWARE / 输入已回收）。这类结果不写缓存。
+        // 注意这里两个查询都是**只读**：标记的消费留给 holder 的停顿补算与角标，不能被这里吃掉。
+        val retryable = bitmap != null && !enhancedOk &&
+            EnhanceTimings.hasInterrupted(pageIndex) && !EnhanceTimings.hasSkipped(pageIndex)
         return PagerPreparedPage(
             source = itemSource,
             source2 = null,
@@ -240,6 +268,7 @@ object PagerPagePreparer {
             },
             layoutApplied = true,
             enhanced = enhancedOk,
+            retryable = retryable,
         )
     }
 
