@@ -190,7 +190,7 @@ fun initExpensiveComponents(app: Application) {
     // The crash screen is declared with its own process, which would open a second connection pool
     // on the same database file. Its writes then collide with the main process, and SQLite answers
     // with "database is locked" — so this process only carries the crash screen.
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && app.packageName != app.getProcessName()) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && app.packageName != Application.getProcessName()) {
         return
     }
     // SY <--
