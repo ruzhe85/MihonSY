@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
@@ -30,7 +31,13 @@ suspend fun CoroutineWorker.setForegroundSafely() {
     try {
         setForeground(getForegroundInfo())
         delay(0.5.seconds)
-    } catch (e: IllegalStateException) {
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        // Recent Android versions refuse the transition in more ways than one: a background start,
+        // a type the service does not declare, a permission that is missing. None of them says
+        // anything about the work itself, so the worker keeps running without the service instead of
+        // failing before it starts.
         logcat(LogPriority.ERROR, e) { "Not allowed to set foreground job" }
     }
 }

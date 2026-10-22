@@ -105,8 +105,23 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     // SY -->
     private val syncPreferences: SyncPreferences by injectLazy()
 
+    /**
+     * True only in the process the launcher starts.
+     *
+     * The crash screen is declared with its own process, so it runs this whole class again. Sync
+     * and database work must stay out of it: a second process opens its own connection pool on the
+     * same file, and its writes arrive while the main process is restoring, which SQLite answers
+     * with "database is locked".
+     */
+    private val isMainProcess: Boolean by lazy {
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.P || packageName == getProcessName()
+    }
+
     /** Reading data is refreshed at most this often, so switching apps cannot spam the remote. */
     private val lightRefreshThrottleMillis = 60_000L
+
+    /** Both the start and the resume trigger read it, and the start one runs off the main thread. */
+    @Volatile
     private var lastLightRefreshAt = 0L
     // SY <--
 
@@ -196,17 +211,18 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         if (!WorkManager.isInitialized()) {
             WorkManager.initialize(this, Configuration.Builder().build())
         }
+        initializeMigrator()
+
         // SY -->
         // Each moment lists what it does: the reading channels are pulled here, and a full sync runs
         // only when its own switch was ticked — every single time, with nothing holding it back.
+        // It comes after the migrator and off the main thread; see triggerSync.
         val syncTriggerOpt = syncPreferences.getSyncTriggerOptions()
-        if (syncPreferences.isSyncEnabled()) {
-            if (syncTriggerOpt.syncOnAppStart) refreshLightChannels()
-            if (syncTriggerOpt.fullSyncOnAppStart) startFullSync()
-        }
+        triggerSync(
+            lightChannels = syncTriggerOpt.syncOnAppStart,
+            fullSync = syncTriggerOpt.fullSyncOnAppStart,
+        )
         // SY <--
-
-        initializeMigrator()
     }
 
     private fun initializeMigrator() {
@@ -268,19 +284,50 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
     // SY -->
     /**
+     * Runs whichever sync the given moment asked for.
+     *
+     * The triggers query WorkManager synchronously, and at cold start that query would sit on the
+     * main thread that is still about to draw the first frame, so they are handed to a background
+     * dispatcher. A sync is never a reason for the app not to start: whatever it throws is logged
+     * here and goes no further.
+     */
+    private fun triggerSync(lightChannels: Boolean, fullSync: Boolean) {
+        if (!isMainProcess) return
+        if (!lightChannels && !fullSync) return
+        if (!syncPreferences.isSyncEnabled()) return
+
+        ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
+            // Migrations run on their own scope and may still be reshaping the database when the app
+            // starts. A sync that reads it in that window sees a half-migrated library, so it waits.
+            runCatching { Migrator.await() }
+            runCatching {
+                if (lightChannels) refreshLightChannels()
+                if (fullSync) startFullSync()
+            }.onFailure { logcat(LogPriority.ERROR, it) { "Sync trigger failed" } }
+        }
+    }
+
+    /**
      * Pulls the lightweight channels.
      *
-     * History and bookmarks travel in their own files, so an app moment only has to refresh those. A
-     * failure inside a channel is already swallowed there and never blocks the UI.
+     * History and bookmarks travel in their own files, so an app moment only has to refresh those.
+     * Each channel stands alone here: a failed pull — an unreachable remote, a database that is busy
+     * — leaves the other channel and the app untouched.
      */
     private fun refreshLightChannels() {
+        // A full sync carries these channels inside its own payload, so pulling them beside it would
+        // have the two write the same cache files and rows at the same time.
+        if (SyncDataJob.isRunningInProcess) return
+
         val now = System.currentTimeMillis()
         if (now - lastLightRefreshAt < lightRefreshThrottleMillis) return
         lastLightRefreshAt = now
 
-        ProcessLifecycleOwner.get().lifecycleScope.launch {
-            HistorySyncManager(this@App).pullAndApply()
-            BookmarkSyncManager(this@App).pullAndApply()
+        ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
+            runCatching { HistorySyncManager(this@App).pullAndApply() }
+                .onFailure { logcat(LogPriority.ERROR, it) { "History channel pull failed" } }
+            runCatching { BookmarkSyncManager(this@App).pullAndApply() }
+                .onFailure { logcat(LogPriority.ERROR, it) { "Bookmark channel pull failed" } }
         }
     }
 
@@ -301,10 +348,10 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
         // SY -->
         val syncTriggerOpt = syncPreferences.getSyncTriggerOptions()
-        if (syncPreferences.isSyncEnabled()) {
-            if (syncTriggerOpt.syncOnAppResume) refreshLightChannels()
-            if (syncTriggerOpt.fullSyncOnAppResume) startFullSync()
-        }
+        triggerSync(
+            lightChannels = syncTriggerOpt.syncOnAppResume,
+            fullSync = syncTriggerOpt.fullSyncOnAppResume,
+        )
         // SY <--
     }
 

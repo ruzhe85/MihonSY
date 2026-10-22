@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.di
 
 import android.app.Application
+import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
@@ -185,6 +186,15 @@ class AppModule(val app: Application) : InjektModule {
 }
 
 fun initExpensiveComponents(app: Application) {
+    // SY -->
+    // The crash screen is declared with its own process, which would open a second connection pool
+    // on the same database file. Its writes then collide with the main process, and SQLite answers
+    // with "database is locked" — so this process only carries the crash screen.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && app.packageName != app.getProcessName()) {
+        return
+    }
+    // SY <--
+
     // Asynchronously init expensive components for a faster cold start
     ContextCompat.getMainExecutor(app).execute {
         Injekt.get<NetworkHelper>()

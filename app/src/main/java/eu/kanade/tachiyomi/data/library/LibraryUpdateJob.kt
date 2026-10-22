@@ -801,13 +801,12 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
             val syncPreferences: SyncPreferences = Injekt.get()
 
             // Always sync the data before library update if syncing is enabled.
-            if (syncPreferences.isSyncEnabled()) {
-                // Check if SyncDataJob is already running
-                if (SyncDataJob.isRunning(context)) {
-                    // SyncDataJob is already running
-                    return false
-                }
-
+            // A sync that is already in flight cannot be chained behind: starting this chain anyway
+            // would run a second sync beside it, and both would write the same remote. The update
+            // goes out on its own instead, so a sync that happens to be running (opening the library
+            // starts one when it is switched on) does not turn every refresh into "another update is
+            // already running".
+            if (syncPreferences.isSyncEnabled() && !SyncDataJob.isRunning(context)) {
                 // Define the SyncDataJob
                 val syncDataJob = OneTimeWorkRequestBuilder<SyncDataJob>()
                     .addTag(SyncDataJob.TAG_MANUAL)

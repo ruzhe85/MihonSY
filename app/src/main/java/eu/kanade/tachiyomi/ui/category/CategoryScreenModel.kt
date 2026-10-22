@@ -33,22 +33,42 @@ class CategoryScreenModel(
     init {
         screenModelScope.launch {
             getCategories.subscribe()
-                .collectLatest { categories ->
-                    mutableState.update {
-                        CategoryScreenState.Success(
-                            categories = categories
-                                .filterNot(Category::isSystemCategory),
-                        )
-                    }
-                }
+                .collectLatest { categories -> applyCategories(categories) }
         }
+    }
+
+    /**
+     * Puts a fresh list into the screen state, keeping whatever dialog is open.
+     *
+     * Rebuilding the whole state here used to drop the dialog, which closed a rename or delete
+     * prompt the moment anything else changed the list.
+     */
+    private fun applyCategories(categories: List<Category>) {
+        val visible = categories.filterNot(Category::isSystemCategory)
+        mutableState.update { state ->
+            when (state) {
+                CategoryScreenState.Loading -> CategoryScreenState.Success(categories = visible)
+                is CategoryScreenState.Success -> state.copy(categories = visible)
+            }
+        }
+    }
+
+    /**
+     * Reads the list again after a write.
+     *
+     * The screen used to depend on the query flow alone, and a change it did not report left the
+     * new row invisible until the screen was re-entered. A write the user just asked for gets its
+     * answer from the database directly.
+     */
+    private suspend fun reload() {
+        applyCategories(getCategories.await())
     }
 
     fun createCategory(name: String) {
         screenModelScope.launch {
             when (createCategoryWithName.await(name)) {
                 is CreateCategoryWithName.Result.InternalError -> _events.send(CategoryEvent.InternalError)
-                else -> {}
+                else -> reload()
             }
         }
     }
@@ -57,7 +77,7 @@ class CategoryScreenModel(
         screenModelScope.launch {
             when (deleteCategory.await(categoryId = categoryId)) {
                 is DeleteCategory.Result.InternalError -> _events.send(CategoryEvent.InternalError)
-                else -> {}
+                else -> reload()
             }
         }
     }
@@ -66,7 +86,7 @@ class CategoryScreenModel(
         screenModelScope.launch {
             when (reorderCategory.await(category, newIndex)) {
                 is ReorderCategory.Result.InternalError -> _events.send(CategoryEvent.InternalError)
-                else -> {}
+                else -> reload()
             }
         }
     }
@@ -75,7 +95,7 @@ class CategoryScreenModel(
         screenModelScope.launch {
             when (renameCategory.await(category, name)) {
                 is RenameCategory.Result.InternalError -> _events.send(CategoryEvent.InternalError)
-                else -> {}
+                else -> reload()
             }
         }
     }

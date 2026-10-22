@@ -24,13 +24,34 @@ import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.atomics.AtomicBoolean
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
+@OptIn(ExperimentalAtomicApi::class)
 class SyncDataJob(private val context: Context, workerParams: WorkerParameters) :
     CoroutineWorker(context, workerParams) {
 
     private val notifier = SyncNotifier(context)
 
     override suspend fun doWork(): Result {
+        // SY -->
+        // One run at a time in this process. The startup moment, the timer, a manual request and the
+        // sync a library update chains in front of itself travel under different unique work names,
+        // so WorkManager does not stop them from overlapping: two runs would each build a payload,
+        // write the same remote file and queue their own restore at the same time.
+        if (!syncGate.compareAndSet(expectedValue = false, newValue = true)) {
+            logcat(LogPriority.DEBUG) { "Skipping sync: another run is already in flight" }
+            return Result.success()
+        }
+        try {
+            return runSync()
+        } finally {
+            syncGate.store(false)
+        }
+        // SY <--
+    }
+
+    private suspend fun runSync(): Result {
         if (tags.contains(TAG_AUTO)) {
             if (!context.isOnline()) {
                 return Result.retry()
@@ -90,6 +111,9 @@ class SyncDataJob(private val context: Context, workerParams: WorkerParameters) 
         private const val TAG_AUTO = "$TAG_JOB:auto"
         const val TAG_MANUAL = "$TAG_JOB:manual"
 
+        /** Holds while a sync worker runs in this process; the worker itself sets and clears it. */
+        private val syncGate = AtomicBoolean(false)
+
         // SY -->
         /** Marks the periodic run, the only one the sync frequency may hold back. */
         private const val TAG_TIMER = "$TAG_JOB:timer"
@@ -105,8 +129,22 @@ class SyncDataJob(private val context: Context, workerParams: WorkerParameters) 
         private const val WORK_EVENT = "$TAG_JOB:event"
         // SY <--
 
+        // SY -->
+        /**
+         * True while a sync runs in this process. Answers without touching WorkManager, so the UI
+         * thread can ask before committing to a synchronous work query.
+         */
+        val isRunningInProcess: Boolean
+            get() = syncGate.load()
+        // SY <--
+
         fun isRunning(context: Context): Boolean {
-            return context.workManager.isRunning(TAG_JOB)
+            // SY -->
+            if (syncGate.load()) return true
+            // A failed query must not decide anything else: treat it as "not running" instead of
+            // taking the caller down during application startup, when WorkManager may be mid-init.
+            return runCatching { context.workManager.isRunning(TAG_JOB) }.getOrDefault(false)
+            // SY <--
         }
 
         // SY -->

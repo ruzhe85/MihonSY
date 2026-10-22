@@ -1299,7 +1299,10 @@ class LibraryScreenModel(
 
             // Hide the default category because it has a different behavior than the ones from db.
             // SY -->
-            val categories = state.value.libraryData.categories.filter { it.id != 0L }
+            // Read the list from the database instead of the cached library state: the dialog is
+            // reached right after the category screen, where a category may just have been added,
+            // and the cached copy would still be the one built before that write.
+            val categories = getCategories.await().filter { it.id != 0L }
             // SY <--
 
             // Get indexes of the common categories to preselect.
