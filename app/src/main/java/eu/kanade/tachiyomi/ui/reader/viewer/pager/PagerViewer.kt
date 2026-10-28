@@ -457,6 +457,37 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     // GPU 上正在为已跑远的目标做的推理主动 abort，避免新目标被旧任务拖住。
     private val readerPrefs: ReaderPreferences by injectLazy()
 
+    /** 最近一次预热的方向（连点结束后的补预热沿用）。 */
+    private var lastPrewarmForward = true
+
+    /** [onBurstSettled] 的节流时刻（多个 holder 会同时回调）。 */
+    private var lastBurstSettleAt = 0L
+
+    /** 连点期间被推迟的预载，延后多久再试（`EnhanceBurst.EXIT_MS` 之后即可）。 */
+    private val prewarmDeferMs = 300L
+
+    /** 连点结束后的那次预载。 */
+    private val prewarmWhenQuiet = Runnable {
+        if (EnhanceBurst.isBursting) return@Runnable
+        prewarmAdjacentPages(forward = lastPrewarmForward)
+    }
+
+    /**
+     * 连点结束后补一次邻居预热。
+     *
+     * 预热只在**换页**时触发；连点期间它被 [EnhanceBurst] 挡掉之后，如果用户就此停下、
+     * 不再翻页，邻居页会一直冷着 —— 表现就是「停下后要等很久预载才恢复」。
+     * 补算链路只负责当前页，这里把邻居那一份补上（1 秒内只跑一次，多个 holder 同时回调也不会重复）。
+     */
+    fun onBurstSettled() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastBurstSettleAt < 1_000L) return
+        lastBurstSettleAt = now
+        // 直接走 prewarmAdjacentPages：它内部会判断「是否仍在连续阅读」，
+        // 需要时自动延后到静默之后（见 prewarmWhenQuiet）。
+        prewarmAdjacentPages(forward = lastPrewarmForward)
+    }
+
     /**
      * Komiho (2026-10-16)：「跑远就打断」判定用的**参考页号**（页 index，-1 = 未知）。
      *

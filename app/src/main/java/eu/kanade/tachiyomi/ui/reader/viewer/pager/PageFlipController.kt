@@ -1,8 +1,8 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import android.animation.ValueAnimator
-import android.view.ViewPager
 import android.view.animation.AccelerateDecelerateInterpolator
+import androidx.viewpager.widget.ViewPager
 import androidx.core.animation.doOnEnd
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences.ReaderTheme
