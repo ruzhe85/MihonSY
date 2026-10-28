@@ -59,16 +59,64 @@ class PagerConfig(
     // SY -->
     var usePageTransitions = false
 
+    /**
+     * 翻页动画是否生效（等价于用户开着「翻页动画」开关）。
+     *
+     * Komiho 这里还额外关掉了 E-Ink 模式的动画，MihonSY 暂无 E-Ink 主题，故只看开关。
+     */
+    val pageSlideAnimationsEnabled: Boolean
+        get() = usePageTransitions
+
+    /**
+     * 页漫翻页方式（0 = 平移 / 1 = 覆盖 / 2 = 翻书）。
+     *
+     * 只影响翻页动画的绘制，不改任何位图输出，所以不接 `imagePropertyChangedListener`。
+     */
+    var pageTurnStyle = readerPreferences.pageTurnStyle.get().coerceIn(0, 2)
+        private set
+
+    /** 是否走「非平移」的翻页动画（覆盖 / 翻书由叠加层接管拖动）。 */
+    val pageFlipActive: Boolean
+        get() = pageTurnStyle != 0 && pageSlideAnimationsEnabled
+
+    /**
+     * 点击 / 按键翻一页的实际时长（毫秒）。平移与覆盖共用。
+     *
+     * 定为常量 **400ms**（不再可调）：它与「拖动后抬手结算」同一量级，足够稳，
+     * 又不会像 500ms 那样显得拖沓。
+     */
+    val pageFlipDurationMs = TAP_FLIP_DURATION_MS
+
+    /**
+     * 页漫双击缩放。关闭后点击翻页改为「抬手即派发」——
+     * 没有双击判定，也就没有那 ~300ms 的固定延迟（见 `Pager.tapImmediate`）。
+     */
+    var pagedDoubleTapZoom = readerPreferences.pagedDoubleTapZoom.get()
+        private set
+
     var shiftDoublePage = false
 
-    var doublePages =
-        readerPreferences.pageLayout.get() == PageLayout.DOUBLE_PAGES && !readerPreferences.dualPageSplitPaged.get()
+    // 拆分双页**不再关掉双页合并** —— 这是两件独立的事：
+    // 「双页合并」决定一屏几页，「拆分双页」决定一张宽图要不要切成两页。
+    // 以前绑死的结果是：开着拆分就永远进不了双页（横屏也只剩单页，用户看到的就是
+    // 「双页无法合并」）。真正的互斥放在 [dualPageSplitActive]。
+    var doublePages = readerPreferences.pageLayout.get() == PageLayout.DOUBLE_PAGES
         set(value) {
             field = value
             if (!value) {
                 shiftDoublePage = false
             }
         }
+
+    /**
+     * 拆分双页**实际生效**的条件。
+     *
+     * 开着「拆分双页」但当前是双页布局时**不拆** —— 一张宽图在跨页里本来就该整屏铺开
+     * （走 handleWideImage 的中缝逻辑），拆成两半会把左右页配错，也正好是用户看到的
+     * 「横屏开拆分后双页合不起来」。
+     */
+    val dualPageSplitActive: Boolean
+        get() = dualPageSplit && !doublePages
 
     var invertDoublePages = false
 
@@ -80,11 +128,18 @@ class PagerConfig(
     var centerMarginType = CenterMarginType.NONE
 
     /**
-     * Komiho：预载页数（ViewPager 离屏缓冲 = 前后各保留 N 页）。
-     * 见 [ReaderPreferences.pagerOffscreenLimit]；运行时改也会即时生效（见 init 里的 register）。
+     * ViewPager 离屏缓冲 —— **固定 1 页**，不再对外暴露。
+     *
+     * 原因：
+     * - **增强开启时**：引擎是单槽串行的，离屏窗口里的每个 holder 都会各自启动解码+增强，
+     *   窗口越大只是让更多页去抢同一把锁 → 队列变长、顺序不可控，可见页排在后面，
+     *   最后被 `prewarm-far` 打断（表现为 skip）。
+     * - **增强关闭时**：现代机型解码一页只要 50~100ms，调大换来的是内存（每页 6MB 级位图），
+     *   感知不到速度差。
+     *
+     * 老偏好 [ReaderPreferences.pagerOffscreenLimit] 保留但不再消费（老数据不影响）。
      */
-    var offscreenPageLimit = readerPreferences.pagerOffscreenLimit.get()
-        .coerceIn(OffscreenPages.MIN, OffscreenPages.MAX)
+    var offscreenPageLimit = OffscreenPages.DEFAULT
         private set
 
     // SY <--
@@ -185,6 +240,18 @@ class PagerConfig(
         // —— 否则拨一下开关会白白重建 adapter、清 preparedCache，可见页重新解码 + 重跑 AI 增强。
         readerPreferences.pageTransitionsPager
             .register({ usePageTransitions = it })
+        // 翻页方式（平移 / 覆盖 / 翻书）。只影响翻页动画的绘制，
+        // 不改位图输出，所以不接 imagePropertyChangedListener。
+        readerPreferences.pageTurnStyle
+            .register({ style -> pageTurnStyle = style.coerceIn(0, 2) })
+        // 双击缩放开关同时决定点击是否「抬手即派发」（关掉它才有 0 延迟）。
+        readerPreferences.pagedDoubleTapZoom
+            .register({ enabled ->
+                pagedDoubleTapZoom = enabled
+                viewer.pager.tapImmediate = !enabled
+                // 已渲染出来的页也要立刻跟着变，否则「点击没延迟了、双击却还能放大」。
+                viewer.applyDoubleTapZoom(enabled)
+            })
         readerPreferences.readerTheme
             .register(
                 {
@@ -200,13 +267,13 @@ class PagerConfig(
                 {
                     autoDoublePages = it == PageLayout.AUTOMATIC
                     if (!autoDoublePages) {
-                        doublePages = it == PageLayout.DOUBLE_PAGES && dualPageSplit == false
+                        doublePages = it == PageLayout.DOUBLE_PAGES
                     }
                 },
                 {
                     autoDoublePages = it == PageLayout.AUTOMATIC
                     if (!autoDoublePages) {
-                        doublePages = it == PageLayout.DOUBLE_PAGES && dualPageSplit == false
+                        doublePages = it == PageLayout.DOUBLE_PAGES
                     }
                     reloadChapterListener?.invoke(doublePages)
                 },
@@ -216,19 +283,10 @@ class PagerConfig(
             .register({ centerMarginType = it }, { imagePropertyChangedListener?.invoke() })
 
         readerPreferences.invertDoublePages
-            .register({ invertDoublePages = it && dualPageSplit == false }, { imagePropertyChangedListener?.invoke() })
+            .register({ invertDoublePages = it }, { imagePropertyChangedListener?.invoke() })
 
-        // Komiho：预载页数（离屏缓冲）。改设置**即时生效** —— ViewPager 允许动态改，会触发一次
-        // populate：前后各 N 页的 holder 随之重建（多出来的会被创建并各自跑一次预处理）。
-        // 与其它 register 一样，注册时的首个值也会走 onChanged ⇒ 构造期就把 pager 设好。
-        readerPreferences.pagerOffscreenLimit
-            .register(
-                { offscreenPageLimit = it.coerceIn(OffscreenPages.MIN, OffscreenPages.MAX) },
-                {
-                    offscreenPageLimit = it.coerceIn(OffscreenPages.MIN, OffscreenPages.MAX)
-                    viewer.pager.offscreenPageLimit = offscreenPageLimit
-                },
-            )
+        // 预载页数已固定为 1（原因见 [offscreenPageLimit]），因此不再订阅
+        // `pagerOffscreenLimit`；老用户存的值不再生效。
         // SY <--
     }
 
@@ -273,6 +331,10 @@ class PagerConfig(
         // MihonSY: pageTransitionsPager 不改位图输出（见上方 register 处注释），不进指纹。
         append('|').append(readerPreferences.centerMarginType.get())
         append('|').append(readerPreferences.invertDoublePages.get())
+        // 「拆分是否实际生效」取决于**当前**的布局（双页时不拆），而布局在 AUTOMATIC 下会随
+        // 方向/展开变化 —— 不进指纹的话，横竖切换会复用上一方向切好/合并好的位图，
+        // 表现就是「方向对了但页还是错的」。
+        append('|').append(if (dualPageSplitActive) "split" else "merged")
     }
 
     override fun defaultNavigation(): ViewerNavigation {
@@ -325,5 +387,10 @@ class PagerConfig(
             2 -> 0x202125
             else -> Color.WHITE
         }
+    }
+
+    private companion object {
+        /** 点击 / 按键翻页的时长（ms），见 [pageFlipDurationMs]。 */
+        const val TAP_FLIP_DURATION_MS = 400
     }
 }

@@ -6,6 +6,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup.LayoutParams
+import android.widget.FrameLayout
 import androidx.core.view.children
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
@@ -21,7 +22,9 @@ import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
+import eu.kanade.tachiyomi.util.EnhanceBurst
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -58,6 +61,18 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * top of this class.
      */
     val pager = createPager()
+
+    /**
+     * 「覆盖 / 翻书」的会话控制 + 叠加绘制层（见 [PageFlipController]）。
+     * 翻页判定仍归 [pager]，这里只负责钉住当前页与进度换算。
+     */
+    internal val pageFlip = PageFlipController(this)
+
+    /**
+     * pager 的宿主容器。叠加层必须画在 pager **之上**，而 [getView] 只能返回一个
+     * View，所以再包一层 FrameLayout（与 `WebtoonViewer` 的 `frame` 同一个套路）。
+     */
+    private val pagerFrame = FrameLayout(activity)
 
     /**
      * Configuration used by the pager, like allow taps, scale mode on images, page transitions...
@@ -113,15 +128,37 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             }
         }
 
+    /**
+     * Komiho (2026-10-25): 本次换页是不是**手指拖动**造成的。
+     *
+     * 拖动没有「请求」事件，只能在落地时补记一次连点计数；而点击翻页已经在
+     * `moveRight/moveLeft` 记过，落地时不能再记（否则一次操作算两次，慢读也会被判成连点）。
+     */
+    private var scrolledSinceSelection = false
+
     private val pagerListener = object : ViewPager.SimpleOnPageChangeListener() {
         override fun onPageSelected(position: Int) {
             // SY -->
             if (pager.isRestoring) return
             // SY <--
+            // Komiho (2026-10-25): 只有**拖动结算**才在这里计入连点。
+            // 点击 / 音量键 / 翻页键已经在 moveRight/moveLeft 计过一次了；同一次翻页计两次的话，
+            // 「落地」与「下一次点击」只隔 ~100ms，会让**慢速阅读**也被判成连点 —— 表现得就是
+            // 「skip → NPU OK → skip」来回抖。判据必须是「一次用户操作 = 一次计数」。
+            if (scrolledSinceSelection) {
+                scrolledSinceSelection = false
+                EnhanceBurst.onTurn()
+            }
             if (!activity.isScrollingThroughPages) {
                 activity.hideMenu()
             }
             onPageChange(position)
+        }
+
+        override fun onPageScrolled(position: Int, positionOffset: Float, positionOffsetPixels: Int) {
+            // 翻书动画唯一的驱动源。拖动与 setCurrentItem(…, true) 都会走到这里，
+            // 所以速度判定、边界、取消回弹全部沿用 ViewPager，不另写一套。
+            pageFlip.onPageScrolled(position, positionOffset)
         }
 
         override fun onPageScrollStateChanged(state: Int) {
@@ -131,6 +168,17 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             // 封顶（`waifu2x.cpp`），连惯性期也让位只会白白推迟出图。
             // 这套让位逻辑在原生里一直存在，但此前没有任何 Kotlin 调用点 —— 等于死代码。
             Waifu2x.setUiBusy(state == ViewPager.SCROLL_STATE_DRAGGING)
+            // Komiho (2026-10-25): 记下「这次换页来自手指拖动」—— 拖动没有请求事件，
+            // 只能在落地时补记一次连点计数（见 onPageSelected）。停稳即清，避免拖了又回去
+            // 的那一次残留到下一个点击上。
+            if (state == ViewPager.SCROLL_STATE_DRAGGING) {
+                scrolledSinceSelection = true
+            } else if (state == ViewPager.SCROLL_STATE_IDLE) {
+                scrolledSinceSelection = false
+            }
+            // 停稳即收尾（复位透明度/位移/叠加层）。放在这里而不是 onPageSelected，
+            // 因为取消回弹（拖了一点又回去）不会触发 onPageSelected。
+            pageFlip.onScrollStateChanged(state)
         }
     }
 
@@ -138,6 +186,16 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         pager.isVisible = false // Don't layout the pager yet
         pager.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         pager.isFocusable = false
+        // 翻书叠加层挂在 pager 之上。它不消费触摸（不可点击），因此点击/拖动/双指缩放
+        // 全部照旧落到下面的 pager 与页 View。
+        pagerFrame.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+        pagerFrame.addView(pager)
+        pagerFrame.addView(
+            pageFlip.overlay,
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
+        )
+        // 点击翻页动画途中用户触摸 → 立刻落位，把控制权交回手势。
+        pager.onTouchDownListener = { pageFlip.abortTapFlip() }
         // SY: 离屏缓冲 = 1（前后各 1 页）。流畅度由「并发解码密度」决定而非 Mutex：
         // offscreen 越高，ViewPager 同时撑起的页面越多，5000×2400 整页解码+Lanczos 增强
         // 并发打满 CPU/GC 导致掉帧。降回 1 恢复最早顺滑感；独立的 ByteArray 内存流已
@@ -212,6 +270,10 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         // 依赖这个字段，不能再让它跨会话残留）。
         Waifu2x.visiblePageIndex = -1
         lastPreparePage = -1
+        pageFlip.release()
+        // Komiho (2026-10-25): 连点节奏不该跨会话残留（否则刚退出时的翻页速度会带进下一本）。
+        EnhanceBurst.reset()
+        pager.removeCallbacks(prewarmWhenQuiet)
         scope.cancel()
     }
 
@@ -224,7 +286,42 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Returns the view this viewer uses.
      */
     override fun getView(): View {
-        return pager
+        return pagerFrame
+    }
+
+    /**
+     * `joinedItems` 下标 → 当前项。翻书动画据此确认「这一页是 ReaderPage 还是
+     * 章节过渡页」，也只有拿到具体项才能把参与翻页的两页认出来（不能靠 position 浮点）。
+     */
+    fun itemAt(position: Int): Any? = adapter.joinedItems.getOrNull(position)?.first
+
+    /**
+     * 该位置当前是否为「双页合并」的一跨。
+     *
+     * 用于翻页动画的时长补偿：一屏承载两页内容时，相同时长下信息量翻倍、观感更快，
+     * 所以双页那一跨要多给一点时间（见 `PageFlipController.tapFlipDuration`）。
+     */
+    fun isDoubleSpread(position: Int): Boolean =
+        adapter.joinedItems.getOrNull(position)?.second != null
+
+    /**
+     * 上一次翻页是否还没结束（用于连点时忽略新点击）。
+     *
+     * - 平移：`ViewPager` 还在 DRAGGING / SETTLING（[isIdle] 为 false）；
+     * - 覆盖 / 翻书：ViewPager 全程不动、[isIdle] 一直是 true，要看叠加层自己的动画。
+     */
+    private fun isBusyWithFlip(): Boolean = !isIdle || pageFlip.isBusy
+
+    /**
+     * 双击缩放实时生效 —— 遍历当前页 View 逐个切换，不必重新加载图片。
+     *
+     * 页 View 的 `Config` 是加载那一刻的快照，只改设置不会影响已经渲染出来的页；
+     * 而 [Pager.tapImmediate] 是实时的，两者必须一起变。
+     */
+    fun applyDoubleTapZoom(enabled: Boolean) {
+        for (i in 0 until pager.childCount) {
+            (pager.getChildAt(i) as? PagerPageHolder)?.setDoubleTapZoomEnabled(enabled)
+        }
     }
 
     /**
@@ -374,7 +471,55 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         return (adapter.joinedItems.getOrNull(pager.currentItem)?.first as? ReaderPage)?.index ?: -1
     }
 
+    /**
+     * **单飞准备** —— 同一页只算一次。
+     *
+     * 预载与 holder 都会准备同一页：预载正在算 N+1 时用户翻到 N+1，holder 只看自己的
+     * `renderedKey`（没算过）就另起一次，两次抢同一把原生锁，先到的那次被 `prewarm-far`
+     * 打断 —— 白算一遍，而且那一页最终可能落成 skip。
+     *
+     * 现在两个入口都走这里：先查缓存，再查「正在算」；命中就等它的结果，不重复烧推理。
+     */
+    suspend fun prepareShared(page: ReaderPage, extraPage: ReaderPage?, viewHeight: Int): PagerPreparedPage? {
+        val key = preparedCache.key(page, extraPage)
+        preparedCache.get(key)?.let { return it }
+
+        val mine = CompletableDeferred<PagerPreparedPage?>()
+        val existing = preparedCache.beginInFlight(key, mine)
+        if (existing != null) {
+            android.util.Log.d(
+                "Waifu2xPrefetch",
+                "page=${page.index} join in-flight extra=${extraPage?.index ?: -1}",
+            )
+            return existing.await()
+        }
+        try {
+            val result = PagerPagePreparer.preparePure(
+                viewer = this,
+                page = page,
+                extraPage = extraPage,
+                viewHeight = viewHeight,
+            )
+            result?.let { preparedCache.put(key, it) }
+            return result
+        } finally {
+            // 必须无条件结束登记：等待方可能正卡在 await 上，漏一次就会永久挂住。
+            preparedCache.endInFlight(key, preparedCache.get(key))
+        }
+    }
+
     private fun prewarmAdjacentPages(forward: Boolean) {
+        lastPrewarmForward = forward
+        // Komiho (2026-10-25): **只在连点期间**让位，其余情况照常预载。
+        // 预载的意义就是「翻过去时已经算完」，正常阅读（每页停留 1~3 秒）完全来得及；
+        // 但连点时节奏 200~400ms/页，预载追不上，只会占住引擎让可见页排在自己后面，
+        // 最后被 `prewarm-far` 打断、那一页落成 skip。这类场景推迟到连点结束再补。
+        if (EnhanceBurst.isBursting) {
+            pager.removeCallbacks(prewarmWhenQuiet)
+            pager.postDelayed(prewarmWhenQuiet, prewarmDeferMs)
+            prewarmLog("defer pos=${pager.currentItem} reason=bursting")
+            return
+        }
         val enhancementOn = readerPrefs.enhancementMode.get() != 0
         val generation = prewarmGeneration.incrementAndGet()
 
@@ -446,8 +591,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
                     // Komiho P3：把预热也登记进「谁在跑」，这样可见页 holder 开始跑时能把它打断
                     // （否则新可见页会排在一条已无人要的预热推理后面，实测可拖到 +2.5s）。
                     onPrepareStart(pageIndex = next.index, visible = false)
-                    val prepared = PagerPagePreparer.preparePure(
-                        viewer = this@PagerViewer,
+                    val prepared = prepareShared(
                         page = next,
                         extraPage = pair.second as? ReaderPage,
                         viewHeight = pager.height,
@@ -495,6 +639,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Sets the active [chapters] on this pager.
      */
     private fun setChaptersInternal(chapters: ViewerChapters) {
+        // 章节/页列表重建会让 holder 全部重造，进行中的翻书会话必须立刻收尾，
+        // 否则它会攥着一个即将被回收的 View 去改 alpha。
+        pageFlip.end()
         // Remove listener so the change in item doesn't trigger it
         pager.removeOnPageChangeListener(pagerListener)
 
@@ -559,12 +706,23 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Moves to the page at the right.
      */
     protected open fun moveRight() {
+        // 上一页还没翻完就忽略这次点击：连点会连着排好几次翻页，动画被不断重定向，
+        // 页面来不及解码 / 增强，状态会落到 skip 或 CPU 回退。
+        if (isBusyWithFlip()) return
         if (pager.currentItem != adapter.count - 1) {
             val holder = (currentPage as? ReaderPage)?.let(::getPageHolder)
             if (holder != null && config.navigateToPan && holder.canPanRight()) {
                 holder.panRight()
             } else {
-                pager.setCurrentItem(pager.currentItem + 1, config.usePageTransitions)
+                // 真正要换页了 → 喂给连点判定（见 EnhanceBurst）。
+                EnhanceBurst.onTurn()
+                if (config.pageSlideAnimationsEnabled && pager.isHorizontalPager) {
+                    // 点击翻页统一由叠加层播放（平移 / 覆盖同一套时长与缓动）。
+                    // 交回 ViewPager 的话时长由它的 Scroller 决定，而这个 fork 换不掉 Scroller。
+                    pageFlip.startTapFlip(1)
+                } else {
+                    pager.setCurrentItem(pager.currentItem + 1, config.pageSlideAnimationsEnabled)
+                }
             }
         }
     }
@@ -573,12 +731,20 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Moves to the page at the left.
      */
     protected open fun moveLeft() {
+        // 同上 —— 上一页还没翻完就忽略这次点击。
+        if (isBusyWithFlip()) return
         if (pager.currentItem != 0) {
             val holder = (currentPage as? ReaderPage)?.let(::getPageHolder)
             if (holder != null && config.navigateToPan && holder.canPanLeft()) {
                 holder.panLeft()
             } else {
-                pager.setCurrentItem(pager.currentItem - 1, config.usePageTransitions)
+                // 同上 —— 真正要换页了。
+                EnhanceBurst.onTurn()
+                if (config.pageSlideAnimationsEnabled && pager.isHorizontalPager) {
+                    pageFlip.startTapFlip(-1)
+                } else {
+                    pager.setCurrentItem(pager.currentItem - 1, config.pageSlideAnimationsEnabled)
+                }
             }
         }
     }
@@ -618,6 +784,8 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         refreshJob = scope.launch {
             delay(REFRESH_COALESCE_DELAY_MS)
             android.util.Log.d(KOMIHA_REBUILD_TAG, "rebuild adapter (coalesced)")
+            // 重建会换掉所有 holder，先收尾翻书会话（同 setChaptersInternal）。
+            pageFlip.end()
             val currentItem = pager.currentItem
             preparedCache.clear() // SY: 图像配置变更（分割/裁剪/背景等）后旧结果全部失效
             adapter.refresh()
@@ -695,12 +863,16 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
 
     fun onPageSplit(currentPage: ReaderPage, newPage: InsertPage) {
         activity.runOnUiThread {
+            // 插入页会重排 joinedItems 并重建 holder，进行中的翻书会话必须收尾
+            // （否则会话会攥着一个即将失效的 View）。
+            pageFlip.end()
             // Need to insert on UI thread else images will go blank
             adapter.onPageSplit(currentPage, newPage)
         }
     }
 
     private fun cleanupPageSplit() {
+        pageFlip.end()
         adapter.cleanupPageSplit()
     }
 
@@ -714,6 +886,8 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     }
 
     fun splitDoublePages(currentPage: ReaderPage) {
+        // 拆跨页会重排 joinedItems（holder 全部重建），会话先收尾，理由同上。
+        pageFlip.end()
         adapter.splitDoublePages(currentPage)
     }
 

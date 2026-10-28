@@ -15,6 +15,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
+import eu.kanade.tachiyomi.util.EnhanceBurst
 import eu.kanade.tachiyomi.util.EnhanceTimings
 import eu.kanade.tachiyomi.widget.ViewPagerAdapter
 import uy.kohesive.injekt.Injekt
@@ -128,8 +129,24 @@ class PagerPageHolder(
     /** 补算请求在飞标记——防止停顿回调与迟到回调叠加重复发。 */
     private var reEnhanceInFlight = false
 
-    /** 迟到补算延迟（ms）：等预热抢占的 abort 发生、被打断的解码出图后再判一次。 */
-    private val reEnhanceDelayMs = 400L
+    /**
+     * 本 holder 已发起的补算次数。
+     *
+     * GPU / NPU 档没有 CPU 兜底（引擎失败即保持原图并登记「可重试」），所以持续失败时
+     * 「停稳 → 补算 → 再失败」可以无限循环。这里封顶 [maxReEnhanceAttempts]，
+     * 一旦某次真的出图（`enhanced == true`）就清零。
+     */
+    private var reEnhanceAttempts = 0
+    private val maxReEnhanceAttempts = 3
+
+    /**
+     * 迟到补算延迟（ms）：等预热抢占的 abort 发生、被打断的解码出图后再判一次。
+     *
+     * Komiho (2026-10-25)：400 → **150**。连点期间增强被整段跳过（见 [EnhanceBurst]），
+     * 停稳后要尽快把当前页补上；原生那边置 abort 标志到真正退出只隔一两个 tile，
+     * 150ms 足够，再等 400ms 只会让用户多看着原图 0.25s。
+     */
+    private val reEnhanceDelayMs = 150L
 
     private val pendingReEnhance = Runnable { maybeReEnhance("late") }
 
@@ -155,6 +172,7 @@ class PagerPageHolder(
         currentImageEnhanced = enhanced
         reEnhanceInFlight = false
         if (enhanced) {
+            reEnhanceAttempts = 0
             appliedSource = null
             removeCallbacks(pendingReEnhance)
             return
@@ -179,10 +197,23 @@ class PagerPageHolder(
      */
     private fun maybeReEnhance(reason: String) {
         if (currentImageEnhanced || reEnhanceInFlight) return
+        // 没有 CPU 兜底后，引擎持续失败会「补算 → 再失败 → 再补算」循环，这里封顶。
+        if (reEnhanceAttempts >= maxReEnhanceAttempts) return
         val src = appliedSource ?: return
         if (appliedAnimated) return
         val preferences = Injekt.get<ReaderPreferences>()
         if (preferences.enhancementMode.get() == 0 && preferences.denoiseLevel.get() == 0) return
+        // Komiho (2026-10-25): 还在连点 —— 等它停，别在这儿发起必然被打断的推理。
+        // 每轮重排 150ms，连点结束后自然落到下面的正常流程（不消耗补算次数）。
+        if (EnhanceBurst.isBursting) {
+            removeCallbacks(pendingReEnhance)
+            postDelayed(pendingReEnhance, reEnhanceDelayMs)
+            return
+        }
+        // Komiho (2026-10-25): 刚离开连点 —— 顺手补一次邻居预热。
+        // 预热只在换页时触发，连点期间被挡掉后如果用户就此停下、不再翻页，邻居会一直是冷的。
+        // （viewer 内部有 1s 节流，多个 holder 同时回调也不会重复。）
+        viewer.onBurstSettled()
         // Komiho (2026-10-16): 闸门换成**应用层**的「本页被抢占过」登记（由 MihonSyEnhancer 在
         // 抢占当场写入、按页保留）。原来查的是原生 `Waifu2x.wasAborted()` —— 那个槽位只有一个，
         // 下一次推理一起步就被清成 -1，而这里是几百毫秒后才回头看，实测必为 false ⇒ 这条兜底
@@ -193,11 +224,15 @@ class PagerPageHolder(
         if (!viewer.isCurrentItem(item)) return
         EnhanceTimings.takeInterrupted(page.index)
         reEnhanceInFlight = true
+        reEnhanceAttempts++
         // 作废预处理缓存里那份未增强位图 + 放行 already-rendered 守卫：否则回翻再命中还是原图，
         // 状态重发也被守卫挡掉。缓存删除后本 holder 持有的源是唯一引用。
         val key = viewer.preparedCache.key(page, extraPage)
         viewer.preparedCache.remove(key)
         renderedKey = null
+        // Komiho (2026-10-25): 给这次补算开放行窗口 —— 否则它会被连点判定挡在门外
+        // （停稳到真正发起补算之间可能只有 150ms，仍在 burst 窗口内）。
+        EnhanceBurst.openResumeWindow()
         android.util.Log.d(
             "Waifu2xReEnhance",
             "page=${page.index} reason=$reason id=${System.identityHashCode(this)}",
@@ -356,8 +391,8 @@ class PagerPageHolder(
             var prepared = viewer.preparedCache.get(key)
             val prewarmHit = prepared != null
             if (prepared == null) {
-                prepared = PagerPagePreparer.preparePure(
-                    viewer = viewer,
+                // 走 viewer 的单飞入口：预载正在算同一页时就等它的结果，不重复烧推理。
+                prepared = viewer.prepareShared(
                     page = page,
                     extraPage = extraPage,
                     viewHeight = if (height > 0) height else viewer.pager.height,
@@ -417,6 +452,7 @@ class PagerPageHolder(
                     currentImageEnhanced = result.enhanced
                     appliedAnimated = result.isAnimated
                     appliedSource = if (result.enhanced) null else result.source
+                    if (result.enhanced) reEnhanceAttempts = 0
                     // Komiho (2026-10-16): 预解码路径也要安排补算。这条路径**不走 Coil 回调**，
                     // `handleDecodeCompleted` 永远不会被调，所以「迟到的复核」以前只对现场解码路径
                     // 生效 —— 预解码降级图一旦渲染就没人再管，这正是 issue #8 里「翻回还是原图，
@@ -484,6 +520,8 @@ class PagerPageHolder(
         cropBordersAggressive = viewer.config.imageCropBordersAggressive,
         zoomStartPosition = viewer.config.imageZoomType,
         landscapeZoom = viewer.config.landscapeZoom,
+        // 关掉后双击不再放大，点击翻页才能「抬手即启动」（见 Pager.tapImmediate）。
+        doubleTapZoom = viewer.config.pagedDoubleTapZoom,
     )
 
     /**
@@ -509,7 +547,8 @@ class PagerPageHolder(
                 } else {
                     null
                 }.use { source2 ->
-                    val itemSource = if (viewer.config.dualPageSplit) {
+                    // 双页布局下不拆（否则宽图被切成两页，跨页配错）。
+                    val itemSource = if (viewer.config.dualPageSplitActive) {
                         process(item.first, Buffer().readFrom(source))
                     } else {
                         mergePages(Buffer().readFrom(source), source2?.let { Buffer().readFrom(it) })
@@ -546,7 +585,7 @@ class PagerPageHolder(
     private suspend fun applyLegacyLayout(raw: PagerPreparedPage): PagerPreparedPage? {
         return try {
             val itemSource = withIOContext {
-                if (viewer.config.dualPageSplit) {
+                if (viewer.config.dualPageSplitActive) {
                     process(page, raw.source)
                 } else {
                     mergePages(raw.source, raw.source2)
@@ -582,7 +621,8 @@ class PagerPageHolder(
             return rotateDualPage(imageSource)
         }
 
-        if (!viewer.config.dualPageSplit) {
+        // 双页布局下整条拆分管线都不该走（见 PagerConfig.dualPageSplitActive）。
+        if (!viewer.config.dualPageSplitActive) {
             return imageSource
         }
 

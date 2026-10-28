@@ -1537,24 +1537,12 @@ class ReaderActivity : BaseActivity() {
                 }
                 .launchIn(lifecycleScope)
 
-            readerPreferences.dualPageSplitPaged.changes()
-                .drop(1)
-                .onEach {
-                    if (viewModel.state.value.viewer !is PagerViewer) return@onEach
-                    reloadChapters(
-                        !it &&
-                            when (readerPreferences.pageLayout.get()) {
-                                PagerConfig.PageLayout.DOUBLE_PAGES -> true
-                                PagerConfig.PageLayout.AUTOMATIC ->
-                                    resources.configuration.orientation ==
-                                        Configuration.ORIENTATION_LANDSCAPE
-
-                                else -> false
-                            },
-                        true,
-                    )
-                }
-                .launchIn(lifecycleScope)
+            // 这里原来还订阅了 dualPageSplitPaged，切换时按「拆分开 → 强制 doublePages=false /
+            // 拆分关 → 横屏强制 true」重排布局。那是拆分与双页合并还绑死时的补偿逻辑；
+            // 两者解耦后（见 PagerConfig.dualPageSplitActive）它只会帮倒忙：横屏开着双页时
+            // 一打开拆分，就把当次会话强切成单页（宽图随即被拆成两页），退出重进才恢复。
+            // 现在拆分开关只由 PagerConfig 的 register 处理（重建位图管线 + 关闭时清理已拆页），
+            // 布局完全交给「双页合并」自己管。
             // SY <--
         }
 

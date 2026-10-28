@@ -220,7 +220,7 @@ object MihonSyEnhancer {
      *   + `nativeProcess` 内部再拿一次那次的排队），不属于计算耗时；角标显示「实际计算消耗」时
      *   要把它减掉。见 [Waifu2x.Timing.totalWaitMs]。
      * @param sourceTag Komiho 诊断：请求来源标识（`prewarm#12` / `holder#12`），仅用于日志。
-     * @param pageIndex Komiho：本页页号。透传给 [Waifu2x.process] / [Waifu2x.markCpuFallback]，
+     * @param pageIndex Komiho：本页页号。透传给 [Waifu2x.process]，
      *   让角标按页登记引擎（全局槽会被并发页覆盖，见 [Waifu2x.engineFor]）。-1 = 未知。
      */
     fun enhance(
@@ -242,6 +242,18 @@ object MihonSyEnhancer {
         // on software bitmaps, so a HARDWARE input simply skips enhancement.
         if (input.config == Bitmap.Config.HARDWARE) {
             EnhanceTimings.markSkipped(pageIndex)
+            onComplete?.invoke(false, SystemClock.uptimeMillis() - start, 0L)
+            return null
+        }
+
+        // Komiho (2026-10-25): 连点期间整段跳过 —— 包括后面那条 CPU Lanczos 兜底。
+        // 连点时翻页间隔只有 0.2~0.3s，而单页推理 0.5~0.8s：这时发起的请求必然被下一次
+        // 翻页打断（实测 completed 49 / aborted 118），失败后还会再跑一遍 0.6~1s 的 CPU
+        // 兜底去和下一页的推理抢核。跳过只损失一张马上就会被盖掉的图。
+        // 登记 markInterrupted 让停稳后的停顿补算能接上（与「被抢占」同一条兜底链路）。
+        val isVisiblePage = pageIndex >= 0 && pageIndex == Waifu2x.visiblePageIndex
+        if (!EnhanceBurst.allows(isVisiblePage)) {
+            EnhanceTimings.markInterrupted(pageIndex)
             onComplete?.invoke(false, SystemClock.uptimeMillis() - start, 0L)
             return null
         }
@@ -634,20 +646,21 @@ object MihonSyEnhancer {
                     return null
                 }
             }
-            logcat(LogPriority.WARN) { "AI upscale produced no result; falling back to Lanczos3" }
+            logcat(LogPriority.WARN) { "AI upscale produced no result; kept original (engine produced no result)" }
         } else {
-            logcat(LogPriority.WARN) { "AI upscale unavailable for this ABI; falling back to Lanczos3" }
+            logcat(LogPriority.WARN) { "AI upscale unavailable for this ABI; kept original" }
         }
 
-        // Komiho: 落到这里 = GPU/NPU 引擎都没出结果，本页由 CPU 重采样完成。
-        // 角标据此显示 CPU OK（引擎选择失败时 lastEngine 保持上一次的值，所以必须在
-        // 真正走 CPU 路径时清掉，否则会把上一页的 GPU/NPU 结果错误地沿用过来）。
-        // 2026-09-19：只清**本页**的记录 —— 全局清空会让并发中的其他页被误标成 CPU OK。
-        Waifu2x.markCpuFallback(pageIndex)
-        val scale = preferences.lanczosScale.get() / 100f
-        if (scale <= 1f) return null
-        val argb = ensureArgb(input) ?: return null
-        return nativeLanczosProcess(argb, scale).takeUnless { it === argb }
+        // Komiho (2026-10-25): GPU / NPU 模型下**没有 CPU 兜底** —— 没结果就保持原图。
+        // 三条理由：
+        //  1. CPU Lanczos 占 0.6~1s，会和下一页的推理抢核；失败后跑兜底只会把连锁放大；
+        //  2. 返回一张非空位图会被上层当成「已增强」，那一页从此不再补算（就是 CPU OK 卡死）；
+        //  3. 设备能力不足（无 Vulkan / 无 HTP）应当由模型列表按能力隐藏
+        //     （见 [Waifu2x.isModelSupported]），不该用兜底把它掩盖成「看起来在跑」。
+        // 这里登记「可重试」→ 停稳后由 `PagerPageHolder.maybeReEnhance` 补算。
+        // CPU 重采样档（mode 2/3）是用户显式选择的另一条分支，不经过这里。
+        EnhanceTimings.markInterrupted(pageIndex)
+        return null
     }
 
     /**

@@ -392,6 +392,12 @@
     <string name="pref_double_tap_zoom">Double tap to zoom</string>
     <string name="pref_cutout_short">Show content in cutout area</string>
     <string name="pref_page_transitions">Animate page transitions</string>
+    <string name="pref_page_flip">Cover</string>
+    <string name="pref_page_flip_translate">Slide</string>
+    <string name="pref_page_flip_fold">Page turn</string>
+    <string name="pref_page_flip_mode">Page turn style</string>
+    <string name="pref_paged_double_tap_zoom">Double tap to zoom</string>
+    <string name="pref_paged_double_tap_zoom_summary">Turn this off so tap-to-turn starts instantly (no double tap wait)</string>
     <string name="pref_flash_page">Flash on page change</string>
     <string name="pref_flash_page_summ">Reduces ghosting on e-ink displays</string>
     <string name="pref_flash_duration">Flash duration</string>

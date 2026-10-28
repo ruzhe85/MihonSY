@@ -267,6 +267,23 @@ object SettingsReaderScreen : SearchableSettings {
                     preference = readerPreferences.pageTransitionsPager,
                     title = stringResource(MR.strings.pref_page_transitions),
                 ),
+                // 页漫双击缩放。关掉后点击翻页没有双击判定等待，抬手即翻页。
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = readerPreferences.pagedDoubleTapZoom,
+                    title = stringResource(MR.strings.pref_paged_double_tap_zoom),
+                    subtitle = stringResource(MR.strings.pref_paged_double_tap_zoom_summary),
+                ),
+                // 翻页方式（页漫）。从属于上面的总开关。
+                Preference.PreferenceItem.ListPreference(
+                    preference = readerPreferences.pageTurnStyle,
+                    entries = mapOf(
+                        0 to stringResource(MR.strings.pref_page_flip_translate),
+                        1 to stringResource(MR.strings.pref_page_flip),
+                        2 to stringResource(MR.strings.pref_page_flip_fold),
+                    ),
+                    title = stringResource(MR.strings.pref_page_flip_mode),
+                    enabled = readerPreferences.pageTransitionsPager.get(),
+                ),
                 // SY <--
                 Preference.PreferenceItem.SwitchPreference(
                     preference = readerPreferences.landscapeZoom,

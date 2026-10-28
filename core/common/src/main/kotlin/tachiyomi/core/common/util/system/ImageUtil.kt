@@ -30,6 +30,7 @@ import okio.Buffer
 import okio.BufferedSource
 import tachiyomi.decoder.Format
 import tachiyomi.decoder.ImageDecoder
+import java.io.BufferedInputStream
 import java.io.File
 import java.io.InputStream
 import java.security.SecureRandom
@@ -125,21 +126,106 @@ object ImageUtil {
         WEBP("image/webp", "webp"),
     }
 
+    // SY --> Komiho: 封面/缩略图的统一采样解码入口。
+    // 不能只用 BitmapFactory：AVIF 的系统解码走厂商实现，部分机型完全解不出来 ——
+    // inJustDecodeBounds 给 0×0、decode 返回 null，表现为「封面/缩略图不显示，但点开阅读器
+    // 又能正常看图」（阅读器走 fork 的 ImageDecoder，与系统解码无关）。
+    // 这里按格式分派：AVIF/JXL 直接交给 ImageDecoder（与阅读器同一引擎、同一口径），
+    // 其余先走系统解码（更快、支持 EXIF），失败再兜底 ImageDecoder。
+    // [open] 必须可重复打开（本函数最多读两次/三次同一张图）。
+    fun decodeSampled(open: () -> InputStream?, maxPx: Int): Bitmap? {
+        val type = runCatching {
+            open()?.use { findImageType(BufferedInputStream(it)) }
+        }.getOrNull()
+        return when (type) {
+            ImageType.AVIF, ImageType.JXL -> decodeWithImageDecoder(open, maxPx)
+            else -> decodeWithBitmapFactory(open, maxPx) ?: decodeWithImageDecoder(open, maxPx)
+        }
+    }
+
+    // SY --> Komiho: 只读宽高（不解像素）。系统 bounds 在部分机型上对 AVIF 恒给 0×0，
+    // 此时改用 fork 的 ImageDecoder 取容器元数据 —— 仍然不解像素，只多一次流打开与头部解析。
+    // 返回 null = 两条路都读不出尺寸。
+    fun readImageSize(open: () -> InputStream?): Pair<Int, Int>? {
+        val bounds = runCatching {
+            open()?.use { stream ->
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeStream(stream, null, options)
+                options.outWidth to options.outHeight
+            }
+        }.getOrNull()
+        if (bounds != null && bounds.first > 0 && bounds.second > 0) return bounds
+        return runCatching {
+            val decoder = open()?.use { ImageDecoder.newInstance(it) } ?: return@runCatching null
+            try {
+                if (decoder.width > 0 && decoder.height > 0) decoder.width to decoder.height else null
+            } finally {
+                runCatching { decoder.recycle() }
+            }
+        }.getOrNull()
+    }
+
+    /** 系统解码：先 inJustDecodeBounds 探尺寸，再按 inSampleSize 采样解码（省内存）。 */
+    private fun decodeWithBitmapFactory(open: () -> InputStream?, maxPx: Int): Bitmap? = runCatching {
+        open()?.use { first ->
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeStream(first, null, opts)
+            if (opts.outWidth <= 0 || opts.outHeight <= 0) return@use null
+            val sample = max(1, max(opts.outWidth, opts.outHeight) / maxPx)
+            open()?.use { second ->
+                val opts2 = BitmapFactory.Options().apply { inSampleSize = sample }
+                BitmapFactory.decodeStream(second, null, opts2)
+            }
+        }
+    }.getOrNull()
+
+    /** fork 的 ImageDecoder 解码（libavif/libjxl/libheif）：按长边算采样比，解不出返回 null。 */
+    private fun decodeWithImageDecoder(open: () -> InputStream?, maxPx: Int): Bitmap? = runCatching {
+        val decoder = open()?.use { ImageDecoder.newInstance(it) } ?: return@runCatching null
+        try {
+            if (decoder.width <= 0 || decoder.height <= 0) return@runCatching null
+            // 采样比取 2 的幂（与 Coil calculateInSampleSize 同口径），避免把非 2 的幂直塞 native。
+            val longEdge = max(decoder.width, decoder.height)
+            var sample = 1
+            while (longEdge / (sample * 2) >= maxPx) sample *= 2
+            decoder.decode(sampleSize = sample)
+        } finally {
+            runCatching { decoder.recycle() }
+        }
+    }.getOrNull()
+
     /**
      * Check whether the image is wide (which we consider a double-page spread).
      *
      * @return true if the width is greater than the height
      */
     fun isWideImage(imageSource: BufferedSource): Boolean {
-        val options = extractImageOptions(imageSource)
-        return options.outWidth > options.outHeight
+        // Komiho: 尺寸读取带 JNI 兜底（部分机型系统 bounds 对 AVIF 恒给 0×0，会把宽页误判成单页）。
+        val (width, height) = readImageSize { imageSource.peek().inputStream() } ?: return false
+        return width > height
     }
+
+    // SY --> Komiho: 整图解出（保持原始像素，不采样）：系统解码优先，失败再走 fork 的
+    // ImageDecoder。用于双页拆分 / 旋转 / 合并这类「必须按原图几何操作」的场景 ——
+    // 这些地方原先直接用 BitmapFactory，AVIF 在部分机型上解出来是 null，一拆双页就崩页。
+    fun decodeFullBitmap(open: () -> InputStream?): Bitmap? {
+        val fast = runCatching {
+            open()?.use { BitmapFactory.decodeStream(it) }
+        }.getOrNull()
+        return fast ?: decodeWithImageDecoder(open, Int.MAX_VALUE)
+    }
+
+    /** 从 [imageSource] 整图解出（不消耗源，取的是 peek 视图）。 */
+    fun decodeFullBitmap(imageSource: BufferedSource): Bitmap? =
+        decodeFullBitmap { imageSource.peek().inputStream() }
+    // SY <--
 
     /**
      * Extract the 'side' part from [BufferedSource] and return it as [BufferedSource].
      */
     fun splitInHalf(imageSource: BufferedSource, side: Side, sidePadding: Int): BufferedSource {
-        val imageBitmap = BitmapFactory.decodeStream(imageSource.inputStream())
+        // Komiho: 解不出就原样返回（宁可显示整页，也不要抛异常把这一页变成错误页）。
+        val imageBitmap = decodeFullBitmap(imageSource) ?: return imageSource
         val height = imageBitmap.height
         val width = imageBitmap.width
 
@@ -160,7 +246,8 @@ object ImageUtil {
     }
 
     fun rotateImage(imageSource: BufferedSource, degrees: Float): BufferedSource {
-        val imageBitmap = BitmapFactory.decodeStream(imageSource.inputStream())
+        // Komiho: 解不出就原样返回，旋转失败不该变成错误页。
+        val imageBitmap = decodeFullBitmap(imageSource) ?: return imageSource
         val rotated = rotateBitMap(imageBitmap, degrees)
 
         val output = Buffer()
@@ -179,7 +266,8 @@ object ImageUtil {
      * new vertically-aligned image.
      */
     fun splitAndMerge(imageSource: BufferedSource, upperSide: Side): BufferedSource {
-        val imageBitmap = BitmapFactory.decodeStream(imageSource.inputStream())
+        // Komiho: 解不出就原样返回（与 splitInHalf 同口径）。
+        val imageBitmap = decodeFullBitmap(imageSource) ?: return imageSource
         val height = imageBitmap.height
         val width = imageBitmap.width
 
@@ -222,7 +310,8 @@ object ImageUtil {
         viewHeight: Int,
         backgroundContext: Context,
     ): BufferedSource {
-        val imageBitmap = ImageDecoder.newInstance(imageSource.inputStream())?.decode()!!
+        // Komiho: 原来这里是 `?.decode()!!` —— 解不出直接 NPE 崩页；改为原样返回。
+        val imageBitmap = decodeFullBitmap(imageSource) ?: return imageSource
         val height = imageBitmap.height
         val width = imageBitmap.width
 

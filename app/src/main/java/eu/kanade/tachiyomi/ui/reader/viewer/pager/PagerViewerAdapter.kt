@@ -165,7 +165,12 @@ class PagerViewerAdapter(private val viewer: PagerViewer) : ViewPagerAdapter() {
             if (position != -1) {
                 return position
             } else {
-                logcat { "Position for ${view.item} not found" }
+                // 这行原来打的是 "Position for ${view.item} not found"，而 item 的 toString
+                // 会带出整个章节 URL（ChapterTransition.Prev(from=smb://…/Vol_01.zip, to=null)）
+                // —— 排查时极易被读成「找不到这个文件」。实际含义只是：这个 View 对应的列表项
+                // 已不在当前数据集里（换章 / 预载完成触发刷新），于是返回 POSITION_NONE 让
+                // ViewPager 重建它。属于正常流程，与文件是否存在无关，所以这里只打类型。
+                logcat { "Pager item not in current dataset, rebuild view: ${view.item::class.simpleName}" }
             }
         }
         return POSITION_NONE

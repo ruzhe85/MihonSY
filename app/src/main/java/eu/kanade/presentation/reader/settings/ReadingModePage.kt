@@ -112,17 +112,9 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
         }
     }
 
-    // Komiho：预载页数（前后各几页）。档位只写值，含义由行标题承担。
-    val offscreenLimit by screenModel.preferences.pagerOffscreenLimit.collectAsState()
-    SettingsChipRow(MR.strings.pref_pager_offscreen_limit) {
-        (PagerConfig.OffscreenPages.MIN..PagerConfig.OffscreenPages.MAX).forEach { pages ->
-            FilterChip(
-                selected = offscreenLimit == pages,
-                onClick = { screenModel.preferences.pagerOffscreenLimit.set(pages) },
-                label = { Text(pages.toString()) },
-            )
-        }
-    }
+    // 「预载页数」已移除 —— 离屏缓冲固定 1 页。
+    // 增强开启时引擎单槽串行，多留几页只会让它们抢同一把锁（队列变长、可见页被抢占）；
+    // 关闭增强时现代机型解码 50~100ms，调大只多占内存。见 PagerConfig.offscreenPageLimit。
     // SY <--
 
     CheckboxItem(
@@ -173,9 +165,41 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
     }
 
     // SY -->
+    val pageTransitionsPager by screenModel.preferences.pageTransitionsPager.collectAsState()
     CheckboxItem(
         label = stringResource(MR.strings.pref_page_transitions),
         pref = screenModel.preferences.pageTransitionsPager,
+    )
+
+    // 翻页方式是「翻页动画」的直接下文 —— 不另起标题行，chip 紧贴在上面那一项下面。
+    // 点击翻页时长已固定 400ms（见 PagerConfig.TAP_FLIP_DURATION_MS），没有滑条。
+    if (pageTransitionsPager) {
+        val turnStyle by screenModel.preferences.pageTurnStyle.collectAsState()
+        SettingsChipRow {
+            listOf(0, 1, 2).forEach { style ->
+                FilterChip(
+                    selected = turnStyle == style,
+                    onClick = { screenModel.preferences.pageTurnStyle.set(style) },
+                    label = {
+                        Text(
+                            stringResource(
+                                when (style) {
+                                    1 -> MR.strings.pref_page_flip
+                                    2 -> MR.strings.pref_page_flip_fold
+                                    else -> MR.strings.pref_page_flip_translate
+                                },
+                            ),
+                        )
+                    },
+                )
+            }
+        }
+    }
+
+    // 双击缩放。关掉后点击翻页不再等双击判定，抬手即启动。
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_paged_double_tap_zoom),
+        pref = screenModel.preferences.pagedDoubleTapZoom,
     )
 
     CheckboxItem(

@@ -267,7 +267,7 @@ object Waifu2x {
      * drawn per page while [lastEngine] is one global slot.
      *
      * Why the global slot alone was wrong: enhancements run concurrently for neighbouring
-     * pages (background prewarm + the page on screen), and [markCpuFallback] used to clear
+     * pages (background prewarm + the page on screen), and the old CPU-fallback marker used to clear
      * the global value for *any* page that produced no result — including pages whose
      * inference the pager deliberately aborted when the user swiped. The next badge to be
      * drawn then read `NONE` and printed `CPU OK` on a page that had in fact run on the NPU.
@@ -286,24 +286,11 @@ object Waifu2x {
     fun engineFor(pageIndex: Int): EngineKind =
         if (pageIndex >= 0) engineByPage[pageIndex] ?: lastEngine else lastEngine
 
-    /**
-     * Komiho: records that [pageIndex] had to be completed on the **CPU** resampler because
-     * neither the NPU nor the Vulkan engine produced a result.
-     *
-     * Called by [MihonSY]'s enhancer on the CPU fallback path. Without it the badge would
-     * keep showing the previous page's engine — the state is sticky by design (a page that
-     * never reaches [process] must not clear an earlier result), so the transition to CPU
-     * has to be reported explicitly.
-     *
-     * Scoped to [pageIndex] so one page's fallback can no longer mislabel its neighbours;
-     * `pageIndex < 0` (no page number) still clears the global slot only.
-     */
-    fun markCpuFallback(pageIndex: Int = -1) {
-        lastEngine = EngineKind.NONE
-        if (pageIndex >= 0) {
-            engineByPage[pageIndex] = EngineKind.NONE
-        }
-    }
+    // Komiho (2026-10-25): `markCpuFallback` 已删除。
+    // GPU / NPU 档不再有 CPU Lanczos 兜底 —— 引擎没结果就保持原图并登记「可重试」
+    // （见 `MihonSyEnhancer` 与 `EnhanceTimings.markInterrupted`）。角标按
+    // [EngineKind.NONE] 显示 SKIP，不再冒充 CPU 完成。CPU 重采样档（mode 2/3）的角标
+    // 由 `ReaderPageImageView` 直接按档位显示 CPU OK，与本方法无关。
 
     /**
      * Komiho (2026-10-01): 当前可见页的页号（-1 = 未知）。阅读器**准备可见页**时写入 ——

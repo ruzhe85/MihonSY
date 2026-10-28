@@ -1,7 +1,6 @@
 package eu.kanade.tachiyomi.ui.reader
 
 import android.app.Application
-import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.annotation.ColorInt
 import androidx.annotation.IntRange
@@ -1078,12 +1077,10 @@ class ReaderViewModel @JvmOverloads constructor(
      */
     private fun measurePageAspectRatio(page: ReaderPage): Float? {
         return try {
-            val inputStream = page.stream?.invoke() ?: return null
-            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            inputStream.use { BitmapFactory.decodeStream(it, null, options) }
-            val width = options.outWidth
-            val height = options.outHeight
-            if (width <= 0 || height <= 0) null else height.toFloat() / width
+            // Komiho: 尺寸读取统一走 ImageUtil —— 系统 bounds 读不出（AVIF 在部分机型恒 0×0）
+            // 时自动改用 JNI 解析容器头，仍然不解像素。
+            val (width, height) = ImageUtil.readImageSize { page.stream?.invoke() } ?: return null
+            height.toFloat() / width
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e) { "MihonSY auto-webtoon aspect check failed" }
             null

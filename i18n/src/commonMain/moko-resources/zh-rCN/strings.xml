@@ -104,6 +104,12 @@
 \n信任此插件即代表你愿意承担上述风险。</string>
     <string name="pref_fullscreen">全屏</string>
     <string name="pref_page_transitions">翻页动画</string>
+    <string name="pref_page_flip">覆盖</string>
+    <string name="pref_page_flip_translate">平移</string>
+    <string name="pref_page_flip_fold">翻书</string>
+    <string name="pref_page_flip_mode">翻页方式</string>
+    <string name="pref_paged_double_tap_zoom">双击缩放</string>
+    <string name="pref_paged_double_tap_zoom_summary">关闭后点击翻页立刻启动，不再等双击判定</string>
     <string name="pref_double_tap_anim_speed">双击动画速度</string>
     <string name="pref_show_page_number">显示页码</string>
     <string name="pref_crop_borders">裁剪边缘</string>

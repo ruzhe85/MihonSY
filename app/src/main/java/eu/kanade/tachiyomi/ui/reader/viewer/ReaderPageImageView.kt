@@ -38,6 +38,7 @@ import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.EASE_IN_OUT_QUAD
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.EASE_OUT_QUAD
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.SCALE_TYPE_CENTER_INSIDE
+import com.davemorrissey.labs.subscaleview.provider.InputProvider
 import com.github.chrisbanes.photoview.PhotoView
 import eu.kanade.tachiyomi.data.coil.cropBorders
 import eu.kanade.tachiyomi.data.coil.cropBordersAggressive
@@ -53,6 +54,8 @@ import eu.kanade.tachiyomi.util.view.isVisibleOnScreen
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import okio.BufferedSource
 import tachiyomi.core.common.util.system.ImageUtil
+import java.io.ByteArrayInputStream
+import java.io.InputStream
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -92,6 +95,29 @@ open class ReaderPageImageView @JvmOverloads constructor(
      */
     val imageSHeight: Int
         get() = (pageView as? SubsamplingScaleImageView)?.sHeight ?: 0
+
+    // Komiho: 双击缩放的运行期状态。
+    // `Config` 是图片加载那一刻的快照，改设置后不重新加载就不会变 —— 而点击翻页的
+    // `Pager.tapImmediate` 是实时的，两边必须同步，否则会出现「点击没延迟了但双击还能放大」。
+    private var doubleTapZoomEnabled = true
+    private var doubleTapZoomScale = 1f
+
+    /**
+     * 实时切换双击缩放 —— 不必重新加载图片。
+     *
+     * 关掉时把 SSIV 的双击目标设成当前缩放（等于不放大），PhotoView 则由
+     * [doubleTapZoomEnabled] 直接拦下。
+     */
+    fun setDoubleTapZoomEnabled(enabled: Boolean) {
+        doubleTapZoomEnabled = enabled
+        val view = pageView as? SubsamplingScaleImageView ?: return
+        // 视图还没布局时 scale 可能是 0，先跳过 —— 图片加载完 setupZoom 会按 config 再设一次。
+        if (!enabled) {
+            if (view.scale > 0f) view.setDoubleTapZoomScale(view.scale)
+        } else if (doubleTapZoomScale > 0f) {
+            view.setDoubleTapZoomScale(doubleTapZoomScale)
+        }
+    }
 
     /**
      * For automatic background. Will be set as background color when [onImageLoaded] is called.
@@ -322,8 +348,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
             else -> when (Waifu2x.engineFor(pageIndex)) {
                 Waifu2x.EngineKind.QNN_HTP -> "NPU OK"
                 Waifu2x.EngineKind.NCNN_VULKAN -> "GPU OK"
-                // NONE = 引擎没出结果，本页由 CPU 重采样兜底（或首个引擎结果尚未登记）。
-                Waifu2x.EngineKind.NONE -> "CPU OK"
+                // NONE 不再表示「CPU 兜底」—— 那条路径已删除。它现在只表示「本页没有 AI 结果」，
+                // 此时 `success` 必为 false、角标走「跳过」文案，这里的值只是兜底。
+                Waifu2x.EngineKind.NONE -> "SKIP"
             }
         }
     // MihonSY <--
@@ -414,7 +441,11 @@ open class ReaderPageImageView @JvmOverloads constructor(
     private fun SubsamplingScaleImageView.setupZoom(config: Config?) {
         // 5x zoom
         maxScale = scale * MAX_ZOOM_SCALE
-        setDoubleTapZoomScale(scale * 2)
+        // 关闭「双击缩放」时把双击目标设成当前缩放 —— 双击等于不放大。
+        // 配合 `Pager.tapImmediate`：没有双击判定后，点击翻页才能做到抬手即启动。
+        doubleTapZoomEnabled = config?.doubleTapZoom != false
+        doubleTapZoomScale = scale * 2
+        setDoubleTapZoomScale(if (doubleTapZoomEnabled) doubleTapZoomScale else scale)
 
         when (config?.zoomStartPosition) {
             ZoomStartPosition.LEFT -> setScaleAndCenter(scale, PointF(0F, 0F))
@@ -469,7 +500,27 @@ open class ReaderPageImageView @JvmOverloads constructor(
                         isStandardImageStream(data)
                 if (!enhancementOn) {
                     setHardwareConfig(ImageUtil.canUseHardwareBitmap(data))
-                    setImage(ImageSource.inputStream(data.inputStream()))
+                    // Komiho: 这里不能再用 `ImageSource.inputStream(data.inputStream())` ——
+                    // SSIV 的 OpenStreamProvider 明确标注「not reusable」，每次 openStream() 都返回
+                    // 同一个流实例。只要 SSIV 二次打开（View 复用换页 / 尺寸变化重建 / 首帧失败
+                    // 重试），拿到的就是已读空的流 → 它的 Decoder.init 里 newInstance 返回 null →
+                    // 抛 "Image decoder failed to initialize and get image size"。
+                    // 开「拆分双页」时一页被拆成两半、View 复用与重建最频繁，最先暴露。
+                    // 改为「字节物化一次 + 每次 openStream 给一条新流」，彻底消掉这个失效模式。
+                    val bytes = runCatching { data.readByteArray() }.getOrNull()
+                    if (bytes == null || bytes.isEmpty()) {
+                        onImageLoadError(
+                            IllegalStateException("页面数据为空，无法交给查看器解码（page=$pageIndex）"),
+                        )
+                        return@apply
+                    }
+                    setImage(
+                        ImageSource.provider(
+                            object : InputProvider {
+                                override fun openStream(): InputStream = ByteArrayInputStream(bytes)
+                            },
+                        ),
+                    )
                     isVisible = true
                     return@apply
                 }
@@ -580,6 +631,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 setOnDoubleTapListener(
                     object : GestureDetector.SimpleOnGestureListener() {
                         override fun onDoubleTap(e: MotionEvent): Boolean {
+                            // 关闭「双击缩放」后不再放大。
+                            // 读字段而不是 config —— 开关要能即时生效，config 是加载那一刻的快照。
+                            if (!doubleTapZoomEnabled) return false
                             if (scale > 1F) {
                                 setScale(1F, e.x, e.y, true)
                             } else {
@@ -648,6 +702,13 @@ open class ReaderPageImageView @JvmOverloads constructor(
         val cropBordersAggressive: Boolean = false,
         val zoomStartPosition: ZoomStartPosition = ZoomStartPosition.CENTER,
         val landscapeZoom: Boolean = false,
+        /**
+         * 是否允许双击放大。
+         *
+         * 关闭后页漫的点击翻页才能做到「抬手即启动」—— 打开时 `GestureDetector` 必须等
+         * 双击判定超时（约 300ms）才敢确认是单击，那 300ms 就是点击翻页的固定延迟。
+         */
+        val doubleTapZoom: Boolean = true,
     )
 
     enum class ZoomStartPosition {

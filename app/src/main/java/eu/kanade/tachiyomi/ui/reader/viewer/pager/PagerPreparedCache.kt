@@ -19,6 +19,7 @@ import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.isStandardImageStream
 import eu.kanade.tachiyomi.util.EnhanceTimings
+import kotlinx.coroutines.CompletableDeferred
 import logcat.LogPriority
 import okio.Buffer
 import okio.BufferedSource
@@ -95,6 +96,38 @@ class PagerPreparedCache(private val maxSize: Int = 3) {
     private val map = LinkedHashMap<Pair<ReaderPage, ReaderPage?>, PagerPreparedPage>(8, 0.75f, true)
 
     fun key(page: ReaderPage, extraPage: ReaderPage?): Pair<ReaderPage, ReaderPage?> = page to extraPage
+
+    /**
+     * 「这一页正在算」的单飞表。
+     *
+     * 解决的问题：预载正在算 N+1，用户翻到 N+1 时 holder 只看自己的 `renderedKey`（没算过），
+     * 于是**另起一次** prepare —— 两次抢同一把原生锁，先到的那次（预载）被打断，白算一遍，
+     * 而且那一页最终可能落成 skip。
+     *
+     * 现在两个入口都走 `PagerViewer.prepareShared()`：一个算、其他等结果。
+     */
+    private val inFlight = HashMap<Pair<ReaderPage, ReaderPage?>, CompletableDeferred<PagerPreparedPage?>>()
+
+    /**
+     * 登记「我在算这一页」。
+     *
+     * @return 非 null = 别人已在算，调用方应 `await()` 它的结果而不是重算。
+     */
+    fun beginInFlight(
+        key: Pair<ReaderPage, ReaderPage?>,
+        mine: CompletableDeferred<PagerPreparedPage?>,
+    ): CompletableDeferred<PagerPreparedPage?>? = synchronized(lock) {
+        val existing = inFlight[key]
+        if (existing != null) return@synchronized existing
+        inFlight[key] = mine
+        null
+    }
+
+    /** 结束登记并把结果广播给所有等待者。**必须在 finally 里调用**（含取消与异常）。 */
+    fun endInFlight(key: Pair<ReaderPage, ReaderPage?>, result: PagerPreparedPage?) {
+        val pending = synchronized(lock) { inFlight.remove(key) }
+        pending?.complete(result)
+    }
 
     fun get(key: Pair<ReaderPage, ReaderPage?>): PagerPreparedPage? = synchronized(lock) {
         val value = map[key] ?: return null

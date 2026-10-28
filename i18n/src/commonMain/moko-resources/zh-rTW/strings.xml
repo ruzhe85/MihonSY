@@ -154,6 +154,12 @@
     <string name="download_notifier_download_paused">下載已暫停</string>
     <string name="pref_library_columns">每列數目</string>
     <string name="pref_page_transitions">翻頁轉場動畫</string>
+    <string name="pref_page_flip">覆蓋</string>
+    <string name="pref_page_flip_translate">平移</string>
+    <string name="pref_page_flip_fold">翻書</string>
+    <string name="pref_page_flip_mode">翻頁方式</string>
+    <string name="pref_paged_double_tap_zoom">雙擊縮放</string>
+    <string name="pref_paged_double_tap_zoom_summary">關閉後點擊翻頁立刻啟動，不再等雙擊判定</string>
     <string name="pref_crop_borders">邊緣裁剪</string>
     <string name="pref_crop_borders_aggressive">深度裁剪邊緣</string>
     <string name="pref_color_filter_mode">濾鏡融合機制</string>

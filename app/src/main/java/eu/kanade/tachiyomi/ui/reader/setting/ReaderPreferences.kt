@@ -24,6 +24,28 @@ class ReaderPreferences(
     // SY -->
     val pageTransitionsPager: Preference<Boolean> = preferenceStore.getBoolean("pref_enable_transitions_pager_key", true)
 
+    /**
+     * 页漫翻页方式。
+     *
+     * - 0 = 平移（两页并排滑动，最朴素）
+     * - 1 = 覆盖（当前页不动，新页压上来）
+     * - 2 = 翻书（当前页沿折线卷走，露出下一页）
+     *
+     * 见 `PagerConfig.pageTurnStyle` 与 `PageFlipController`。
+     */
+    val pageTurnStyle: Preference<Int> = preferenceStore.getInt("pref_page_turn_style", 0)
+
+    /**
+     * 页漫双击缩放。
+     *
+     * 关闭后点击翻页没有「等双击判定」这一段 —— 抬手即派发点击，动画立刻启动。
+     * 代价是双击不再放大（默认开，保持既有行为）。
+     */
+    val pagedDoubleTapZoom: Preference<Boolean> = preferenceStore.getBoolean(
+        "pref_paged_double_tap_zoom",
+        true,
+    )
+
     val pageTransitionsWebtoon: Preference<Boolean> = preferenceStore.getBoolean("pref_enable_transitions_webtoon_key", true)
 
     // Komiho: 条页点击滚屏的第二套动画（ComicScreen 手感：五次方减速 + 时长按距离算）。
@@ -421,11 +443,11 @@ class ReaderPreferences(
     val pageLayout: Preference<Int> = preferenceStore.getInt("page_layout", PagerConfig.PageLayout.AUTOMATIC)
 
     /**
-     * Komiho：分页阅读的「预载页数」= ViewPager 离屏缓冲（当前页**前后各保留几页**）。
+     * 分页阅读的「预载页数」= ViewPager 离屏缓冲（当前页**前后各保留几页**）。
      *
-     * 默认 [PagerConfig.OffscreenPages.DEFAULT]（1，保守、最省内存）。调大能让连翻 / 跳页更"即出"，
-     * 代价是每档约多 2 页**已解码的增强位图**（双页一跨页增强后 4016×2880 ≈ 46MB），以及每页
-     * 一次**推测性**的 GPU 推理（引擎只有一个、串行）。稳态阅读（每页停留 > 渲染耗时）看不出差别。
+     * ⚠️ 已不再消费：离屏缓冲固定为 [PagerConfig.OffscreenPages.DEFAULT]（1 页）。
+     * 增强开启时引擎单槽串行，调大只会让更多页抢同一把锁；关闭增强时解码足够快。
+     * 定义保留是为了老数据不报错，见 `PagerConfig.offscreenPageLimit`。
      */
     val pagerOffscreenLimit: Preference<Int> =
         preferenceStore.getInt("pref_pager_offscreen_limit", PagerConfig.OffscreenPages.DEFAULT)

@@ -16,6 +16,7 @@ import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.EnhanceTimings
 import eu.kanade.tachiyomi.util.MihonSyEnhancer
+import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import eu.kanade.tachiyomi.util.storage.CbzCrypto
 import eu.kanade.tachiyomi.util.storage.CbzCrypto.getCoverStream
 import mihon.core.common.archive.archiveReader
@@ -247,7 +248,13 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                                 enhanced = downscaled
                             }
                         }
-                        if (enhanceOk) {
+                        // Komiho (2026-10-25): 只有**真出了 AI 结果**才登记计时。
+                        // CPU 兜底（Lanczos）也会返回一张新位图，以前据此登记，于是上层把
+                        // 「CPU 放大」当成「已增强」（timing != null ⇒ currentImageEnhanced
+                        // = true）⇒ 停顿补算永远不触发 —— 用户看到的就是「停在 CPU OK
+                        // 的那一页再也不会重建」。
+                        val aiEngine = Waifu2x.engineFor(options.pageIndex)
+                        if (enhanceOk && aiEngine != Waifu2x.EngineKind.NONE) {
                             EnhanceTimings.put(
                                 options.pageIndex,
                                 (android.os.SystemClock.uptimeMillis() - decodeStart) -
