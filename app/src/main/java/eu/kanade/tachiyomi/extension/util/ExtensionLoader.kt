@@ -22,6 +22,7 @@ import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.injectLazy
 import java.io.File
+import java.io.IOException
 
 /**
  * Class that handles the loading of the extensions. Supports two kinds of extensions:
@@ -92,9 +93,13 @@ internal object ExtensionLoader {
         }
 
         val target = File(getPrivateExtensionDir(context), "${extension.packageName}.$PRIVATE_EXTENSION_EXTENSION")
+        // 先写 .part 再 rename：原来的「先 delete 旧文件再 copy」一旦 copy 失败（空间不足 /
+        // 源不可读），旧扩展已经被删掉，用户会直接失去这个扩展，且原文件也没了。
+        // 现在任何一步失败都只是丢掉 .part，旧扩展保持原样。
+        val staged = File(target.parentFile, "${target.name}.part")
         return try {
-            target.delete()
-            file.copyAndSetReadOnlyTo(target, overwrite = true)
+            file.copyAndSetReadOnlyTo(staged, overwrite = true)
+            if (!staged.renameTo(target)) throw IOException("Unable to replace ${target.name}")
             if (currentExtension != null) {
                 ExtensionInstallReceiver.notifyReplaced(context, extension.packageName)
             } else {
@@ -103,8 +108,9 @@ internal object ExtensionLoader {
             true
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e) { "Failed to copy extension file." }
-            target.delete()
             false
+        } finally {
+            staged.delete()
         }
     }
 

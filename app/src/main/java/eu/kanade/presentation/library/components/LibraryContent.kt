@@ -53,7 +53,15 @@ fun LibraryContent(
             end = contentPadding.calculateEndPadding(LocalLayoutDirection.current),
         ),
     ) {
-        val coercedCurrentPage = remember(categories, currentPage) { currentPage.coerceIn(0, categories.lastIndex) }
+        // 分类为空（用户把所有分类删光）时 lastIndex 是 -1，coerceIn(0, -1) 会抛
+        // IllegalArgumentException —— 表现为进图书馆直接崩。
+        val coercedCurrentPage = remember(categories, currentPage) {
+            if (categories.isEmpty()) {
+                0
+            } else {
+                currentPage.coerceIn(0, categories.lastIndex)
+            }
+        }
         // SY <--
         val pagerState = rememberPagerState(coercedCurrentPage) { categories.size }
 
