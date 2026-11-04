@@ -281,12 +281,12 @@
     <string name="automatic_can_still_switch">在使用自动页面布局时，你仍然可以在阅读时更改布局，而不需要重设这一设置</string>
     <string name="invert_double_pages">反向双页</string>
     <!-- Center margin -->
-    <string name="center_margin">中间空白</string>
+    <string name="center_margin">居中留白</string>
     <string name="center_margin_none">无</string>
-    <string name="center_margin_double_page">添加到双页视图</string>
-    <string name="center_margin_wide_page">添加到宽屏视图</string>
-    <string name="center_margin_double_and_wide_page">两个都添加</string>
-    <string name="pref_center_margin">中间空白类型</string>
+    <string name="center_margin_double_page">双页居中留白</string>
+    <string name="center_margin_wide_page">宽页居中留白</string>
+    <string name="center_margin_double_and_wide_page">双页 + 宽页</string>
+    <string name="pref_center_margin">居中留白</string>
     <string name="pref_center_margin_summary">插入空白以适应可折叠设备的屏幕盲区。</string>
     <!-- Archive reader mode -->
     <string name="archive_mode_load_from_file">直接从文件加载</string>

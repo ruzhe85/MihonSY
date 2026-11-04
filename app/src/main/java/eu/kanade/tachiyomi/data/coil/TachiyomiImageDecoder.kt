@@ -139,6 +139,11 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
 
         check(bitmap != null) { "Failed to decode image" }
 
+        // Komiho (2026-11-04): 记录源图是否**真**带透明像素。必须在这里判断 ——
+        // 增强（AI / Lanczos）按 RGB 处理，会把 alpha 写死成 255，透明区随即变成不透明黑，
+        // 之后再也分辨不出来了。
+        val srcTransparent = ImageUtil.hasTransparentPixels(bitmap)
+
         // Komiho (2026-09-26 定稿): AI 跳过门 —— 解码后、预缩前算 fit 比例 r。
         // 普通页 r = min(视图宽/图宽, 视图高/图高)：r ≤ 1 = 屏幕只会缩小显示，源图高频细节
         // 本来就够，AI 2x 再缩回视图是白做往返（真机实测 2890×4096 源图净画质不升反降），
@@ -271,6 +276,18 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                 // Fall back to the original on ANY failure (incl. OutOfMemoryError,
                 // which Exception does not catch — an OOM here used to crash the
                 // whole reader on large downloaded pages).
+            }
+        }
+
+        // Komiho (2026-11-04): 透明图统一压成纯白底。
+        //
+        // 放在增强之后、E-Ink / 硬件位图之前：增强已经破坏 alpha（透明变黑），而 E-Ink 灰阶化
+        // 与 hardware 转换都要求软件位图。
+        if (srcTransparent) {
+            val flattened = ImageUtil.flattenOnWhite(bitmap)
+            if (flattened != null && flattened !== bitmap) {
+                bitmap.recycle()
+                bitmap = flattened
             }
         }
 

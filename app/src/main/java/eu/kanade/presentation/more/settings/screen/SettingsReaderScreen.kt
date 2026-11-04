@@ -87,9 +87,11 @@ object SettingsReaderScreen : SearchableSettings {
     @Composable
     private fun getDisplayGroup(readerPreferences: ReaderPreferences): Preference.PreferenceGroup {
         val fullscreen by readerPreferences.fullscreen.collectAsState()
+        // Komiho: 「页码位置」只在显示页码时出现。
+        val showPageNumber by readerPreferences.showPageNumber.collectAsState()
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_category_display),
-            preferenceItems = listOf(
+            preferenceItems = listOfNotNull<Preference.PreferenceItem<out Any, out Any>>(
                 Preference.PreferenceItem.ListPreference(
                     preference = readerPreferences.defaultOrientationType,
                     entries = ReaderOrientation.entries.drop(1)
@@ -124,6 +126,17 @@ object SettingsReaderScreen : SearchableSettings {
                     preference = readerPreferences.showPageNumber,
                     title = stringResource(MR.strings.pref_show_page_number),
                 ),
+                // Komiho: 页码位置（左下 / 居中 / 右下）—— 仅在开启「显示页码」时出现，默认居中。
+                if (showPageNumber) {
+                    Preference.PreferenceItem.ListPreference(
+                        preference = readerPreferences.pageNumberPosition,
+                        entries = ReaderPreferences.PageNumberPosition.entries
+                            .associateWith { stringResource(it.titleRes) },
+                        title = stringResource(MR.strings.pref_page_number_position),
+                    )
+                } else {
+                    null
+                },
             ),
         )
     }
@@ -658,8 +671,11 @@ object SettingsReaderScreen : SearchableSettings {
                     preference = readerPreferences.centerMarginType,
                     title = stringResource(SYMR.strings.center_margin),
                     subtitle = stringResource(SYMR.strings.pref_center_margin_summary),
+                    // Komiho: 这里的 key 必须就是偏好存的 0..3 —— 原来写的是 index + 1，
+                    // 与阅读器内 chip（0..3）差一档：选「无」会存成「双页留白」，
+                    // 选「两个都添加」会存成 4（谁都不匹配），选项看着「没反应」。
                     entries = ReaderPreferences.CenterMarginTypes
-                        .mapIndexed { index, it -> index + 1 to stringResource(it) }
+                        .mapIndexed { index, it -> index to stringResource(it) }
                         .toMap(),
                 ),
                 Preference.PreferenceItem.ListPreference(

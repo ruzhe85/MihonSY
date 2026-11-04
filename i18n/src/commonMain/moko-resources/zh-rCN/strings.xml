@@ -112,6 +112,10 @@
     <string name="pref_paged_double_tap_zoom_summary">关闭后点击翻页立刻启动，不再等双击判定</string>
     <string name="pref_double_tap_anim_speed">双击动画速度</string>
     <string name="pref_show_page_number">显示页码</string>
+    <string name="pref_page_number_position">页码位置</string>
+    <string name="page_number_position_left">左下</string>
+    <string name="page_number_position_center">居中</string>
+    <string name="page_number_position_right">右下</string>
     <string name="pref_crop_borders">裁剪边缘</string>
     <string name="pref_crop_borders_aggressive">深度裁剪边缘</string>
     <string name="pref_custom_brightness">自定义亮度</string>

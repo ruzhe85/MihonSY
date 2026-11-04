@@ -146,13 +146,14 @@ object ImageUtil {
     // SY --> Komiho: 只读宽高（不解像素）。系统 bounds 在部分机型上对 AVIF 恒给 0×0，
     // 此时改用 fork 的 ImageDecoder 取容器元数据 —— 仍然不解像素，只多一次流打开与头部解析。
     // 返回 null = 两条路都读不出尺寸。
+    //
+    // ⚠️ 绝对不能把 Java 流交给 BitmapFactory.decodeStream（原因见下方常量区的说明）。
     fun readImageSize(open: () -> InputStream?): Pair<Int, Int>? {
         val bounds = runCatching {
-            open()?.use { stream ->
-                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeStream(stream, null, options)
-                options.outWidth to options.outHeight
-            }
+            val head = readHead(open, BOUNDS_HEAD_BYTES) ?: return@runCatching null
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(head, 0, head.size, options)
+            options.outWidth to options.outHeight
         }.getOrNull()
         if (bounds != null && bounds.first > 0 && bounds.second > 0) return bounds
         return runCatching {
@@ -165,18 +166,71 @@ object ImageUtil {
         }.getOrNull()
     }
 
-    /** 系统解码：先 inJustDecodeBounds 探尺寸，再按 inSampleSize 采样解码（省内存）。 */
-    private fun decodeWithBitmapFactory(open: () -> InputStream?, maxPx: Int): Bitmap? = runCatching {
-        open()?.use { first ->
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeStream(first, null, opts)
-            if (opts.outWidth <= 0 || opts.outHeight <= 0) return@use null
-            val sample = max(1, max(opts.outWidth, opts.outHeight) / maxPx)
-            open()?.use { second ->
-                val opts2 = BitmapFactory.Options().apply { inSampleSize = sample }
-                BitmapFactory.decodeStream(second, null, opts2)
+    /*
+     * Komiho (2026-11-03): 为什么这里宁可多读一次字节，也不直接 BitmapFactory.decodeStream(stream)。
+     *
+     * 现场：OPPO PKJ110 / Android 17 上打开一本 EPUB，进程必崩 SIGSEGV（开不开图像增强都一样）。
+     * 系统给的 native 栈：
+     * ```
+     * __memmove_aarch64_nt
+     * art::JNI<false>::GetByteArrayRegion
+     * JavaInputStreamAdaptor::read          (libhwui.so)
+     * FrontBufferedStream::peek / SkCodec::MakeFromStream
+     * BitmapFactory.nativeDecodeStream
+     * android.graphics.BitmapFactory.decodeStream
+     * ImageUtil.readImageSize
+     * ReaderViewModel.measurePageAspectRatio   ← 自动条漫检测
+     * ```
+     * 崩点在框架「Java 流 → native」的适配层（GetByteArrayRegion 的 memmove 越界），与图片数据
+     * 本身无关；decodeByteArray 直接吃字节数组，完全不走那条适配层。
+     *
+     * 代价：只读尺寸时多读一次头部（BOUNDS_HEAD_BYTES，远小于一页图），换掉一处必崩的系统调用。
+     */
+
+    /** 探测尺寸只读这么多字节：JPEG 的 SOF、PNG 的 IHDR、WebP 的 VP8X 都在这个范围内。 */
+    private const val BOUNDS_HEAD_BYTES = 1024 * 1024
+
+    /** 整图解码的字节上限：超过按「解不了」处理，绝不为了解一张图把内存吃穿。 */
+    private const val MAX_DECODE_BYTES = 64 * 1024 * 1024
+
+    /** 读流的前 [maxBytes] 字节（读到 EOF 就提前停）。 */
+    private fun readHead(open: () -> InputStream?, maxBytes: Int): ByteArray? = runCatching {
+        open()?.use { stream ->
+            val buf = ByteArray(maxBytes)
+            var n = 0
+            while (n < maxBytes) {
+                val read = stream.read(buf, n, maxBytes - n)
+                if (read <= 0) break
+                n += read
             }
+            if (n == 0) null else buf.copyOf(n)
         }
+    }.getOrNull()
+
+    /** 读入整段图片字节（超过 [MAX_DECODE_BYTES] 直接放弃，返回 null）。 */
+    private fun readAllBytes(open: () -> InputStream?): ByteArray? = runCatching {
+        open()?.use { stream ->
+            val out = java.io.ByteArrayOutputStream()
+            val chunk = ByteArray(64 * 1024)
+            while (true) {
+                val read = stream.read(chunk)
+                if (read <= 0) break
+                if (out.size() + read > MAX_DECODE_BYTES) return@use null
+                out.write(chunk, 0, read)
+            }
+            out.toByteArray()
+        }
+    }.getOrNull()?.takeIf { it.isNotEmpty() }
+
+    /** 系统解码：先探尺寸，再按 inSampleSize 采样解码（省内存）。走字节路径，不用 decodeStream。 */
+    private fun decodeWithBitmapFactory(open: () -> InputStream?, maxPx: Int): Bitmap? = runCatching {
+        val bytes = readAllBytes(open) ?: return@runCatching null
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        if (opts.outWidth <= 0 || opts.outHeight <= 0) return@runCatching null
+        val sample = max(1, max(opts.outWidth, opts.outHeight) / maxPx)
+        val opts2 = BitmapFactory.Options().apply { inSampleSize = sample }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts2)
     }.getOrNull()
 
     /** fork 的 ImageDecoder 解码（libavif/libjxl/libheif）：按长边算采样比，解不出返回 null。 */
@@ -209,8 +263,10 @@ object ImageUtil {
     // ImageDecoder。用于双页拆分 / 旋转 / 合并这类「必须按原图几何操作」的场景 ——
     // 这些地方原先直接用 BitmapFactory，AVIF 在部分机型上解出来是 null，一拆双页就崩页。
     fun decodeFullBitmap(open: () -> InputStream?): Bitmap? {
+        // 同样走字节路径，不用 decodeStream（原因见常量区说明）。
         val fast = runCatching {
-            open()?.use { BitmapFactory.decodeStream(it) }
+            val bytes = readAllBytes(open) ?: return@runCatching null
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         }.getOrNull()
         return fast ?: decodeWithImageDecoder(open, Int.MAX_VALUE)
     }
@@ -237,6 +293,9 @@ object ImageUtil {
             Side.LEFT -> Rect(0, 0, width / 2, height)
         }
         half.applyCanvas {
+            // Komiho (2026-11-04): 先铺纯白。输出是 JPEG（无 alpha），不铺的话
+            // 带透明底的图（调色板 PNG 的 tRNS、普通 RGBA）整片会变成不透明黑。
+            drawColor(Color.WHITE)
             drawBitmap(imageBitmap, part, singlePage, null)
         }
         val output = Buffer()
@@ -250,8 +309,10 @@ object ImageUtil {
         val imageBitmap = decodeFullBitmap(imageSource) ?: return imageSource
         val rotated = rotateBitMap(imageBitmap, degrees)
 
+        // 输出 JPEG，同样先压白底（透明区否则变黑）。
+        val flattened = flattenOnWhite(rotated) ?: rotated
         val output = Buffer()
-        rotated.compress(Bitmap.CompressFormat.JPEG, 100, output.outputStream())
+        flattened.compress(Bitmap.CompressFormat.JPEG, 100, output.outputStream())
 
         return output
     }
@@ -273,6 +334,8 @@ object ImageUtil {
 
         val result = createBitmap(width / 2, height * 2)
         result.applyCanvas {
+            // Komiho (2026-11-04): 输出 JPEG，先铺纯白，避免透明区变黑。
+            drawColor(Color.WHITE)
             // right -> upper
             val rightPart = when (upperSide) {
                 Side.RIGHT -> Rect(width - width / 2, 0, width, height)
@@ -304,11 +367,15 @@ object ImageUtil {
      * Split the image into left and right parts, then merge them into a
      * new image with added center padding scaled relative to the height of the display view
      * to compensate for scaling.
+     *
+     * [canvasColor] 是阅读页的底色（`PagerConfig.pageCanvasColor`）：画布先铺这个颜色再画两半，
+     * 于是透明像素与中间留白都落成页面底色。输出是 JPEG（无 alpha 通道），不铺的话 PNG 的透明区
+     * 会被压成黑色。
      */
     fun addHorizontalCenterMargin(
         imageSource: BufferedSource,
         viewHeight: Int,
-        backgroundContext: Context,
+        canvasColor: Int = Color.WHITE,
     ): BufferedSource {
         // Komiho: 原来这里是 `?.decode()!!` —— 解不出直接 NPE 崩页；改为原样返回。
         val imageBitmap = decodeFullBitmap(imageSource) ?: return imageSource
@@ -322,14 +389,16 @@ object ImageUtil {
         val leftTargetPart = Rect(0, 0, width / 2, height)
         val rightTargetPart = Rect(width / 2 + centerPadding, 0, width + centerPadding, height)
 
-        val bgColor = chooseBackground(backgroundContext, imageSource)
-        bgColor.setBounds(width / 2, 0, width / 2 + centerPadding, height)
         val result = createBitmap(width + centerPadding, height)
 
         result.applyCanvas {
+            // Komiho: 先铺页面底色，再画两半 —— 透明像素自然合成为底色，不再变黑。
+            // 中间那条留白也由这次填充决定：它和页面四周同色，接缝看不出来。
+            // （旧实现用 chooseBackground 采样边角上色，但此时流已被 decodeFullBitmap 读空，
+            //   实际永远拿到白色 —— 深色页上反而会有一条突兀的白缝。）
+            drawColor(canvasColor)
             drawBitmap(imageBitmap, leftSourcePart, leftTargetPart, null)
             drawBitmap(imageBitmap, rightSourcePart, rightTargetPart, null)
-            bgColor.draw(this)
         }
 
         val output = Buffer()
@@ -474,6 +543,98 @@ object ImageUtil {
     }
 
     /**
+     * Komiho (2026-11-04): 页面背景的统一入口。
+     *
+     * - 开「自动背景」（阅读主题=自动）：按图片内容挑白/黑，与原行为一致；
+     * - 关自动背景：只要图片格式**可能带透明通道**（PNG/WebP/GIF/AVIF/HEIF…，JPEG 不可能），
+     *   就给一个纯白底。这样深色主题下「黑字 + 透明底」的素材图（logo、标题卡）也不会整页看不见。
+     *   不透明像素会被图片自己盖住，所以对普通 PNG 页没有可见副作用。
+     */
+    fun pageBackground(
+        context: Context,
+        imageSource: BufferedSource,
+        automaticBackground: Boolean,
+    ): Drawable? = if (automaticBackground) {
+        chooseBackground(context, imageSource)
+    } else {
+        transparentPageBackground(imageSource)
+    }
+
+    /** 图片格式是否可能带透明通道；是则返回纯白底，JPEG 返回 null（保持主题底色）。 */
+    private fun transparentPageBackground(imageSource: BufferedSource): Drawable? {
+        val type = runCatching { findImageType { imageSource.peek().inputStream() } }.getOrNull()
+            ?: return null
+        return if (type == ImageType.JPEG) null else Color.WHITE.toDrawable()
+    }
+
+    /**
+     * Komiho (2026-11-04): 位图里是否存在**真正透明**的像素。
+     *
+     * 只看 `hasAlpha()` 没用 —— ARGB_8888 恒为 true。这里按网格采样（外加四角），
+     * 命中一次 `alpha < 255` 就返回。用于「解码后、增强前」判断这张图要不要压白底。
+     */
+    fun hasTransparentPixels(bitmap: Bitmap): Boolean {
+        if (bitmap.isRecycled || bitmap.config != Bitmap.Config.ARGB_8888) return false
+        val w = bitmap.width
+        val h = bitmap.height
+        if (w <= 0 || h <= 0) return false
+        // 四角最容易是透明的（logo/标题卡），先看
+        val corners = intArrayOf(0, 0, w - 1, 0, 0, h - 1, w - 1, h - 1)
+        for (i in corners.indices step 2) {
+            if (Color.alpha(bitmap[corners[i], corners[i + 1]]) < 255) return true
+        }
+        val stepX = (w / 24).coerceAtLeast(1)
+        val stepY = (h / 24).coerceAtLeast(1)
+        var y = 0
+        while (y < h) {
+            var x = 0
+            while (x < w) {
+                if (Color.alpha(bitmap[x, y]) < 255) return true
+                x += stepX
+            }
+            y += stepY
+        }
+        return false
+    }
+
+    /**
+     * Komiho (2026-11-04): 把带透明通道的位图压到**纯白**底上，返回新位图（不回收入参）。
+     *
+     * 透明图（logo、标题卡、透明插画）在增强 / 编码 / 缩放链路里很容易丢掉 alpha
+     * （RGB 内核会把 alpha 写成 255，透明区随即变成不透明黑），提前压白就一劳永逸。
+     */
+    fun flattenOnWhite(bitmap: Bitmap): Bitmap? {
+        if (bitmap.isRecycled) return null
+        return runCatching {
+            val out = createBitmap(bitmap.width, bitmap.height)
+            out.applyCanvas {
+                drawColor(Color.WHITE)
+                drawBitmap(bitmap, 0f, 0f, null)
+            }
+            out
+        }.getOrNull()
+    }
+
+    /** 四角采样里是否含透明像素（带透明底的素材图，不能拿角上的颜色当页面背景）。 */
+    private fun hasTransparentCorner(image: Bitmap): Boolean {
+        if (!image.hasAlpha()) return false
+        val xs = intArrayOf(
+            (image.width * 0.03f).toInt().coerceIn(0, image.width - 1),
+            (image.width * 0.97f).toInt().coerceIn(0, image.width - 1),
+        )
+        val ys = intArrayOf(
+            (image.height * 0.02f).toInt().coerceIn(0, image.height - 1),
+            (image.height * 0.98f).toInt().coerceIn(0, image.height - 1),
+        )
+        for (x in xs) {
+            for (y in ys) {
+                if (Color.alpha(image[x, y]) == 0) return true
+            }
+        }
+        return false
+    }
+
+    /**
      * Algorithm for determining what background to accompany a comic/manga page
      */
     fun chooseBackground(context: Context, imageSource: BufferedSource): Drawable {
@@ -484,6 +645,17 @@ object ImageUtil {
         val whiteColor = Color.WHITE
         if (image == null) return whiteColor.toDrawable()
         if (image.width < 50 || image.height < 50) {
+            return whiteColor.toDrawable()
+        }
+
+        // Komiho (2026-11-04): 带透明底的图不能按「四角颜色」判页面背景。
+        //
+        // 透明像素读出来是 (0,0,0,0)，isDark() 会判成纯黑 —— 于是整页背景被设成黑色。
+        // 放大时透明区跟着铺满屏幕，看起来「整屏全黑」，连点击有没有生效都看不出来
+        // （典型就是带透明底的 logo、标题卡）。
+        // 带透明底的图按「常规阅读器 / PDF 查看器」的做法：一律铺纯白底，
+        // 不去猜它该配黑还是配白（透明的角会被 isDark() 判成黑，之前整页发黑就是这条）。
+        if (hasTransparentCorner(image)) {
             return whiteColor.toDrawable()
         }
 
@@ -705,7 +877,12 @@ object ImageUtil {
      */
     private fun extractImageOptions(imageSource: BufferedSource): BitmapFactory.Options {
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeStream(imageSource.peek().inputStream(), null, options)
+        // 不把 Java 流塞进 BitmapFactory（原因见常量区说明），尺寸读取统一走 readImageSize。
+        val size = readImageSize { imageSource.peek().inputStream() }
+        if (size != null) {
+            options.outWidth = size.first
+            options.outHeight = size.second
+        }
         return options
     }
 

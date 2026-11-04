@@ -84,6 +84,27 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     // stream 物化/处理/增强预解码做完，holder 实例化时直接命中缓存。
     val preparedCache = PagerPreparedCache()
 
+    /**
+     * Komiho: 宽页「居中留白」结果缓存。
+     *
+     * [ImageUtil.addHorizontalCenterMargin] 是「整图解码 → 补白 → 整图重新编码」的重量级操作，
+     * 而宽页（EPUB 里 4:1 的 logo、跨页插图这类）在打开、adapter 重建、预载、翻页时会各 setImage
+     * 一次，同一页能被处理很多遍 —— 现象就是一翻到那张图就卡住。这里按「页号 + 视图高度」缓存
+     * 处理后的字节，只付一次代价。
+     */
+    private val widePageCache = object : android.util.LruCache<String, ByteArray>(MAX_WIDE_PAGE_CACHE_BYTES) {
+        override fun sizeOf(key: String, value: ByteArray): Int = value.size
+    }
+
+    fun cachedWidePage(key: String): ByteArray? = widePageCache.get(key)
+
+    fun cacheWidePage(key: String, bytes: ByteArray) {
+        // 单页超过总量 1/4 就不进缓存，免得把一整本大图都顶出去。
+        if (bytes.size <= MAX_WIDE_PAGE_CACHE_BYTES / 4) widePageCache.put(key, bytes)
+    }
+
+    fun clearWidePageCache() = widePageCache.evictAll()
+
     /** 预热串行锁：避免前后两页同时跑 Lanczos 预解码打满 CPU（教训同 offscreen 调高）。 */
     private val prewarmMutex = kotlinx.coroutines.sync.Mutex()
 
@@ -245,6 +266,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
 
         config.reloadChapterListener = {
             preparedCache.clear() // SY: 章节重载（如加密包换密码）后旧预处理结果一律作废
+            clearWidePageCache()
             activity.reloadChapters(it)
         }
 
@@ -819,6 +841,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             pageFlip.end()
             val currentItem = pager.currentItem
             preparedCache.clear() // SY: 图像配置变更（分割/裁剪/背景等）后旧结果全部失效
+            clearWidePageCache()
             adapter.refresh()
             pager.adapter = adapter
             pager.setCurrentItem(currentItem, false)
@@ -949,6 +972,9 @@ private fun prewarmLog(msg: String) = android.util.Log.d("Waifu2xPrewarm", msg)
 
 /** Komiho 诊断：适配器重建日志（webtoon 侧同名 tag，便于一起 grep）。 */
 private const val KOMIHA_REBUILD_TAG = "Waifu2xRebuild"
+
+/** Komiho: 宽页居中留白结果的缓存上限（处理后的图片字节，约 24MB）。 */
+private const val MAX_WIDE_PAGE_CACHE_BYTES = 24 * 1024 * 1024
 
 /** Komiho: 适配器重建的合并窗口 —— 把同一批 register 首发回调并成一次重建。 */
 private const val REFRESH_COALESCE_DELAY_MS = 120L

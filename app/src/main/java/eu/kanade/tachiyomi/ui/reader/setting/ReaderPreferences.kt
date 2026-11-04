@@ -75,6 +75,10 @@ class ReaderPreferences(
 
     val showPageNumber: Preference<Boolean> = preferenceStore.getBoolean("pref_show_page_number_key", true)
 
+    /** Komiho: 页码位置 —— 仅在 [showPageNumber] 开启时生效，默认居中（与旧行为一致）。 */
+    val pageNumberPosition: Preference<PageNumberPosition> =
+        preferenceStore.getEnum("pref_page_number_position", PageNumberPosition.CENTER)
+
     val verticalNavigator: Preference<Set<ReadingMode>> = preferenceStore.getEnumSet(
         "pref_vertical_navigator",
         emptySet(),
@@ -463,6 +467,13 @@ class ReaderPreferences(
         BLACK,
         WHITE,
         WHITE_BLACK,
+    }
+
+    /** Komiho: 页码位置（左下 / 居中 / 右下）。 */
+    enum class PageNumberPosition(val titleRes: StringResource) {
+        LEFT(MR.strings.page_number_position_left),
+        CENTER(MR.strings.page_number_position_center),
+        RIGHT(MR.strings.page_number_position_right),
     }
 
     enum class TappingInvertMode(

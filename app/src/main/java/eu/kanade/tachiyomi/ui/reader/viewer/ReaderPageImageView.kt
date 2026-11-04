@@ -207,7 +207,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
         if (config != null &&
             config.landscapeZoom &&
             config.minimumScaleType == SCALE_TYPE_CENTER_INSIDE &&
-            sWidth > sHeight &&
+            isSpreadAspectRatio() &&
             scale == minScale
         ) {
             handler?.postDelayed(500) {
@@ -225,6 +225,21 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .start()
             }
         }
+    }
+
+    /**
+     * Komiho: 只有「一整张跨页扫描」才自动放大。
+     *
+     * 原来是 `sWidth > sHeight`（任何横图），于是竖屏看一张 2:1 的插图/标题 logo 也会被
+     * 放大到「填满屏幕高度」（约 3 倍），只能左右平移，观感很差。跨页扫描（左右并排两页）
+     * 的宽高比通常在 1.3~1.8 之间，这个区间之外一律不自动放大。
+     *
+     * 注意它判断的始终是**图片**比例，跟设备横竖屏无关 —— 名字里的 landscape 指的是「横向的图」。
+     */
+    private fun SubsamplingScaleImageView.isSpreadAspectRatio(): Boolean {
+        if (sHeight <= 0) return false
+        val ratio = sWidth.toFloat() / sHeight.toFloat()
+        return ratio in SPREAD_MIN_RATIO..SPREAD_MAX_RATIO
     }
 
     fun setImage(drawable: Drawable, config: Config) {
@@ -719,6 +734,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
 }
 
 private const val MAX_ZOOM_SCALE = 5F
+
+/** Komiho: 「跨页扫描」的宽高比区间 —— 只有落在这个区间才做自动放大（见 isSpreadAspectRatio）。 */
+private const val SPREAD_MIN_RATIO = 1.3F
+private const val SPREAD_MAX_RATIO = 1.8F
 
 /**
  * MihonSY: true when the stream begins with a known image magic number

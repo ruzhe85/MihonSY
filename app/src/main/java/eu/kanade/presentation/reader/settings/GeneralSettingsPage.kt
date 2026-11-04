@@ -64,6 +64,21 @@ internal fun ColumnScope.GeneralPage(screenModel: ReaderSettingsScreenModel) {
         pref = screenModel.preferences.showPageNumber,
     )
 
+    // Komiho: 页码位置（左下 / 居中 / 右下）—— 只在开启「显示页码」时出现，默认居中。
+    val showPageNumber by screenModel.preferences.showPageNumber.collectAsState()
+    if (showPageNumber) {
+        val pageNumberPosition by screenModel.preferences.pageNumberPosition.collectAsState()
+        SettingsChipRow(MR.strings.pref_page_number_position) {
+            ReaderPreferences.PageNumberPosition.entries.forEach { position ->
+                FilterChip(
+                    selected = pageNumberPosition == position,
+                    onClick = { screenModel.preferences.pageNumberPosition.set(position) },
+                    label = { Text(stringResource(position.titleRes)) },
+                )
+            }
+        }
+    }
+
     val verticalNavigatorModes by screenModel.preferences.verticalNavigator.collectAsState()
 
     SettingsChipRow(MR.strings.pref_vertical_navigator) {
