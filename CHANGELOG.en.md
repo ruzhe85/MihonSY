@@ -6,6 +6,32 @@
 
 [中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
 
+## v1.3.0 (MihonSY)
+
+### New
+
+- **Page-turn animation for paged mode**: paged reading now offers "Slide / Cover / Page-flip" transitions.
+- **Paper reading backgrounds**: new "Parchment / Kraft" reading backgrounds.
+- **Page number position**: choose bottom-left / center / bottom-right; the edge positions automatically
+  clear the rounded screen corners.
+- **Double-tap zoom toggle for paged mode**: turning it off makes taps more responsive; zoom with two fingers.
+
+### Improvements
+
+- **Byte-path decoding**: size probing and full-image decoding no longer hand Java streams to the system
+  decoder, avoiding the Android 17 SIGSEGV some devices hit when opening tall pages.
+- **Tighter auto-zoom**: only true double-page spreads (aspect ratio 1.3–1.8) auto-zoom; 2:1 illustrations
+  are no longer stretched to fill the screen height.
+- **Double-page pairing and resume position**: pairing is computed from the current page; rotating or
+  switching reading mode no longer lands one page off, and no longer jumps back to an old page.
+- **Enhancement queue reworked**: fast paging in paged mode no longer leaves pages without enhancement.
+- **Firebase telemetry and GMS dependencies removed**: startup no longer loads Google services.
+
+### Fixes
+
+- **Empty-category crash, lost extension replacement, legacy DB column names** — all fixed.
+- **Startup sync**: multi-process races resolved; newly added categories now refresh.
+
 ## v1.2.0 (MihonSY)
 
 ### New
