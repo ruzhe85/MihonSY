@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -205,9 +206,19 @@ fun HorizontalChapterNavigator(
                             .padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // SY -->
-                        Text(text = currentPageText)
-                        // SY <--
+                        // Komiho（对齐上游 TachiyomiSY 68559e3b25）: 页码文本从「1」变成
+                        // 「12」或双页形态「4-5」时宽度会变，左边一挤，滑块位置就跟着抖。
+                        // 用一条同样长度的透明文本占位，把宽度钉在最大值上。
+                        Box(contentAlignment = Alignment.CenterEnd) {
+                            // SY -->
+                            Text(text = currentPageText)
+                            // 占满长度：双页形态（含 '-'）预留「总页数-总页数」的宽度
+                            Text(
+                                text = if ('-' in currentPageText) "$totalPages-$totalPages" else totalPages.toString(),
+                                color = Color.Transparent,
+                            )
+                            // SY <--
+                        }
 
                         Slider(
                             state = state,

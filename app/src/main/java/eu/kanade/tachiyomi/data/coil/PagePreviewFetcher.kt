@@ -246,9 +246,10 @@ class PagePreviewFetcher(
             return PagePreviewFetcher(
                 page = data,
                 options = options,
-                pagePreviewFile = { pagePreviewCache.getImageFile(data.imageUrl) },
-                isInCache = { pagePreviewCache.isImageInCache(data.imageUrl) },
-                writeToCache = { pagePreviewCache.putImageToCache(data.imageUrl, it) },
+                // Komiho: 一律用 cacheKey（默认 = imageUrl，源可给稳定 key），见 PagePreviewInfo。
+                pagePreviewFile = { pagePreviewCache.getImageFile(data.cacheKey) },
+                isInCache = { pagePreviewCache.isImageInCache(data.cacheKey) },
+                writeToCache = { pagePreviewCache.putImageToCache(data.cacheKey, it) },
                 diskCacheKeyLazy = lazy { imageLoader.components.key(data, options)!! },
                 sourceLazy = lazy { sourceManager.get(data.source)?.getMainSource<PagePreviewSource>() },
                 callFactoryLazy = callFactoryLazy,

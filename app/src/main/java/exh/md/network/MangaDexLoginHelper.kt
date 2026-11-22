@@ -20,6 +20,8 @@ class MangaDexLoginHelper(
     private val preferences: TrackPreferences,
     private val mdList: MdList,
     private val mangaDexAuthInterceptor: MangaDexAuthInterceptor,
+    // Komiho: 源侧改写过的 headers（关键是 User-Agent），登录/登出都要带上。
+    private val headers: Headers,
 ) {
 
     /**
@@ -37,7 +39,7 @@ class MangaDexLoginHelper(
         val error = kotlin.runCatching {
             val data = with(MdUtil.jsonParser) {
                 client.newCall(
-                    POST(MdApi.baseAuthUrl + MdApi.token, body = loginFormBody),
+                    POST(MdApi.baseAuthUrl + MdApi.token, body = loginFormBody, headers = headers),
                 ).awaitSuccess().parseAs<MALOAuth>()
             }
             mangaDexAuthInterceptor.setAuth(data)
@@ -72,7 +74,8 @@ class MangaDexLoginHelper(
             client.newCall(
                 POST(
                     url = MdApi.baseAuthUrl + MdApi.logout,
-                    headers = Headers.Builder().add("Authorization", "Bearer $sessionToken")
+                    // Komiho: 以源 headers 为基底，别把 User-Agent 丢掉
+                    headers = headers.newBuilder().add("Authorization", "Bearer $sessionToken")
                         .build(),
                     body = formBody,
                 ),

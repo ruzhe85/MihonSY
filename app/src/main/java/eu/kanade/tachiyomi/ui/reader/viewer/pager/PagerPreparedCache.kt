@@ -205,7 +205,11 @@ object PagerPagePreparer {
                 val isAnimated = ImageUtil.isAnimatedAndSupported(source1) ||
                     (source2 != null && ImageUtil.isAnimatedAndSupported(source2))
 
-                if (config.dualPageSplit) {
+                // Komiho: 判定必须与 holder 同源（useSplitPipeline），否则两条路径会打架。
+                // 这里原先是裸的 config.dualPageSplit：开着拆分又进双页布局时（dualPageSplitActive
+                // = false，真正的合并应该由 mergePages 做），预载却按「已拆分」算出 layoutApplied
+                // = true 的单页结果，holder 直接采用、再也不合并 —— 横屏开拆分后双页合不起来。
+                if (config.useSplitPipeline(source2 != null)) {
                     val itemSource = processPure(viewer, page, source1)
                         // C 方案：副作用分支（宽图分割需 onPageSplit 插 InsertPage）——
                         // 通用预处理照常缓存，布局处理留给 holder 补跑；增强预解码跳过

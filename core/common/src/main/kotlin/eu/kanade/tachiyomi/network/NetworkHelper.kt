@@ -42,6 +42,12 @@ open /* SY <-- */ class NetworkHelper(
         if (isDebugBuild) {
             val httpLoggingInterceptor = HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.HEADERS
+                // Komiho（对齐上游 mihon 0864ce0f46）: 请求头日志里永远不该出现明文凭据 ——
+                // 这些日志会进系统 logcat，也可能被「导出诊断日志」带出去。
+                // 上游把这个做成可关的偏好（默认开），这里直接写死：只有 debug 构建会走到
+                // 这段，而「需要看到明文 token 才能排查」的场景不存在。
+                redactHeader("Authorization")
+                redactHeader("Auth")
             }
             builder.addNetworkInterceptor(httpLoggingInterceptor)
         }

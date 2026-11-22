@@ -119,6 +119,21 @@ class PagerConfig(
     val dualPageSplitActive: Boolean
         get() = dualPageSplit && !doublePages
 
+    /**
+     * 这一屏该走「布局加工」管线（[PagerPageHolder.process]）还是「合并」管线（mergePages）。
+     *
+     * - [dualPageSplitActive] 时必须走加工管线；
+     * - 否则只要开着「宽页旋转适配」（[dualPageRotateToFit]）且**这一屏只有一页**
+     *   （没有配对页），也必须走 —— 宽图需要在 process → rotateDualPage 里转 90°，
+     *   mergePages 那条路径不做旋转。以前只有拆分生效才进 process，于是双页布局下
+     *   单张跨页宽图既不拆也不转，只能横着看。
+     *
+     * （对齐上游 mihon 43a6803273：`dualPageSplit || (dualPageRotateToFit && buffer2 == null)`。
+     * 这里把三处调用点收敛成一个判定，避免 holder 两条路径与预载路径再次走偏。）
+     */
+    fun useSplitPipeline(hasPairPage: Boolean): Boolean =
+        dualPageSplitActive || (dualPageRotateToFit && !hasPairPage)
+
     var invertDoublePages = false
 
     var autoDoublePages = readerPreferences.pageLayout.get() == PageLayout.AUTOMATIC

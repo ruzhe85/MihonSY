@@ -195,6 +195,8 @@ class NHentai(delegate: HttpSource, val context: Context) :
                 PagePreviewInfo(
                     index + 1,
                     imageUrl = "$thumbServer/$path",
+                    // Komiho: thumbServer 是随机挑的镜像域名，拿去当缓存 key 会每换一次域名就 miss。
+                    cacheKey = "https://nhentai.net/$path",
                 )
             },
             false,

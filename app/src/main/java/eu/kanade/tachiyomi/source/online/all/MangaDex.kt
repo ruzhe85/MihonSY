@@ -79,12 +79,20 @@ class MangaDex(delegate: HttpSource, val context: Context) :
         context.getSharedPreferences("source_$id", 0x0000)
     }
 
-    private val loginHelper = MangaDexLoginHelper(network.client, trackPreferences, mdList, mdList.interceptor)
-
     override val headers: Headers = delegate.headers.newBuilder()
         .removeAll("User-Agent")
         .add("User-Agent", "TachiyomiSY v${BuildConfig.VERSION_NAME} (${BuildConfig.APPLICATION_ID})")
         .build()
+
+    // Komiho（对齐上游 TachiyomiSY 4ba3a6af5b）: 必须排在 headers 之后并把 headers 传进去 ——
+    // 登录/登出的请求要带上被改写的 User-Agent，否则 MangaDex 侧会拒（登录莫名失败）。
+    private val loginHelper = MangaDexLoginHelper(
+        network.client,
+        trackPreferences,
+        mdList,
+        mdList.interceptor,
+        headers,
+    )
 
     override val baseHttpClient: OkHttpClient = delegate.client.newBuilder()
         .addInterceptor(mdList.interceptor)

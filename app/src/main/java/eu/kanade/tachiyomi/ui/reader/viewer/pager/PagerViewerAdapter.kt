@@ -33,8 +33,12 @@ class PagerViewerAdapter(private val viewer: PagerViewer) : ViewPagerAdapter() {
 
     /**
      * Holds preprocessed items so they don't get removed when changing chapter
+     *
+     * Komiho（对齐上游 mihon 3156b4a1c4）: 以前是 `Map<页 index, InsertPage>`，只按 index 归属。
+     * 但相邻章节的页同样会被拆分，一个「属于下一章」的 InsertPage 会按同样的 index 插进
+     * **当前章**的页列表里 —— 双页拆分跨章节时页码错位。改成保留所属章节的列表，插入时过滤。
      */
-    private var preprocessed: MutableMap<Int, InsertPage> = mutableMapOf()
+    private var preprocessed: List<InsertPage> = emptyList()
 
     var nextTransition: ChapterTransition.Next? = null
         private set
@@ -65,6 +69,11 @@ class PagerViewerAdapter(private val viewer: PagerViewer) : ViewPagerAdapter() {
     fun setChapters(chapters: ViewerChapters, forceTransition: Boolean) {
         val newItems = mutableListOf<ReaderItem>()
 
+        // Komiho（对齐上游 mihon 51b61a36e8）: ViewPager 只会「跟着自己创建过的页」保持位置。
+        // 首次布局之前就往前面插了页（R2L 下下一章的页是插在最前）时，它仍停在原 position
+        // → 直接落到另一个章节去。先按对象引用记下当前项，重建后再找回它的新下标。
+        val currentItem = joinedItems.getOrNull(viewer.pager.currentItem)?.first
+
         // Forces chapter transition if there is missing chapters
         val prevHasMissingChapters = calculateChapterGap(chapters.currChapter, chapters.prevChapter) > 0
         val nextHasMissingChapters = calculateChapterGap(chapters.nextChapter, chapters.currChapter) > 0
@@ -86,13 +95,16 @@ class PagerViewerAdapter(private val viewer: PagerViewer) : ViewPagerAdapter() {
 
             val lastPage = pages.last()
 
-            // Insert preprocessed pages into current page list
-            preprocessed.keys.sortedDescending()
-                .forEach { key ->
-                    if (lastPage.index == key) {
-                        insertPageLastPage = preprocessed[key]
+            // Insert preprocessed pages into current page list.
+            // Komiho: 相邻章节的页也会被拆分，这里只插回**本章**的，并按 index 倒序插。
+            preprocessed
+                .filter { it.chapter.chapter.id == chapters.currChapter.chapter.id }
+                .sortedByDescending { it.index }
+                .forEach { page ->
+                    if (lastPage.index == page.index) {
+                        insertPageLastPage = page
                     }
-                    preprocessed[key]?.let { pages.add(key + 1, it) }
+                    pages.add(page.index + 1, page)
                 }
 
             newItems.addAll(pages)
@@ -117,7 +129,9 @@ class PagerViewerAdapter(private val viewer: PagerViewer) : ViewPagerAdapter() {
         // Resets double-page splits, else insert pages get misplaced
         subItems.filterIsInstance<InsertPage>().also { subItems.removeAll(it) }
 
-        preprocessed = mutableMapOf()
+        // Komiho: 只留相邻章节的预拆分页（本章的已插进 subItems，更远的章节再也用不到）
+        val adjacentChapterIds = setOfNotNull(chapters.prevChapter?.chapter?.id, chapters.nextChapter?.chapter?.id)
+        preprocessed = preprocessed.filter { it.chapter.chapter.id in adjacentChapterIds }
         subItems = newItems.toMutableList()
 
         var useSecondPage = false
@@ -129,6 +143,15 @@ class PagerViewerAdapter(private val viewer: PagerViewer) : ViewPagerAdapter() {
         }
         doubledUp = viewer.config.doublePages
         setJoinedItems(useSecondPage)
+
+        // Komiho: 重建后把 pager 拉回同一项（位置可能因为前面插了页而整体后移）。
+        // 找不到（例如当前项是章节过渡页、对象已被重建）就保持原样，交给 TextView 的默认行为。
+        if (currentItem != null) {
+            val restored = joinedItems.indexOfFirst { it.first === currentItem }
+            if (restored != -1 && restored != viewer.pager.currentItem) {
+                viewer.pager.setCurrentItem(restored, false)
+            }
+        }
 
         // Will skip insert page otherwise
         if (insertPageLastPage != null) {
@@ -181,9 +204,13 @@ class PagerViewerAdapter(private val viewer: PagerViewer) : ViewPagerAdapter() {
 
         val currentIndex = joinedItems.indexOfFirst { it.first == currentPage }
 
-        // Put aside preprocessed pages for next chapter so they don't get removed when changing chapter
+        // Put aside pages of an adjacent chapter until it becomes the current one, so they are not lost on
+        // the chapter change. Komiho: 同一 (章节, index) 只留一份，避免重复插入。
         if (currentPage.chapter.chapter.id != currentChapter?.chapter?.id) {
-            preprocessed[newPage.index] = newPage
+            val chapterId = newPage.chapter.chapter.id
+            if (preprocessed.none { it.chapter.chapter.id == chapterId && it.index == newPage.index }) {
+                preprocessed = preprocessed + newPage
+            }
             return
         }
 

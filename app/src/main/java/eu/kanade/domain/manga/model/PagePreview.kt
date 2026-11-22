@@ -11,6 +11,8 @@ data class PagePreview(
     val index: Int,
     val imageUrl: String,
     val source: Long,
+    /** Komiho: 磁盘缓存 key，默认等于 [imageUrl]。旧备份/旧缓存反序列化时走默认值。 */
+    val cacheKey: String = imageUrl,
 ) {
     @Transient
     private val _progress: MutableStateFlow<Int> = MutableStateFlow(-1)
@@ -18,5 +20,5 @@ data class PagePreview(
     @Transient
     val progress = _progress.asStateFlow()
 
-    fun getPagePreviewInfo() = PagePreviewInfo(index, imageUrl, _progress)
+    fun getPagePreviewInfo() = PagePreviewInfo(index, imageUrl, cacheKey, _progress)
 }

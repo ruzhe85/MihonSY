@@ -243,12 +243,28 @@ class ReaderViewModel @JvmOverloads constructor(
         val manga = manga!!
         // SY -->
         val (chapters, mangaMap) = runBlocking {
+            // Komiho（对齐上游 mihon 2b4b8472bb）: 当前章节被 scanlator 过滤挡掉时，仍要能
+            // 从「继续阅读 / 更新 / 下载完的通知」直接进阅读器。以前这里直接拿过滤后的列表去
+            // find，会走到下面 `error("Requested chapter ... not found")` 崩掉。
             if (manga.source == MERGED_SOURCE_ID) {
-                getMergedChaptersByMangaId.await(manga.id, applyScanlatorFilter = true) to
-                    getMergedMangaById.await(manga.id)
-                        .associateBy { it.id }
+                val filtered = getMergedChaptersByMangaId.await(manga.id, applyScanlatorFilter = true)
+                val chapters = if (filtered.any { it.id == chapterId }) {
+                    filtered
+                } else {
+                    filtered + getMergedChaptersByMangaId.await(manga.id, applyScanlatorFilter = false)
+                        .filter { it.id == chapterId }
+                }
+                chapters to getMergedMangaById.await(manga.id)
+                    .associateBy { it.id }
             } else {
-                getChaptersByMangaId.await(manga.id, applyScanlatorFilter = true) to null
+                val filtered = getChaptersByMangaId.await(manga.id, applyScanlatorFilter = true)
+                val chapters = if (filtered.any { it.id == chapterId }) {
+                    filtered
+                } else {
+                    filtered + getChaptersByMangaId.await(manga.id, applyScanlatorFilter = false)
+                        .filter { it.id == chapterId }
+                }
+                chapters to null
             }
         }
         fun isChapterDownloaded(chapter: Chapter): Boolean {

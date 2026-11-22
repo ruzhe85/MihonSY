@@ -548,7 +548,9 @@ class PagerPageHolder(
                     null
                 }.use { source2 ->
                     // 双页布局下不拆（否则宽图被切成两页，跨页配错）。
-                    val itemSource = if (viewer.config.dualPageSplitActive) {
+                    // 但开着「宽页旋转适配」且这一屏只有一页时仍要走 process —— 单张宽图
+                    // 需要在里面转 90°，mergePages 不转（见 PagerConfig.useSplitPipeline）。
+                    val itemSource = if (viewer.config.useSplitPipeline(source2 != null)) {
                         process(item.first, Buffer().readFrom(source))
                     } else {
                         mergePages(Buffer().readFrom(source), source2?.let { Buffer().readFrom(it) })
@@ -585,7 +587,7 @@ class PagerPageHolder(
     private suspend fun applyLegacyLayout(raw: PagerPreparedPage): PagerPreparedPage? {
         return try {
             val itemSource = withIOContext {
-                if (viewer.config.dualPageSplitActive) {
+                if (viewer.config.useSplitPipeline(raw.source2 != null)) {
                     process(page, raw.source)
                 } else {
                     mergePages(raw.source, raw.source2)

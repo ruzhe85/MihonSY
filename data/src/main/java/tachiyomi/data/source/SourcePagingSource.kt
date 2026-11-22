@@ -6,6 +6,7 @@ import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.MetadataMangasPage
 import exh.metadata.metadata.RaisedSearchMetadata
+import kotlinx.coroutines.CancellationException
 import mihon.domain.manga.model.toDomainManga
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.domain.manga.interactor.NetworkToLocalManga
@@ -60,6 +61,10 @@ abstract class BaseSourcePagingSource(
             // SY -->
             getPageLoadResult(params, mangasPage)
             // SY <--
+        } catch (e: CancellationException) {
+            // Komiho: 翻页/切筛选把请求取消掉时，CancellationException 必须原样抛出 ——
+            // 吞成 LoadResult.Error 会让 Paging 把「用户主动取消」显示成加载失败。
+            throw e
         } catch (e: Exception) {
             LoadResult.Error(e)
         }

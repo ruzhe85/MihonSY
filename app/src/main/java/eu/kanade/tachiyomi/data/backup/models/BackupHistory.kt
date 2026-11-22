@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.data.backup.models
 
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.protobuf.ProtoNumber
 import tachiyomi.domain.history.model.History
@@ -7,8 +8,11 @@ import java.util.Date
 
 @Serializable
 data class BackupHistory(
-    @ProtoNumber(1) var url: String,
-    @ProtoNumber(2) var lastRead: Long,
+    // Komiho: 见 Backup.kt —— 等于默认值时也必须写出。
+    @EncodeDefault
+    @ProtoNumber(1) var url: String = "",
+    @EncodeDefault
+    @ProtoNumber(2) var lastRead: Long = 0,
     @ProtoNumber(3) var readDuration: Long = 0,
     // SY -->
     /**

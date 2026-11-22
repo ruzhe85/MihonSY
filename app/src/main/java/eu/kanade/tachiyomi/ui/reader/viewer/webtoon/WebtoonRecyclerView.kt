@@ -242,7 +242,9 @@ class WebtoonRecyclerView @JvmOverloads constructor(
             if (immediateTapDownTimes.remove(ev.downTime)) {
                 return false
             }
-            if (!tapDuringManualScroll) {
+            // Komiho（对齐上游 mihon c371d6331d）: 单击是**延迟确认**的，等它回来时阅读器
+            // 可能已经关了 —— 对一张已 detach 的列表做滚动/布局会去 measure 无法合成的页。
+            if (!tapDuringManualScroll && isAttachedToWindow) {
                 tapListener?.invoke(ev)
             }
             return false

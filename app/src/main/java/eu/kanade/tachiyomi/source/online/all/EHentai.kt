@@ -1239,12 +1239,23 @@ class EHentai(
         ).awaitSuccess().asJsoup()
 
         val body = doc.body()
+        // Komiho（对齐上游 TachiyomiSY 90f9bfcb64）: 缩略图缓存 key 用 gid + 序号 + 几何，
+        // 而不是 toUrl() —— 后者带的是会变的缩略图地址/占位图参数，拿它做 key 会导致
+        // 不同页互相覆盖、或每次换 URL 就 miss。gid 解析失败时返回 null，toCacheKey 会退回
+        // 用 imageUrl 保证 key 仍然唯一（宁可少命中，不可撞车）。
+        val galleryId = runCatching {
+            EHentaiSearchMetadata.galleryId(chapters.lastOrNull()?.url ?: manga.url)
+        }.getOrNull()
         val previews = body
             .select("#gdt > div > div")
             .plus(body.select("#gdt > a"))
             .map {
                 val preview = parseNormalPreview(it)
-                PagePreviewInfo(preview.index, imageUrl = preview.toUrl())
+                PagePreviewInfo(
+                    preview.index,
+                    imageUrl = preview.toUrl(),
+                    cacheKey = preview.toCacheKey(galleryId),
+                )
             }
             .ifEmpty {
                 body.select("#gdt div a img")
@@ -1321,6 +1332,31 @@ class EHentai(
         fun toUrl(): String {
             return BLANK_PREVIEW_THUMB.toHttpUrl().newBuilder()
                 .addQueryParameter("imageUrl", imageUrl)
+                .addQueryParameter("width", width.toString())
+                .addQueryParameter("height", height.toString())
+                .addQueryParameter("widthOffset", widthOffset.toString())
+                .build()
+                .toString()
+        }
+
+        /**
+         * Komiho: 缓存 key —— 只放稳定量（gid / 页序号 / 裁剪几何），**不放** imageUrl。
+         *
+         * 缩略图地址是带签名的临时链接，把它放进 key 等于每次请求都换一个 key；而
+         * 「未加载」的占位缩略图更是所有页共用同一个地址。gid 取不到时退回 imageUrl，
+         * 保证唯一性优先。
+         */
+        fun toCacheKey(galleryId: String?): String {
+            return BLANK_PREVIEW_THUMB.toHttpUrl().newBuilder()
+                .addQueryParameter("key", "preview")
+                .apply {
+                    if (galleryId.isNullOrBlank()) {
+                        addQueryParameter("imageUrl", imageUrl)
+                    } else {
+                        addQueryParameter("gid", galleryId)
+                    }
+                }
+                .addQueryParameter("index", index.toString())
                 .addQueryParameter("width", width.toString())
                 .addQueryParameter("height", height.toString())
                 .addQueryParameter("widthOffset", widthOffset.toString())
