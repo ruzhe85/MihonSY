@@ -852,7 +852,12 @@ class WebtoonViewer(
 }
 
 // Double the cache size to reduce rebinds/recycles incurred by the extra layout space on scroll direction changes
-private val RECYCLER_VIEW_CACHE_SIZE = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) 4 else 2
+// Komiho: 4 → 8。条漫的增强结果**只存在于各自的 holder view 里** —— ReaderPageImageView 的
+// Coil 请求是 memory/disk 双 DISABLED（刻意不留缓存），所以一旦 view 被回收（recycle() 会清掉
+// renderedPage 等「已渲染」标记），滚回来重绑就是一次完整解码 + AI 增强（单页 160–600ms）。
+// 多留几屏的 view 就能让 setImage() 的 already-rendered 守卫直接命中，跳过重算；代价是几个
+// 离屏页的位图内存（原先这些位图本来也没有第二份副本可复用）。
+private val RECYCLER_VIEW_CACHE_SIZE = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) 8 else 4
 
 // MihonSY: bottom peek margin (dp) left un-scrolled for the "full screen" tap-scroll
 // preset, mirroring ComicScreen's set_menu_pagekey_offset default (23dp). A sliver of

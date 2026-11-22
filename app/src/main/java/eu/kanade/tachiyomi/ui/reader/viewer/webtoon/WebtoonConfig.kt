@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 
+import android.os.Build
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerConfig
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation
@@ -123,6 +124,15 @@ class WebtoonConfig(
             .register({ }, { imagePropertyChangedListener?.invoke() })
         readerPreferences.aiAreaDownscaleStrength
             .register({ }, { imagePropertyChangedListener?.invoke() })
+
+        // Komiho: 12 以下的伽马走解码期 LUT（改像素），改了必须重渲染当前页；12+ 由显示层
+        // shader 即时生效，不需要（也不该）触发整页重解码。
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            readerPreferences.gammaFilter
+                .register({ }, { imagePropertyChangedListener?.invoke() })
+            readerPreferences.gammaFilterValue
+                .register({ }, { imagePropertyChangedListener?.invoke() })
+        }
 
         readerPreferences.webtoonSidePadding
             .register({ sidePadding = it }, { imagePropertyChangedListener?.invoke() })

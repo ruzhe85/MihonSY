@@ -99,8 +99,12 @@
     <string name="page_number_position_left">左下</string>
     <string name="page_number_position_center">置中</string>
     <string name="page_number_position_right">右下</string>
-    <string name="pref_custom_brightness">自訂亮度</string>
+    <string name="pref_custom_brightness">自訂螢幕亮度</string>
     <string name="pref_custom_color_filter">色彩濾鏡</string>
+    <string name="pref_image_brightness">圖像亮度</string>
+    <string name="pref_image_contrast">圖像對比度</string>
+    <string name="pref_image_gamma">伽馬</string>
+    <string name="filter_applies_after_close">關閉設定後生效</string>
     <string name="pref_keep_screen_on">保持螢幕恆亮</string>
     <string name="double_tap_anim_speed_0">停用動畫</string>
     <string name="double_tap_anim_speed_normal">正常</string>
@@ -982,6 +986,9 @@
     <!-- Komiho (2026-10-02): 圖像增強頁改為「一級選方式 + 二級詳情」，以下為一級/詳情頁文案。 -->
     <string name="enhancement_section_methods">增強方式</string>
     <string name="enhancement_detail_model">模型</string>
+    <string name="enhancement_qnn_power_mode">功耗模式</string>
+    <string name="enhancement_qnn_power_performance">效能</string>
+    <string name="enhancement_qnn_power_balanced">平衡</string>
     <string name="enhancement_detail_advanced">AI 選項</string>
     <!-- Komiho: NPU 詳情裡「沒有系列、或系列只有它一個」的模型統一歸到這個組。 -->
     <string name="enhancement_series_standalone">Standalone</string>

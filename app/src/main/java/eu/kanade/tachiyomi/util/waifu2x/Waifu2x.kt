@@ -3,9 +3,12 @@ package eu.kanade.tachiyomi.util.waifu2x
 import android.content.Context
 import android.content.res.AssetManager
 import android.graphics.Bitmap
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import java.io.File
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 /**
  * Komiho: ncnn + Vulkan AI upscaler.
@@ -770,11 +773,35 @@ object Waifu2x {
         }
         val contextPath = prepareQnnContext(context, model, asset) ?: return false
         val libraryDir = context.applicationInfo.nativeLibraryDir
-        return try {
+        val ok = try {
             nativeInitQnn(contextPath, libraryDir, model.padding)
         } catch (e: Throwable) {
             logcat(LogPriority.WARN, e) { "Waifu2x: nativeInitQnn threw (missing symbol?)" }
             false
+        }
+        // Komiho: 模型加载成功后按用户选的功耗档配置 HTP。默认 0（性能/Burst）与改造前的
+        // 固定行为一致，所以不选的话手感不变。
+        if (ok) {
+            runCatching { Injekt.get<ReaderPreferences>().qnnPowerMode.get() }
+                .onSuccess { applyQnnPowerMode(it) }
+        }
+        return ok
+    }
+
+    /**
+     * Komiho: 应用 QNN/HTP 功耗档（0 = 性能 / 1 = 平衡）。
+     *
+     * 未初始化时原生只记住档位，下次 [initQnnEngine] 生效；已初始化则立刻重设 perf 配置
+     * （不重建 QNN context，切换是即时的）。QNN 引擎重建时由 [ensureEngine] 重新应用，
+     * 所以这里只需要在「设置页改档」时调一次。
+     */
+    fun applyQnnPowerMode(mode: Int) {
+        if (!libraryLoaded) return
+        try {
+            nativeSetQnnPowerMode(mode)
+        } catch (e: Throwable) {
+            // 老 .so 没有这个符号（本地 ABI 没更新）——降级为「按旧的固定 Burst 跑」。
+            logcat(LogPriority.WARN, e) { "Waifu2x: nativeSetQnnPowerMode 不可用，沿用默认功耗档" }
         }
     }
 
@@ -1068,6 +1095,13 @@ object Waifu2x {
      * Takes the engine lock; also exports `ADSP_LIBRARY_PATH` for the DSP-side Skel lookup.
      */
     private external fun nativeInitQnn(contextPath: String, nativeLibraryDir: String, padding: Int): Boolean
+
+    /**
+     * Komiho: HTP 功耗档（0 = 性能 / 1 = 平衡）。
+     * 与 [nativeUpdatePerformanceConfig] 不同，这个真正作用于 QNN（见 qnn_backend.cpp 的
+     * `configure_performance`）。未初始化时只记录，初始化后生效。
+     */
+    private external fun nativeSetQnnPowerMode(mode: Int)
 
     // NOTE: since 2026-09-19 the QNN arch set is **per model** ([UpscaleModelSpec.qnnArches],
     // from the plugin's `models.json`), not a host-wide constant — the host ships no

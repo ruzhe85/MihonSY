@@ -1,5 +1,6 @@
 package eu.kanade.presentation.reader.settings
 
+import android.os.Build
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -19,6 +20,7 @@ import tachiyomi.presentation.core.components.SettingsChipRow
 import tachiyomi.presentation.core.components.SliderItem
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
+import java.util.Locale
 
 @Composable
 internal fun ColumnScope.ColorFilterPage(screenModel: ReaderSettingsScreenModel) {
@@ -122,6 +124,69 @@ internal fun ColumnScope.ColorFilterPage(screenModel: ReaderSettingsScreenModel)
         label = stringResource(MR.strings.pref_inverted_colors),
         pref = screenModel.preferences.invertedColors,
     )
+
+    // Komiho: 图像调节（亮度 / 对比度 / 伽马）—— 与上面「屏幕亮度」「色彩滤镜」并列的
+    // 三条独立滤镜。亮度/对比度是线性变换，走显示层 ColorMatrix，所有版本可用且即时生效；
+    // 伽马是幂函数（ColorMatrix 表达不了），12+ 走 RuntimeShader，12 以下走解码期 LUT
+    //（改完关掉设置页才重新出图，所以低版本在标题后标注生效时机）。
+    val brightnessOn by screenModel.preferences.brightnessFilter.collectAsState()
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_image_brightness),
+        pref = screenModel.preferences.brightnessFilter,
+    )
+    if (brightnessOn) {
+        val brightnessValue by screenModel.preferences.brightnessFilterValue.collectAsState()
+        SliderItem(
+            value = brightnessValue,
+            valueRange = -100..100,
+            steps = 0,
+            label = stringResource(MR.strings.pref_image_brightness),
+            onChange = { screenModel.preferences.brightnessFilterValue.set(it) },
+            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        )
+    }
+
+    val contrastOn by screenModel.preferences.contrastFilter.collectAsState()
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_image_contrast),
+        pref = screenModel.preferences.contrastFilter,
+    )
+    if (contrastOn) {
+        val contrastValue by screenModel.preferences.contrastFilterValue.collectAsState()
+        SliderItem(
+            value = contrastValue,
+            valueRange = -100..100,
+            steps = 0,
+            label = stringResource(MR.strings.pref_image_contrast),
+            onChange = { screenModel.preferences.contrastFilterValue.set(it) },
+            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        )
+    }
+
+    val gammaImmediate = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val gammaLabel = stringResource(MR.strings.pref_image_gamma)
+    val gammaOn by screenModel.preferences.gammaFilter.collectAsState()
+    CheckboxItem(
+        label = if (gammaImmediate) {
+            gammaLabel
+        } else {
+            "$gammaLabel (${stringResource(MR.strings.filter_applies_after_close)})"
+        },
+        pref = screenModel.preferences.gammaFilter,
+    )
+    if (gammaOn) {
+        val gammaValue by screenModel.preferences.gammaFilterValue.collectAsState()
+        SliderItem(
+            value = gammaValue,
+            valueRange = 40..250,
+            steps = 0,
+            label = gammaLabel,
+            // 存的是 40…250（两位小数的定点），显示成 0.40…2.50。
+            valueString = String.format(Locale.US, "%.2f", gammaValue / 100f),
+            onChange = { screenModel.preferences.gammaFilterValue.set(it) },
+            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        )
+    }
 }
 
 private fun getColorValue(currentColor: Int, color: Int, mask: Long, bitShift: Int): Int {

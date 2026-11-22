@@ -184,6 +184,15 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeIsQnnInitialized(
     JNIEnv *, jobject) {
   return qnn_backend::is_initialized() ? JNI_TRUE : JNI_FALSE;
 }
+
+// Komiho (2026-11-07): HTP 功耗档（0 = 性能、1 = 省电）。
+// 未初始化时只记住，下次 nativeInitQnn 时生效；已初始化则即时切换（重建 powerConfigId）。
+extern "C" JNIEXPORT void JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeSetQnnPowerMode(
+    JNIEnv *, jobject, jint mode) {
+  std::lock_guard<std::mutex> lock(g_lock);
+  qnn_backend::set_power_mode(static_cast<int>(mode));
+}
 // ── Komiho: QNN 接线结束 ────────────────────────────────────────────────────
 
 extern "C" JNIEXPORT jboolean JNICALL

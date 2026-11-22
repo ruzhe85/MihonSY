@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.ui.reader.viewer
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.os.Build
 import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.drawable.Animatable
@@ -510,8 +511,15 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 // streams fall back to the original SSIV direct-decode path.
                 // Komiho: 深度裁剪边缘开启时也必须走这条链 —— SSIV 直解路径带不上
                 // aggressiveCrop 参数（它内部按纯白边算法裁边），会退回标准裁切。
+                // Komiho: 12 以下的伽马走解码期 LUT（改像素），必须走这条解码链 ——
+                // 否则设置里调了伽马、页面却完全没反应（滤镜静默失效）。
+                // 12+ 由显示层 shader 做，不需要为它改解码路径。
+                val gammaNeedsDecode = Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
+                    preferences.gammaValueOrNull() != null
                 val enhancementOn =
-                    (preferences.enhancementMode.get() != 0 || config.cropBordersAggressive) &&
+                    (preferences.enhancementMode.get() != 0 ||
+                        config.cropBordersAggressive ||
+                        gammaNeedsDecode) &&
                         isStandardImageStream(data)
                 if (!enhancementOn) {
                     setHardwareConfig(ImageUtil.canUseHardwareBitmap(data))

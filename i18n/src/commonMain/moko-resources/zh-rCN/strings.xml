@@ -118,8 +118,12 @@
     <string name="page_number_position_right">右下</string>
     <string name="pref_crop_borders">裁剪边缘</string>
     <string name="pref_crop_borders_aggressive">深度裁剪边缘</string>
-    <string name="pref_custom_brightness">自定义亮度</string>
+    <string name="pref_custom_brightness">自定义屏幕亮度</string>
     <string name="pref_custom_color_filter">色彩滤镜</string>
+    <string name="pref_image_brightness">图像亮度</string>
+    <string name="pref_image_contrast">图像对比度</string>
+    <string name="pref_image_gamma">伽马</string>
+    <string name="filter_applies_after_close">关闭设置后生效</string>
     <string name="pref_keep_screen_on">保持屏幕常亮</string>
     <string name="reader_bookmarks_title">书签</string>
     <string name="reader_bookmark_add_current">在当前页加书签（第 %1$d 页）</string>
@@ -993,6 +997,9 @@
     <!-- Komiho (2026-10-02): 图像增强页改为「一级选方式 + 二级详情」，以下为一级/详情页文案。 -->
     <string name="enhancement_section_methods">增强方式</string>
     <string name="enhancement_detail_model">模型</string>
+    <string name="enhancement_qnn_power_mode">功耗模式</string>
+    <string name="enhancement_qnn_power_performance">性能</string>
+    <string name="enhancement_qnn_power_balanced">平衡</string>
     <string name="enhancement_detail_advanced">AI 选项</string>
     <!-- Komiho: NPU 详情里「没有系列、或系列只有它一个」的模型统一归到这个组。 -->
     <string name="enhancement_series_standalone">Standalone</string>

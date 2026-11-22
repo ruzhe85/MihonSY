@@ -426,10 +426,14 @@
     <string name="pref_display_profile">Custom display profile</string>
     <string name="pref_crop_borders">Crop borders</string>
     <string name="pref_crop_borders_aggressive">Deep crop borders</string>
-    <string name="pref_custom_brightness">Custom brightness</string>
+    <string name="pref_custom_brightness">Custom screen brightness</string>
     <string name="pref_grayscale">Grayscale</string>
     <string name="pref_inverted_colors">Inverted</string>
     <string name="pref_custom_color_filter">Custom color filter</string>
+    <string name="pref_image_brightness">Image brightness</string>
+    <string name="pref_image_contrast">Image contrast</string>
+    <string name="pref_image_gamma">Gamma</string>
+    <string name="filter_applies_after_close">applies after closing settings</string>
     <string name="pref_color_filter_mode">Color filter blend mode</string>
     <string name="filter_mode_overlay">Overlay</string>
     <string name="filter_mode_multiply">Multiply</string>
@@ -1124,6 +1128,9 @@
     <!-- Komiho (2026-10-02): 图像增强页改为「一级选方式 + 二级详情」，以下为一级/详情页文案。 -->
     <string name="enhancement_section_methods">Enhancement method</string>
     <string name="enhancement_detail_model">Model</string>
+    <string name="enhancement_qnn_power_mode">Power mode</string>
+    <string name="enhancement_qnn_power_performance">Performance</string>
+    <string name="enhancement_qnn_power_balanced">Balanced</string>
     <string name="enhancement_detail_advanced">AI options</string>
     <!-- Komiho: NPU 详情里「没有系列、或系列只有它一个」的模型统一归到这个组。 -->
     <string name="enhancement_series_standalone">Standalone</string>

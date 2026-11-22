@@ -451,6 +451,30 @@ private fun NpuDetail(
         }
     }
 
+    // Komiho: 仅骁龙 QNN 生效的功耗档，对齐高通公布的档位划分：
+    // 性能 = BURST（MAX/MAX，关 DCVS），平衡 = BALANCED（NOM_PLUS/NOM_PLUS）。
+    // 实测 TURBO 与 MAX 几乎同频（差 10%），真正落差从 NOM_PLUS 开始，所以中间不再留档。
+    if (activeModel.backend == UpscaleModelSpec.Backend.QNN_HTP) {
+        EnhancementParamLabel(MR.strings.enhancement_qnn_power_mode)
+        val powerMode by preferences.qnnPowerMode.collectAsState()
+        SettingsChipRow {
+            listOf(
+                0 to MR.strings.enhancement_qnn_power_performance,
+                1 to MR.strings.enhancement_qnn_power_balanced,
+            ).forEach { (mode, labelRes) ->
+                FilterChip(
+                    selected = powerMode == mode,
+                    onClick = {
+                        preferences.qnnPowerMode.set(mode)
+                        // 立即生效：已初始化的 QNN 引擎只重设 perf 配置，不重建 context。
+                        Waifu2x.applyQnnPowerMode(mode)
+                    },
+                    label = { Text(stringResource(labelRes)) },
+                )
+            }
+        }
+    }
+
     EnhancementParamLabel(MR.strings.enhancement_detail_advanced)
     AiAdvancedOptions(preferences)
 }

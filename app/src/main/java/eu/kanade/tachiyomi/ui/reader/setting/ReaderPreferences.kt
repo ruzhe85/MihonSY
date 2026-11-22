@@ -212,6 +212,36 @@ class ReaderPreferences(
 
     val invertedColors: Preference<Boolean> = preferenceStore.getBoolean("pref_inverted_colors", false)
 
+    // Komiho: 图像调节（亮度 / 对比度 / 伽马）—— 与上面的「屏幕亮度」「色彩滤镜」并列的
+    // 三条独立滤镜。亮度/对比度走显示层 ColorMatrix（所有版本可用），伽马走 RuntimeShader
+    //（Android 12+），12 以下退回解码期 LUT。
+    val brightnessFilter: Preference<Boolean> = preferenceStore.getBoolean("pref_brightness_filter", false)
+
+    /** 图像亮度，−100…100（0 = 不调整）。 */
+    val brightnessFilterValue: Preference<Int> = preferenceStore.getInt("brightness_filter_value", 0)
+
+    val contrastFilter: Preference<Boolean> = preferenceStore.getBoolean("pref_contrast_filter", false)
+
+    /** 图像对比度，−100…100（0 = 不调整，以 128 为轴）。 */
+    val contrastFilterValue: Preference<Int> = preferenceStore.getInt("contrast_filter_value", 0)
+
+    val gammaFilter: Preference<Boolean> = preferenceStore.getBoolean("pref_gamma_filter", false)
+
+    /** 伽马，40…250 = 0.40…2.50（100 = 1.00，即不调整）。 */
+    val gammaFilterValue: Preference<Int> = preferenceStore.getInt("gamma_filter_value", 100)
+
+    /**
+     * Komiho: 当前生效的伽马（未启用或中性返回 null）。
+     *
+     * 12+ 的显示层 shader 与 12 以下的解码期 LUT 都从这里取值 —— 「是否启用 / 是否中性」
+     * 只在这一处判断，避免两套路径各写一遍、日后改了这头忘了那头。
+     */
+    fun gammaValueOrNull(): Float? {
+        if (!gammaFilter.get()) return null
+        val raw = gammaFilterValue.get().coerceIn(40, 250)
+        return if (raw == 100) null else raw / 100f
+    }
+
     // endregion
 
     // region Controls
@@ -377,6 +407,15 @@ class ReaderPreferences(
     val showEnhancementStatus: Preference<Boolean> = preferenceStore.getBoolean("pref_show_enhancement_status", false)
 
     /**
+     * Komiho: QNN/HTP 功耗档 —— 0 = 性能（Burst，即改造前的固定行为）、1 = 平衡（NOM_PLUS）。
+     * 只对骁龙 QNN 路径生效（LiteRT/MTK 没有对应接口）。
+     *
+     * 不进 [enhancementCacheKey]：它只影响推理速度与发热，不改变任何像素，
+     * 加进去会让切档白白丢掉已缓存的增强图。
+     */
+    val qnnPowerMode: Preference<Int> = preferenceStore.getInt("pref_qnn_power_mode", 0)
+
+    /**
      * Komiho (2026-09-19): fingerprint of every preference that changes the **rendered result**
      * of enhancement.
      *
@@ -402,6 +441,11 @@ class ReaderPreferences(
         append('|').append(cropBordersWebtoon.get())
         // Komiho: 深度裁剪边缘改变裁切结果（像素），必须进指纹。
         append('|').append(cropBordersAggressive.get())
+        // Komiho: 12 以下的伽马走解码期 LUT，会改变像素 → 必须进指纹；
+        // 12+ 由显示层 shader 做，像素不变，不进指纹（否则改伽马会白扔已解码的页）。
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            append('|').append(gammaValueOrNull() ?: 1f)
+        }
     }
     // MihonSY image enhancement <--
     // MihonSY <--

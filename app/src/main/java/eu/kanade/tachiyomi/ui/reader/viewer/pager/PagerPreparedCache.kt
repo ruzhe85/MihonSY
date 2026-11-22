@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
+import android.os.Build
 import coil3.BitmapImage
 import coil3.imageLoader
 import coil3.request.CachePolicy
@@ -406,7 +407,11 @@ object PagerPagePreparer {
         cropBorders: Boolean,
         pageIndex: Int,
     ): Bitmap? {
-        if (isAnimated || enhancementMode == 0) return null
+        // Komiho: 12 以下的伽马走解码期 LUT（会改像素），即便没开增强也必须走这条解码链，
+        // 否则设置里调了伽马、页面却完全没反应（滤镜静默失效）。12+ 由显示层 shader 做。
+        val gammaNeedsDecode = Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
+            Injekt.get<ReaderPreferences>().gammaValueOrNull() != null
+        if (isAnimated || (enhancementMode == 0 && !gammaNeedsDecode)) return null
         if (!isStandardImageStream(source)) return null
         val width = viewer.pager.width
         val height = viewer.pager.height

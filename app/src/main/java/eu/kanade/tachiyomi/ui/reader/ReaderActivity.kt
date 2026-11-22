@@ -11,8 +11,11 @@ import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
+import android.graphics.RenderEffect
+import android.graphics.RuntimeShader
 import android.net.Uri
 import android.os.Build
+import androidx.annotation.RequiresApi
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -1455,12 +1458,32 @@ class ReaderActivity : BaseActivity() {
             grayscale: Boolean,
             invertedColors: Boolean,
             paperStyle: ReaderTheme.PaperStyle?,
+            brightness: Float,
+            contrast: Float,
         ): Paint {
             return Paint().apply {
                 colorFilter = ColorMatrixColorFilter(
                     ColorMatrix().apply {
                         if (grayscale) {
                             setSaturation(0f)
+                        }
+                        // Komiho: 图像亮度 / 对比度 —— 线性变换，ColorMatrix 可以精确表达：
+                        //   out = (in - 128) * contrast + 128 + brightness
+                        // 注意 ColorMatrix 的 offset 单位是 0..255（不是 0..1）。
+                        // 位置在灰度之后、反色/纸色之前：纸色是坡道映射，若在它之后再拉对比度，
+                        // 纸色会被一起拉偏。
+                        if (contrast != 1f || brightness != 0f) {
+                            val offset = 128f * (1f - contrast) + brightness
+                            postConcat(
+                                ColorMatrix(
+                                    floatArrayOf(
+                                        contrast, 0f, 0f, 0f, offset,
+                                        0f, contrast, 0f, 0f, offset,
+                                        0f, 0f, contrast, 0f, offset,
+                                        0f, 0f, 0f, 1f, 0f,
+                                    ),
+                                ),
+                            )
                         }
                         if (invertedColors) {
                             postConcat(
@@ -1531,15 +1554,29 @@ class ReaderActivity : BaseActivity() {
                 .onEach(::setCustomBrightness)
                 .launchIn(lifecycleScope)
 
+            // Komiho: 显示层滤镜的全部参数 —— 任一变化就重建 paint
+            //（灰度 / 反色 / 纸色 / 图像亮度 / 图像对比度）。
             combine(
                 readerPreferences.grayscale.changes(),
                 readerPreferences.invertedColors.changes(),
                 // 背景档位也要进滤镜流——纸化档位需要叠纸色矩阵。
                 readerPreferences.readerTheme.changes(),
-            ) { grayscale, invertedColors, theme -> Triple(grayscale, invertedColors, theme) }
+                readerPreferences.brightnessFilter.changes(),
+                readerPreferences.brightnessFilterValue.changes(),
+            ) { grayscale, invertedColors, theme, _, _ -> Triple(grayscale, invertedColors, theme) }
+                .combine(readerPreferences.contrastFilter.changes()) { triple, _ -> triple }
+                .combine(readerPreferences.contrastFilterValue.changes()) { triple, _ -> triple }
                 .onEach { (grayscale, invertedColors, theme) ->
                     setLayerPaint(grayscale, invertedColors, theme)
                 }
+                .launchIn(lifecycleScope)
+
+            // Komiho: 伽马单独一条（Android 12 以下 applyGammaEffect 内部直接返回）。
+            combine(
+                readerPreferences.gammaFilter.changes(),
+                readerPreferences.gammaFilterValue.changes(),
+            ) { _, _ -> Unit }
+                .onEach { applyGammaEffect() }
                 .launchIn(lifecycleScope)
 
             combine(
@@ -1656,12 +1693,86 @@ class ReaderActivity : BaseActivity() {
             // 纸化档位（羊皮纸 / 牛皮纸）在既有滤镜之后再叠一层纸色坡道，白场漫画的纸面变为纸色；
             // 不进解码通道，仅合成层生效。
             val paperStyle = ReaderTheme.paperStyleOf(theme)
-            val paint = if (grayscale || invertedColors || paperStyle != null) {
-                getCombinedPaint(grayscale, invertedColors, paperStyle)
+            // Komiho: 图像亮度 / 对比度（线性，所有 Android 版本可用）。
+            // 滑杆 −100…100 映射为：亮度 ±[BRIGHTNESS_MAX_OFFSET]、对比度 0.5…2.0 倍。
+            val brightness = if (readerPreferences.brightnessFilter.get()) {
+                readerPreferences.brightnessFilterValue.get().coerceIn(-100, 100) / 100f * BRIGHTNESS_MAX_OFFSET
+            } else {
+                0f
+            }
+            val contrast = if (readerPreferences.contrastFilter.get()) {
+                // 正负方向幅度不同：加对比最多 2.0 倍，减对比最多到 0.5 倍（再低就整片发灰）。
+                val raw = readerPreferences.contrastFilterValue.get().coerceIn(-100, 100) / 100f
+                if (raw >= 0f) 1f + raw else 1f + raw * 0.5f
+            } else {
+                1f
+            }
+            val paint = if (
+                grayscale ||
+                invertedColors ||
+                paperStyle != null ||
+                brightness != 0f ||
+                contrast != 1f
+            ) {
+                getCombinedPaint(grayscale, invertedColors, paperStyle, brightness, contrast)
             } else {
                 null
             }
             binding.viewerContainer.setLayerType(LAYER_TYPE_HARDWARE, paint)
+            applyGammaEffect()
+        }
+
+        /** Komiho: 伽马 shader / effect（只创建一次，之后只改 uniform；用 Any 存避免低版本加载 API 31 类）。 */
+        private var gammaShader: Any? = null
+        private var gammaRenderEffect: Any? = null
+
+        /**
+         * Komiho: shader 编译失败的闩锁。
+         *
+         * SkSL 编译结果是确定的（同一份源码同一台设备要么能编、要么不能），失败后再重试只会
+         * 每拖一下滑杆就抛一次异常、刷一条日志 —— 拽住它，一次就够。
+         */
+        private var gammaShaderFailed = false
+
+        /**
+         * Komiho: 伽马 —— 幂函数，`ColorMatrix`（仿射变换）表达不出来，只能走 RuntimeShader。
+         * Android 12 以下没有公开 API 能在显示层做，改走解码期 LUT（见 ToneCurveLut），这里直接跳过。
+         */
+        private fun applyGammaEffect() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+            // 「是否启用 / 是否中性」统一由 gammaValueOrNull 判断（低版本的解码期 LUT 也用它）。
+            val gamma = readerPreferences.gammaValueOrNull()
+            applyGammaEffectS(gamma != null, gamma ?: 1f)
+        }
+
+        @RequiresApi(Build.VERSION_CODES.S)
+        private fun applyGammaEffectS(enabled: Boolean, gamma: Float) {
+            val view = binding.viewerContainer
+            if (!enabled) {
+                if (gammaRenderEffect != null) {
+                    view.setRenderEffect(null)
+                    gammaRenderEffect = null
+                }
+                return
+            }
+            if (gammaShaderFailed) return
+            try {
+                val shader = (gammaShader as? RuntimeShader)
+                    ?: RuntimeShader(GAMMA_SHADER).also { gammaShader = it }
+                // 只更新 uniform，不重建 shader —— SkSL 在设备上要编译，频繁重建会卡。
+                shader.setFloatUniform("gamma", gamma)
+                // 注意：child shader 的 uniform 名不能用 `input`（AGSL 保留字，
+                // 编译期直接报 "name 'input' is reserved"），这里用 `page`。
+                val effect = RenderEffect.createRuntimeShaderEffect(shader, "page")
+                view.setRenderEffect(effect)
+                gammaRenderEffect = effect
+            } catch (e: Throwable) {
+                // 个别 ROM 的 RuntimeShader 不可用：退回无伽马，绝不因此让页面画不出来。
+                logcat(LogPriority.WARN, e) { "伽马 shader 不可用: ${e.message}" }
+                gammaShaderFailed = true
+                view.setRenderEffect(null)
+                gammaRenderEffect = null
+            }
         }
     }
 }
@@ -1675,4 +1786,30 @@ class ReaderActivity : BaseActivity() {
  */
 private val PAGE_NUMBER_EDGE_INSET = 28.dp
 private val PAGE_NUMBER_EDGE_LIFT = 10.dp
+
+/**
+ * Komiho: 图像亮度滑杆（−100…100）对应的最大像素偏移（255 制）。
+ *
+ * 取 ±40 是刻意保守的：墨水屏动态范围窄，再大就直接死黑或糊成一片。用户觉得不够时再推到底，
+ * 而不是一上手就把图调坏。
+ */
+private const val BRIGHTNESS_MAX_OFFSET = 40f
+
+/**
+ * Komiho: 伽马 AGSL（`RuntimeShader`，Android 12+）。
+ *
+ * 只做幂变换，端点 0/1 固定 —— 这样它和对比度/亮度（ColorMatrix 那一段）串联时
+ * 语义不会互相污染：伽马挪中间调，对比度绕 128 拉伸，亮度平移。
+ */
+private const val GAMMA_SHADER = """
+uniform shader page;
+uniform float gamma;
+
+half4 main(float2 coord) {
+    half4 color = page.eval(coord);
+    float3 rgb = clamp(float3(color.rgb), 0.0, 1.0);
+    rgb = pow(rgb, float3(gamma));
+    return half4(half3(rgb), color.a);
+}
+"""
 

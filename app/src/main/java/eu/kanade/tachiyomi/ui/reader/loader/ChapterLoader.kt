@@ -8,7 +8,7 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import mihon.core.common.archive.archiveReader
+import mihon.core.common.archive.indexedArchiveHandle
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
@@ -128,8 +128,9 @@ class ChapterLoader(
                     source is LocalSource -> source.getFormat(chapter.chapter).let { format ->
                         when (format) {
                             is Format.Directory -> DirectoryPageLoader(format.file)
-                            is Format.Archive -> ArchivePageLoader(format.file.archiveReader(context))
-                            is Format.Epub -> EpubPageLoader(format.file.archiveReader(context), context)
+                            // Komiho: zip/cbz/epub 走中央目录索引，其余格式内部自动回落 libarchive
+                            is Format.Archive -> ArchivePageLoader(format.file.indexedArchiveHandle(context))
+                            is Format.Epub -> EpubPageLoader(format.file.indexedArchiveHandle(context), context)
                         }
                     }
                     else -> error(context.stringResource(MR.strings.loader_not_implemented_error))
@@ -146,8 +147,9 @@ class ChapterLoader(
             source is LocalSource -> source.getFormat(chapter.chapter).let { format ->
                 when (format) {
                     is Format.Directory -> DirectoryPageLoader(format.file)
-                    is Format.Archive -> ArchivePageLoader(format.file.archiveReader(context))
-                    is Format.Epub -> EpubPageLoader(format.file.archiveReader(context), context)
+                    // Komiho: zip/cbz/epub 走中央目录索引，其余格式内部自动回落 libarchive
+                    is Format.Archive -> ArchivePageLoader(format.file.indexedArchiveHandle(context))
+                    is Format.Epub -> EpubPageLoader(format.file.indexedArchiveHandle(context), context)
                 }
             }
             source is HttpSource -> HttpPageLoader(chapter, source)

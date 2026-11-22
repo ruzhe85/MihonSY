@@ -6,6 +6,7 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
+import eu.kanade.tachiyomi.util.lang.readAllBytesCompact
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -16,7 +17,9 @@ import mihon.core.common.archive.ArchiveEntry
 import mihon.core.common.archive.ArchivePasswordException
 import tachiyomi.core.common.util.system.ImageUtil
 import uy.kohesive.injekt.injectLazy
+import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.InputStream
 
 /**
  * Loader used to load a chapter from an archive file.
@@ -48,7 +51,9 @@ internal class ArchivePageLoader(private val reader: ArchiveHandle) : PageLoader
             tmpDir.mkdirs()
             reader.useEntries { entries ->
                 entries
-                    .filter { it.isFile && ImageUtil.isImage(it.name) { reader.getInputStream(it.name)!! } }
+                    // Komiho: 嗅探只读条目开头几十 KB。索引实现（RemoteZipReader）的
+                    // getInputStream 会先把整条压缩数据读进内存，拿它做嗅探等于把整本图读一遍。
+                    .filter { it.isFile && ImageUtil.isImage(it.name) { sniffStream(it.name) } }
                     .sortedWith { f1, f2 -> f1.name.compareToCaseInsensitiveNaturalOrder(f2.name) }
                     .forEach { entry ->
                         File(tmpDir, entry.name.substringAfterLast("/"))
@@ -74,7 +79,9 @@ internal class ArchivePageLoader(private val reader: ArchiveHandle) : PageLoader
         } else reader.useEntries { entries ->
         // SY <--
         entries
-            .filter { it.isFile && ImageUtil.isImage(it.name) { reader.getInputStream(it.name)!! } }
+            // Komiho: 嗅探只读条目开头几十 KB。索引实现（RemoteZipReader）的
+            // getInputStream 会先把整条压缩数据读进内存，拿它做嗅探等于把整本图读一遍。
+            .filter { it.isFile && ImageUtil.isImage(it.name) { sniffStream(it.name) } }
             .sortedWith { f1, f2 -> f1.name.compareToCaseInsensitiveNaturalOrder(f2.name) }
             .mapIndexed { i, entry ->
                 // SY -->
@@ -100,7 +107,9 @@ internal class ArchivePageLoader(private val reader: ArchiveHandle) : PageLoader
                     // 读取统一走 [readEntryBytes]：LOAD_INTO_MEMORY 用后台预读好的字节
                     //（deferred 内部同样走防御），其余模式实时读；回收/空流/截断在读取层
                     // 快速失败，不再把空字节交给解码器伪装成 "Failed to initialize decoder"。
-                    stream = { (imageBytes ?: readEntryBytes(entry)).copyOf().inputStream() }
+                    // Komiho: 不再 copyOf() —— 这里返回的都是**本次刚分配**的字节数组，
+                    // 没人会改写它，多复制一份只是把单页内存翻倍（64MB 页 × 预取页数）。
+                    stream = { (imageBytes ?: readEntryBytes(entry)).inputStream() }
                     // SY <--
                     status = Page.State.Ready
                 }
@@ -123,11 +132,26 @@ internal class ArchivePageLoader(private val reader: ArchiveHandle) : PageLoader
      *  - 读出空字节 → 明确报「流被回收关闭」
      * 错误行显示真实原因后自动刷新（重绑定→重读）即恢复正常。
      */
+    /**
+     * Komiho: 条目格式嗅探用的流。
+     *
+     * `ImageUtil.isImage` 的 lambda 形参是 `() -> InputStream`（**非空**），而
+     * [ArchiveHandle.peek] 返回 `ByteArray?` —— 直接 `?.inputStream()` 会推断成
+     * `() -> InputStream?` 而编译不过。这里把「peek 不到」收敛成空流：读不到字节时
+     * 判型必然失败，语义与「不是图片」一致。
+     */
+    private fun sniffStream(name: String): InputStream =
+        reader.peek(name, SNIFF_BYTES)?.inputStream() ?: ByteArrayInputStream(ByteArray(0))
+
     private fun readEntryBytes(entry: ArchiveEntry): ByteArray {
         check(!isRecycled) { "页面读取时章节已被回收（翻页/换章竞态）——重载即恢复" }
         val input = reader.getInputStream(entry.name)
             ?: throw IllegalStateException("归档内取不到条目流：${entry.name}")
-        val bytes = input.buffered().use { it.readBytes() }
+        // Komiho: readBytes() 的 ByteArrayOutputStream 扩容峰值可达 3～4 倍，
+        // 大页（32～64MB）多页预取会直接 OOM；有大小线索时按实长精确预分配（峰值 1 倍），
+        // 没有线索（libarchive 路径恒返回 -1）时按 64KB 分块组装（峰值 2 倍）。
+        val sizeHint = reader.entrySize(entry.name)
+        val bytes = input.buffered().use { it.readAllBytesCompact(sizeHint) }
         check(bytes.isNotEmpty()) { "条目读取为空（章节流已被回收关闭）：${entry.name}——重载即恢复" }
         return bytes
     }
@@ -140,3 +164,6 @@ internal class ArchivePageLoader(private val reader: ArchiveHandle) : PageLoader
         // SY <--
     }
 }
+
+/** Komiho: 格式嗅探读取的字节上限 —— 图片魔数在最前面，几十 KB 绰绰有余。 */
+private const val SNIFF_BYTES = 64 * 1024
