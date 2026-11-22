@@ -6,6 +6,29 @@
 
 [中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
 
+## v1.4.0 (MihonSY)
+
+### New
+
+- **Image brightness / contrast / gamma controls**: the reader filter now offers brightness, contrast, gamma and custom screen-brightness sliders.
+- **QNN power modes**: NPU image enhancement gains selectable QNN power modes (Performance / Balanced).
+
+### Improvements
+
+- **ZIP central-directory index**: CBZ / ZIP chapters are indexed via their central directory for faster open and page jumping.
+- **Backup compatibility**: default protobuf fields are now written, so restores keep all settings when moving between SY and Mihon.
+- **Page-preview caching**: previews use a stable cache key — E-Hentai / nhentai thumbnails no longer expire or overwrite each other because of temporary URLs.
+
+### Fixes
+
+- **Cross-chapter split pages**: pager insert pages are scoped to their chapter, no more wrong pages across chapters.
+- **Crash from delayed taps after closing webtoon**: a late single-tap callback no longer triggers layout on a detached view.
+- **Missing chapter when scanlator filter is active**: the current chapter falls back instead of crashing when filtered out.
+- **Page slider jitter**: the slider no longer jumps when the page-number width changes.
+- **MangaDex login**: login and logout requests now carry the rewritten User-Agent.
+- **Network log redaction**: Authorization / Auth headers are masked in debug logs.
+- **Download ownership for same-named sources**: when a placeholder and an installed source share a name, downloaded chapters are no longer reported as missing or re-downloaded.
+
 ## v1.3.0 (MihonSY)
 
 ### New

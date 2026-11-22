@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <changelog bulletedList="true">
+    <changelogversion versionName="1.4.0" changeDate="November 22,2026">
+        <changelogtext>[b]MihonSY 1.4.0 (13)[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 图像亮度 / 对比度 / 伽马调节：阅读器滤镜新增亮度、对比度、伽马与自定义屏幕亮度调节</changelogtext>
+        <changelogtext>[b]新增[/b] QNN 功耗档：NPU 增强可选性能 / 平衡模式</changelogtext>
+        <changelogtext>[b]优化[/b] ZIP 中央目录索引：CBZ 章节打开与跳页定位更快</changelogtext>
+        <changelogtext>[b]优化[/b] 备份互通：补全 protobuf 默认值，SY 与 Mihon 互刷恢复不再丢设置</changelogtext>
+        <changelogtext>[b]优化[/b] 页面预览缓存：改用稳定缓存 key，E-Hentai / nhentai 缩略图不再频繁失效或互相覆盖</changelogtext>
+        <changelogtext>[b]修复[/b] 双页拆分跨章节错位、条漫关闭后延迟点击崩溃</changelogtext>
+        <changelogtext>[b]修复[/b] scanlator 过滤后找不到当前章节导致崩溃</changelogtext>
+        <changelogtext>[b]修复[/b] 页码位数变化时滑块位置抖动</changelogtext>
+        <changelogtext>[b]修复[/b] MangaDex 登录 / 登出请求携带正确的 User-Agent</changelogtext>
+        <changelogtext>[b]修复[/b] 网络日志脱敏：Authorization / Auth 请求头自动打码</changelogtext>
+        <changelogtext>[b]修复[/b] 同名源下载目录归属丢失，已下载章节不再误判 / 重复下载</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.3.0" changeDate="November 4,2026">
         <changelogtext>[b]MihonSY 1.3.0 (12)[/b]</changelogtext>
         <changelogtext>[b]新增[/b] 页漫翻页动画：页漫模式翻页动画，现在可选「平移 / 覆盖 / 翻书」</changelogtext>
