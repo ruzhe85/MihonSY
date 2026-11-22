@@ -168,7 +168,9 @@ class DownloadCache(
     fun getTotalDownloadCount(): Int {
         renewCache()
 
-        return rootDownloadsDir.sourceDirs.values.sumOf { sourceDir ->
+        // Komiho（对齐上游 mihon deeb9b2584）: 同一个磁盘目录可能被多个 source id 共用
+        // （占位源与已安装源同名），不 distinct 会把同一批章节目录重复计数。
+        return rootDownloadsDir.sourceDirs.values.distinctBy { it.dir?.uri }.sumOf { sourceDir ->
             sourceDir.mangaDirs.values.sumOf { mangaDir ->
                 mangaDir.chapterDirs.size
             }
@@ -385,20 +387,24 @@ class DownloadCache(
             }
             // SY <--
 
-            val sourceMap = sources.associate { provider.getSourceDirName(it).lowercase() to it.id }
+            // Komiho（对齐上游 mihon deeb9b2584）: 占位源（已卸载扩展的 stub）可能与已安装源
+            // 同名 → 同一个磁盘目录同时属于多个 source id。以前用 associate 会把它们折成一个，
+            // 另一个 id 就永远找不到自己已下载的章节（表现为「已下载却显示未下载」）。
+            val sourceIdsByDirName = sources.groupBy({ provider.getSourceDirName(it).lowercase() }, { it.id })
 
             rootDownloadsDirMutex.withLock {
                 val updatedRootDir = RootDirectory(storageManager.getDownloadsDirectory())
 
                 updatedRootDir.sourceDirs = updatedRootDir.dir?.listFiles().orEmpty()
                     .filter { it.isDirectory && !it.name.isNullOrBlank() }
-                    .mapNotNull { dir ->
-                        val sourceId = sourceMap[dir.name!!.lowercase()]
-                        sourceId?.let { it to SourceDirectory(dir) }
+                    .flatMap { dir ->
+                        val sourceDir = SourceDirectory(dir)
+                        sourceIdsByDirName[dir.name!!.lowercase()].orEmpty().map { it to sourceDir }
                     }
                     .toMap()
 
-                updatedRootDir.sourceDirs.values.map { sourceDir ->
+                // 多个 id 指向同一个 SourceDirectory 实例，扫描目录只需做一遍。
+                updatedRootDir.sourceDirs.values.distinct().map { sourceDir ->
                     async {
                         sourceDir.mangaDirs = sourceDir.dir?.listFiles().orEmpty()
                             .filter { it.isDirectory && !it.name.isNullOrBlank() }
